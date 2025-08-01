@@ -7,7 +7,7 @@ export default function IntakeFormPage() {
   const [, navigate] = useLocation();
 
   const handleSuccess = () => {
-    navigate("/repairs");
+    navigate("/repair-orders");
   };
 
   return (

@@ -17,8 +17,8 @@ import {
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Gauge },
-  { name: "Intake Forms", href: "/intake", icon: ClipboardList },
-  { name: "Repair Orders", href: "/repairs", icon: Hammer },
+  { name: "Intake Forms", href: "/intake-form", icon: ClipboardList },
+  { name: "Repair Orders", href: "/repair-orders", icon: Hammer },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Mechanics", href: "/mechanics", icon: Users },
   { name: "Reports", href: "/reports", icon: BarChart3 },
