@@ -11,7 +11,8 @@ import {
   Users, 
   BarChart3,
   User,
-  Shield
+  Shield,
+  ChevronDown
 } from "lucide-react";
 
 const navigation = [
@@ -96,8 +97,8 @@ export default function Sidebar() {
             <User className="text-gray-600 text-sm" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-medium text-gray-900">John Smith</p>
-            <p className="text-xs text-gray-500">Shop Manager</p>
+            <p className="text-sm font-medium text-gray-900">{user?.firstName || user?.email}</p>
+            <p className="text-xs text-gray-500">{user?.role || 'User'}</p>
           </div>
           <button>
             <ChevronDown className="text-gray-400 w-4 h-4" />
