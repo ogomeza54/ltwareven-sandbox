@@ -238,6 +238,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/mechanics/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const updates = req.body;
+      const mechanic = await storage.updateMechanic(req.params.id, updates);
+      res.json(mechanic);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to update mechanic" });
+    }
+  });
+
   // Inventory
   app.get("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {

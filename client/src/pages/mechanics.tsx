@@ -8,9 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Users, UserPlus, Wrench, Clock, DollarSign } from "lucide-react";
 import MechanicFormModal from "@/components/modals/mechanic-form-modal";
+import MechanicEditModal from "@/components/modals/mechanic-edit-modal";
+import MechanicScheduleModal from "@/components/modals/mechanic-schedule-modal";
 
 export default function Mechanics() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [selectedMechanic, setSelectedMechanic] = useState<any>(null);
   
   const { data: mechanics = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/mechanics"],
@@ -18,6 +23,16 @@ export default function Mechanics() {
 
   const availableMechanics = mechanics.filter((mechanic: any) => mechanic.isAvailable);
   const busyMechanics = mechanics.filter((mechanic: any) => !mechanic.isAvailable);
+
+  const handleEditMechanic = (mechanic: any) => {
+    setSelectedMechanic(mechanic);
+    setEditModalOpen(true);
+  };
+
+  const handleViewSchedule = (mechanic: any) => {
+    setSelectedMechanic(mechanic);
+    setScheduleModalOpen(true);
+  };
 
   return (
     <div className="flex h-screen">
@@ -188,10 +203,20 @@ export default function Mechanics() {
                     </div>
 
                     <div className="mt-4 flex space-x-2">
-                      <Button variant="outline" size="sm" className="flex-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => handleViewSchedule(mechanic)}
+                      >
                         View Schedule
                       </Button>
-                      <Button variant="outline" size="sm" className="flex-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => handleEditMechanic(mechanic)}
+                      >
                         Edit
                       </Button>
                     </div>
@@ -206,6 +231,18 @@ export default function Mechanics() {
       <MechanicFormModal 
         open={isModalOpen} 
         onOpenChange={setIsModalOpen} 
+      />
+      
+      <MechanicEditModal
+        open={editModalOpen}
+        onOpenChange={setEditModalOpen}
+        mechanic={selectedMechanic}
+      />
+      
+      <MechanicScheduleModal
+        open={scheduleModalOpen}
+        onOpenChange={setScheduleModalOpen}
+        mechanic={selectedMechanic}
       />
     </div>
   );
