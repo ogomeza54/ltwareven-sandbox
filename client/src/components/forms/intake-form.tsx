@@ -64,7 +64,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
       
       // Append form fields
       Object.entries(data).forEach(([key, value]) => {
-        if (key !== "files" && value) {
+        if (key !== "files" && value && typeof value === "string") {
           formData.append(key, value);
         }
       });

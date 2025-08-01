@@ -66,7 +66,7 @@ export default function RepairOrderForm({
     },
   });
 
-  const { data: searchResults } = useQuery({
+  const { data: searchResults = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/search", { q: searchTerm }],
     enabled: searchTerm.length > 2,
   });

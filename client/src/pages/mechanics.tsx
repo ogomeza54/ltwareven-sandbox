@@ -8,12 +8,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Users, UserPlus, Wrench, Clock, DollarSign } from "lucide-react";
 
 export default function Mechanics() {
-  const { data: mechanics, isLoading } = useQuery({
+  const { data: mechanics = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/mechanics"],
   });
 
-  const availableMechanics = mechanics?.filter((mechanic: any) => mechanic.isAvailable);
-  const busyMechanics = mechanics?.filter((mechanic: any) => !mechanic.isAvailable);
+  const availableMechanics = mechanics.filter((mechanic: any) => mechanic.isAvailable);
+  const busyMechanics = mechanics.filter((mechanic: any) => !mechanic.isAvailable);
 
   return (
     <div className="flex h-screen">
@@ -33,7 +33,7 @@ export default function Mechanics() {
                   <div>
                     <p className="text-sm font-medium text-gray-600">Total Mechanics</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {isLoading ? "..." : mechanics?.length || 0}
+                      {isLoading ? "..." : mechanics.length || 0}
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -49,7 +49,7 @@ export default function Mechanics() {
                   <div>
                     <p className="text-sm font-medium text-gray-600">Available</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {isLoading ? "..." : availableMechanics?.length || 0}
+                      {isLoading ? "..." : availableMechanics.length || 0}
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -65,7 +65,7 @@ export default function Mechanics() {
                   <div>
                     <p className="text-sm font-medium text-gray-600">Busy</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {isLoading ? "..." : busyMechanics?.length || 0}
+                      {isLoading ? "..." : busyMechanics.length || 0}
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">

@@ -13,7 +13,7 @@ export default function RepairOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const { data: orders, isLoading } = useQuery({
+  const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/repair-orders"],
   });
 
@@ -45,7 +45,7 @@ export default function RepairOrders() {
     return <Car className="text-gray-600 w-5 h-5" />;
   };
 
-  const filteredOrders = (orders || []).filter((order: any) => {
+  const filteredOrders = orders.filter((order: any) => {
     const matchesSearch = 
       order.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -107,7 +107,7 @@ export default function RepairOrders() {
                     <Car className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No repair orders found</h3>
                     <p className="text-gray-500">
-                      {(orders || []).length === 0 
+                      {orders.length === 0 
                         ? "Create your first repair order by starting with an intake form."
                         : "Try adjusting your search or filter criteria."
                       }

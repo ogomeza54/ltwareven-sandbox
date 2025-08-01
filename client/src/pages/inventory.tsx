@@ -11,16 +11,16 @@ import { useState } from "react";
 export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState("");
 
-  const { data: parts, isLoading } = useQuery({
+  const { data: parts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
   });
 
-  const filteredParts = parts?.filter((part: any) =>
+  const filteredParts = parts.filter((part: any) =>
     part.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     part.partNumber?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const lowStockParts = parts?.filter((part: any) => 
+  const lowStockParts = parts.filter((part: any) => 
     part.quantityInStock <= part.lowStockThreshold
   );
 
@@ -42,7 +42,7 @@ export default function Inventory() {
                   <div>
                     <p className="text-sm font-medium text-gray-600">Total Parts</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {isLoading ? "..." : parts?.length || 0}
+                      {isLoading ? "..." : parts.length || 0}
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -58,7 +58,7 @@ export default function Inventory() {
                   <div>
                     <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {isLoading ? "..." : lowStockParts?.length || 0}
+                      {isLoading ? "..." : lowStockParts.length || 0}
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
