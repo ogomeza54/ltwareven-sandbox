@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
@@ -26,16 +27,27 @@ const upload = multer({
   }
 });
 
-// Middleware to ensure user is authenticated and has company context
-const requireAuth = (req: any, res: any, next: any) => {
-  // In a real app, this would validate JWT token or session
-  // For now, we'll assume user is authenticated and add mock user data
-  req.user = {
-    id: 'user-1',
-    companyId: 'company-1',
-    role: 'manager'
-  };
-  next();
+// Middleware to get user's company context
+const withCompanyContext = async (req: any, res: any, next: any) => {
+  try {
+    const userId = req.user.claims.sub;
+    const user = await storage.getUser(userId);
+    
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    
+    req.userContext = {
+      userId: user.id,
+      companyId: user.companyId,
+      role: user.role
+    };
+    
+    next();
+  } catch (error) {
+    console.error("Error getting user context:", error);
+    res.status(500).json({ message: "Failed to get user context" });
+  }
 };
 
 // Auto-assignment algorithm
@@ -64,12 +76,25 @@ async function autoAssignMechanic(companyId: string, priority: string = 'medium'
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.use(requireAuth);
+  // Auth middleware
+  await setupAuth(app);
+
+  // Auth routes
+  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
 
   // Dashboard Stats
-  app.get("/api/dashboard/stats", async (req: any, res) => {
+  app.get("/api/dashboard/stats", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const stats = await storage.getDashboardStats(req.user.companyId);
+      const stats = await storage.getDashboardStats(req.userContext.companyId);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch dashboard stats" });
@@ -77,16 +102,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Repair Orders
-  app.get("/api/repair-orders", async (req: any, res) => {
+  app.get("/api/repair-orders", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const orders = await storage.getRepairOrdersByCompany(req.user.companyId);
+      const orders = await storage.getRepairOrdersByCompany(req.userContext.companyId);
       res.json(orders);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch repair orders" });
     }
   });
 
-  app.get("/api/repair-orders/:id", async (req, res) => {
+  app.get("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const order = await storage.getRepairOrder(req.params.id);
       if (!order) {
@@ -98,7 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/repair-orders", upload.array('damagePhotos', 10), async (req: any, res) => {
+  app.post("/api/repair-orders", isAuthenticated, withCompanyContext, upload.array('damagePhotos', 10), async (req: any, res) => {
     try {
       const body = req.body;
       
@@ -107,7 +132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: body.customerName,
         phone: body.phoneNumber,
         email: body.email || null,
-        companyId: req.user.companyId
+        companyId: req.userContext.companyId
       };
 
       const vehicleData = {
@@ -118,11 +143,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         licensePlate: body.licensePlate || null,
         color: body.color || null,
         mileage: body.mileage ? parseInt(body.mileage) : null,
-        companyId: req.user.companyId
+        companyId: req.userContext.companyId
       };
 
       // Find or create customer
-      let customer = await storage.getCustomerByPhone(customerData.phone, req.user.companyId);
+      let customer = await storage.getCustomerByPhone(customerData.phone, req.userContext.companyId);
       if (!customer) {
         const validatedCustomer = insertCustomerSchema.parse(customerData);
         customer = await storage.createCustomer(validatedCustomer);
@@ -147,19 +172,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Auto-assign mechanic
-      const assignedMechanicId = await autoAssignMechanic(req.user.companyId, body.priority);
+      const assignedMechanicId = await autoAssignMechanic(req.userContext.companyId, body.priority);
 
       // Create repair order
       const repairOrderData = {
         vehicleId: vehicle.id,
         customerId: customer.id,
         mechanicId: assignedMechanicId,
-        inspectorId: req.user.id,
+        inspectorId: req.userContext.userId,
         description: body.repairDescription,
         priority: body.priority || 'medium',
         status: 'pending',
         damagePhotos,
-        companyId: req.user.companyId
+        companyId: req.userContext.companyId
       };
 
       const validatedRepairOrder = insertRepairOrderSchema.parse(repairOrderData);
@@ -182,7 +207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/repair-orders/:id", async (req: any, res) => {
+  app.patch("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const updates = req.body;
       const order = await storage.updateRepairOrder(req.params.id, updates);
@@ -193,18 +218,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Mechanics
-  app.get("/api/mechanics", async (req: any, res) => {
+  app.get("/api/mechanics", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const mechanics = await storage.getMechanicsByCompany(req.user.companyId);
+      const mechanics = await storage.getMechanicsByCompany(req.userContext.companyId);
       res.json(mechanics);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch mechanics" });
     }
   });
 
-  app.post("/api/mechanics", async (req: any, res) => {
+  app.post("/api/mechanics", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const mechanicData = { ...req.body, companyId: req.user.companyId };
+      const mechanicData = { ...req.body, companyId: req.userContext.companyId };
       const validatedMechanic = insertMechanicSchema.parse(mechanicData);
       const mechanic = await storage.createMechanic(validatedMechanic);
       res.status(201).json(mechanic);
@@ -214,31 +239,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Inventory
-  app.get("/api/inventory", async (req: any, res) => {
+  app.get("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const parts = await storage.getInventoryPartsByCompany(req.user.companyId);
+      const parts = await storage.getInventoryPartsByCompany(req.userContext.companyId);
       res.json(parts);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch inventory" });
     }
   });
 
-  app.get("/api/inventory/search", async (req: any, res) => {
+  app.get("/api/inventory/search", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const query = req.query.q as string;
       if (!query) {
         return res.json([]);
       }
-      const parts = await storage.searchParts(query, req.user.companyId);
+      const parts = await storage.searchParts(query, req.userContext.companyId);
       res.json(parts);
     } catch (error) {
       res.status(500).json({ message: "Failed to search parts" });
     }
   });
 
-  app.post("/api/inventory", async (req: any, res) => {
+  app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const partData = { ...req.body, companyId: req.user.companyId };
+      const partData = { ...req.body, companyId: req.userContext.companyId };
       const validatedPart = insertInventoryPartSchema.parse(partData);
       const part = await storage.createInventoryPart(validatedPart);
       res.status(201).json(part);
@@ -248,7 +273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Parts Usage
-  app.get("/api/repair-orders/:id/parts", async (req, res) => {
+  app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
     try {
       const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.id);
       res.json(partsUsage);
@@ -257,7 +282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/repair-orders/:id/parts", async (req, res) => {
+  app.post("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
     try {
       const partsUsageData = {
         ...req.body,
@@ -271,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/parts-usage/:id", async (req, res) => {
+  app.delete("/api/parts-usage/:id", isAuthenticated, withCompanyContext, async (req, res) => {
     try {
       await storage.deletePartsUsage(req.params.id);
       res.status(204).send();

@@ -3,23 +3,35 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/useAuth";
 import Dashboard from "@/pages/dashboard";
 import IntakeForm from "@/pages/intake-form";
 import RepairOrders from "@/pages/repair-orders";
 import Inventory from "@/pages/inventory";
 import Mechanics from "@/pages/mechanics";
 import Reports from "@/pages/reports";
+import Landing from "@/pages/landing";
+import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
 
 function Router() {
+  const { isAuthenticated, isLoading } = useAuth();
+
   return (
     <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/intake" component={IntakeForm} />
-      <Route path="/repairs" component={RepairOrders} />
-      <Route path="/inventory" component={Inventory} />
-      <Route path="/mechanics" component={Mechanics} />
-      <Route path="/reports" component={Reports} />
+      {isLoading || !isAuthenticated ? (
+        <Route path="/" component={Landing} />
+      ) : (
+        <>
+          <Route path="/" component={Home} />
+          <Route path="/dashboard" component={Dashboard} />
+          <Route path="/intake-form" component={IntakeForm} />
+          <Route path="/repair-orders" component={RepairOrders} />
+          <Route path="/inventory" component={Inventory} />
+          <Route path="/mechanics" component={Mechanics} />
+          <Route path="/reports" component={Reports} />
+        </>
+      )}
       <Route component={NotFound} />
     </Switch>
   );

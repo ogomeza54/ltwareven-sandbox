@@ -1,7 +1,7 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
   type Company, type InsertCompany,
-  type User, type InsertUser,
+  type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
   type Customer, type InsertCustomer,
   type Vehicle, type InsertVehicle,
@@ -17,10 +17,9 @@ export interface IStorage {
   getCompany(id: string): Promise<Company | undefined>;
   createCompany(company: InsertCompany): Promise<Company>;
   
-  // User operations
+  // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  upsertUser(user: UpsertUser): Promise<User>;
   getUsersByCompany(companyId: string): Promise<User[]>;
   
   // Mechanic operations
@@ -90,13 +89,18 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user || undefined;
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values(userData)
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          ...userData,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
     return user;
   }
 

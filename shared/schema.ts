@@ -1,7 +1,18 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// Session storage table for Replit Auth
+export const sessions = pgTable(
+  "sessions",
+  {
+    sid: varchar("sid").primaryKey(),
+    sess: jsonb("sess").notNull(),
+    expire: timestamp("expire").notNull(),
+  },
+  (table) => [index("IDX_session_expire").on(table.expire)],
+);
 
 // Companies table for multi-tenancy
 export const companies = pgTable("companies", {
@@ -9,17 +20,20 @@ export const companies = pgTable("companies", {
   name: text("name").notNull(),
   plan: text("plan").notNull().default("basic"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Users table with company association
+// Users table with Replit Auth integration and company association
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  name: text("name").notNull(),
-  role: text("role").notNull().default("employee"),
+  email: varchar("email").unique(),
+  firstName: varchar("first_name"),
+  lastName: varchar("last_name"),
+  profileImageUrl: varchar("profile_image_url"),
+  role: text("role").notNull().default("technician"),
   companyId: varchar("company_id").notNull().references(() => companies.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // Mechanics table
@@ -199,11 +213,18 @@ export const partsUsageRelations = relations(partsUsage, ({ one }) => ({
 export const insertCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
+});
+
+export const upsertUserSchema = createInsertSchema(users).omit({
+  createdAt: true,
+  updatedAt: true,
 });
 
 export const insertMechanicSchema = createInsertSchema(mechanics).omit({
@@ -244,6 +265,7 @@ export type InsertCompany = z.infer<typeof insertCompanySchema>;
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UpsertUser = z.infer<typeof upsertUserSchema>;
 
 export type Mechanic = typeof mechanics.$inferSelect;
 export type InsertMechanic = z.infer<typeof insertMechanicSchema>;

@@ -1,16 +1,34 @@
-import { create } from "zustand";
+import { createContext, useContext, ReactNode } from 'react';
+import { useAuth } from './useAuth';
 
-interface CompanyState {
-  companyId: string;
-  companyName: string;
-  plan: string;
-  setCompany: (companyId: string, companyName: string, plan: string) => void;
+interface CompanyContextType {
+  companyId: string | null;
+  userRole: string | null;
+  isLoading: boolean;
 }
 
-export const useCompany = create<CompanyState>((set) => ({
-  companyId: "company-1", // Mock company ID for demo
-  companyName: "AutoFix Pro",
-  plan: "Premium Plan",
-  setCompany: (companyId: string, companyName: string, plan: string) =>
-    set({ companyId, companyName, plan }),
-}));
+const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
+
+export function CompanyProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+
+  const value: CompanyContextType = {
+    companyId: user?.companyId || null,
+    userRole: user?.role || null,
+    isLoading,
+  };
+
+  return (
+    <CompanyContext.Provider value={value}>
+      {children}
+    </CompanyContext.Provider>
+  );
+}
+
+export function useCompany() {
+  const context = useContext(CompanyContext);
+  if (context === undefined) {
+    throw new Error('useCompany must be used within a CompanyProvider');
+  }
+  return context;
+}
