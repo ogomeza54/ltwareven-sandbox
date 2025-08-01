@@ -8,10 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Eye, Car, Truck, Bike } from "lucide-react";
 import { useState } from "react";
+import RepairOrderModal from "@/components/modals/repair-order-modal";
 
 export default function RepairOrders() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleViewOrder = (orderId: string) => {
+    setSelectedOrderId(orderId);
+    setIsModalOpen(true);
+  };
 
   const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/repair-orders"],
@@ -153,7 +161,11 @@ export default function RepairOrders() {
                           )}
                         </div>
                         
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleViewOrder(order.id)}
+                        >
                           <Eye className="w-4 h-4 mr-2" />
                           View
                         </Button>
@@ -181,6 +193,15 @@ export default function RepairOrders() {
           </div>
         </div>
       </main>
+      
+      <RepairOrderModal
+        open={isModalOpen}
+        onOpenChange={(open) => {
+          setIsModalOpen(open);
+          if (!open) setSelectedOrderId(null);
+        }}
+        orderId={selectedOrderId}
+      />
     </div>
   );
 }

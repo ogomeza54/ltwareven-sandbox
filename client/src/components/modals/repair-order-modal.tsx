@@ -1,10 +1,23 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
-import RepairOrderForm from "@/components/forms/repair-order-form";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  Car, 
+  User, 
+  Wrench, 
+  Clock, 
+  DollarSign, 
+  FileText, 
+  Image as ImageIcon,
+  Phone,
+  Mail,
+  CheckCircle2
+} from "lucide-react";
 
 interface RepairOrderModalProps {
   open: boolean;
@@ -17,48 +30,35 @@ export default function RepairOrderModal({
   onOpenChange, 
   orderId 
 }: RepairOrderModalProps) {
-  const [isEditing, setIsEditing] = useState(false);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
-  const { data: order, isLoading } = useQuery({
-    queryKey: ["/api/repair-orders", orderId],
-    enabled: !!orderId && open,
+  const { data: orders = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/repair-orders"],
+    enabled: open,
   });
 
-  const { data: customer } = useQuery({
-    queryKey: ["/api/customers", order?.customerId],
-    enabled: !!order?.customerId,
-  });
-
-  const { data: vehicle } = useQuery({
-    queryKey: ["/api/vehicles", order?.vehicleId],
-    enabled: !!order?.vehicleId,
-  });
-
-  const { data: mechanic } = useQuery({
-    queryKey: ["/api/mechanics", order?.mechanicId],
-    enabled: !!order?.mechanicId,
-  });
-
-  const { data: partsUsage } = useQuery({
-    queryKey: ["/api/repair-orders", orderId, "parts"],
-    enabled: !!orderId && open,
-  });
+  const order = orders.find((o: any) => o.id === orderId);
 
   const updateOrderMutation = useMutation({
     mutationFn: async (updates: any) => {
-      const response = await fetch(`/api/repair-orders/${orderId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      if (!response.ok) throw new Error("Failed to update order");
+      const response = await apiRequest("PATCH", `/api/repair-orders/${orderId}`, updates);
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/repair-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      setIsEditing(false);
+      toast({
+        title: "Success",
+        description: "Repair order updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update repair order",
+        variant: "destructive",
+      });
     },
   });
 
@@ -66,17 +66,23 @@ export default function RepairOrderModal({
     switch (status) {
       case "pending":
         return "bg-blue-100 text-blue-800";
-      case "in-progress":
+      case "in_progress":
         return "bg-yellow-100 text-yellow-800";
-      case "ready-pickup":
-        return "bg-green-100 text-green-800";
-      case "completed":
-        return "bg-gray-100 text-gray-800";
-      case "waiting-parts":
+      case "waiting_parts":
         return "bg-orange-100 text-orange-800";
+      case "completed":
+        return "bg-green-100 text-green-800";
+      case "delivered":
+        return "bg-gray-100 text-gray-800";
       default:
         return "bg-gray-100 text-gray-800";
     }
+  };
+
+  const formatStatus = (status: string) => {
+    return status.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
   };
 
   if (!orderId || !open) return null;
@@ -84,9 +90,9 @@ export default function RepairOrderModal({
   if (isLoading) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
-            <p className="text-gray-500">Loading repair order...</p>
+        <DialogContent className="max-w-4xl">
+          <div className="flex justify-center p-6">
+            <p>Loading...</p>
           </div>
         </DialogContent>
       </Dialog>
@@ -96,9 +102,9 @@ export default function RepairOrderModal({
   if (!order) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
-            <p className="text-gray-500">Repair order not found.</p>
+        <DialogContent className="max-w-4xl">
+          <div className="flex justify-center p-6">
+            <p>Order not found</p>
           </div>
         </DialogContent>
       </Dialog>
@@ -107,117 +113,237 @@ export default function RepairOrderModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-        {/* Modal Header */}
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
+          <DialogTitle className="flex items-center gap-3">
+            <Car className="h-6 w-6 text-primary" />
             <div>
-              <DialogTitle>Repair Order - {order.orderNumber}</DialogTitle>
-              <p className="text-sm text-gray-500">
-                {vehicle?.year} {vehicle?.make} {vehicle?.model} - {customer?.name}
-              </p>
+              <div className="flex items-center gap-2">
+                <span>Order #{order.orderNumber}</span>
+                <Badge className={getStatusColor(order.status)}>
+                  {formatStatus(order.status)}
+                </Badge>
+              </div>
+              <div className="text-sm text-muted-foreground font-normal">
+                {order.vehicle?.year} {order.vehicle?.make} {order.vehicle?.model}
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <Badge className={getStatusColor(order.status)}>
-                {order.status.replace("-", " ")}
-              </Badge>
-            </div>
-          </div>
+          </DialogTitle>
+          <DialogDescription>
+            Created on {new Date(order.createdAt).toLocaleDateString()}
+          </DialogDescription>
         </DialogHeader>
 
-        {/* Modal Content */}
-        <div className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left Column - Damage Photos and Description */}
-            <div className="space-y-6">
-              {/* Damage Photos */}
-              {order.damagePhotos && order.damagePhotos.length > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Damage Photos</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    {order.damagePhotos.map((photo: string, index: number) => (
-                      <img
-                        key={index}
-                        src={`/api/uploads/${photo}`}
-                        alt={`Damage photo ${index + 1}`}
-                        className="rounded-lg shadow-sm w-full h-48 object-cover cursor-pointer hover:opacity-75 transition-opacity"
-                        onClick={() => {
-                          // Open image in new tab for full view
-                          window.open(`/api/uploads/${photo}`, '_blank');
-                        }}
-                      />
-                    ))}
+        <div className="space-y-6">
+          {/* Vehicle & Customer Info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Car className="h-4 w-4" />
+                  Vehicle Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Year:</span>
+                  <span>{order.vehicle?.year}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Make:</span>
+                  <span>{order.vehicle?.make}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Model:</span>
+                  <span>{order.vehicle?.model}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">License Plate:</span>
+                  <span>{order.vehicle?.licensePlate || "Not provided"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">VIN:</span>
+                  <span>{order.vehicle?.vin || "Not provided"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Mileage:</span>
+                  <span>{order.vehicle?.mileage ? `${order.vehicle.mileage.toLocaleString()} miles` : "Not provided"}</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <User className="h-4 w-4" />
+                  Customer Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Name:</span>
+                  <span>{order.customer?.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Phone:</span>
+                  <div className="flex items-center gap-1">
+                    <Phone className="h-3 w-3" />
+                    <span>{order.customer?.phone}</span>
                   </div>
                 </div>
-              )}
+                {order.customer?.email && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Email:</span>
+                    <div className="flex items-center gap-1">
+                      <Mail className="h-3 w-3" />
+                      <span>{order.customer.email}</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-              {/* Repair Description */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Repair Description</h3>
-                <p className="text-gray-700 leading-relaxed">
-                  {order.description}
-                </p>
-              </div>
+          {/* Repair Details */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4" />
+                Repair Description
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm leading-relaxed">{order.description}</p>
+            </CardContent>
+          </Card>
 
-              {/* Customer Information */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Customer Information</h3>
-                <div className="space-y-2 text-sm">
-                  <p><span className="font-medium">Name:</span> {customer?.name}</p>
-                  <p><span className="font-medium">Phone:</span> {customer?.phone}</p>
-                  {customer?.email && (
-                    <p><span className="font-medium">Email:</span> {customer.email}</p>
-                  )}
-                  {vehicle?.licensePlate && (
-                    <p><span className="font-medium">License Plate:</span> {vehicle.licensePlate}</p>
-                  )}
+          {/* Photos */}
+          {order.damagePhotos && order.damagePhotos.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ImageIcon className="h-4 w-4" />
+                  Damage Photos ({order.damagePhotos.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {order.damagePhotos.map((photo: string, index: number) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={`/uploads/${photo}`}
+                        alt={`Damage photo ${index + 1}`}
+                        className="w-full h-32 object-cover rounded-md border hover:border-primary transition-colors cursor-pointer"
+                        onClick={() => window.open(`/uploads/${photo}`, '_blank')}
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all rounded-md flex items-center justify-center">
+                        <ImageIcon className="h-6 w-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
+          )}
 
-            {/* Right Column - Repair Order Form */}
-            <div className="space-y-6">
-              <RepairOrderForm
-                order={order}
-                mechanic={mechanic}
-                partsUsage={partsUsage}
-                isEditing={isEditing}
-                onEdit={() => setIsEditing(true)}
-                onCancel={() => setIsEditing(false)}
-                onSave={(updates) => updateOrderMutation.mutate(updates)}
-                isLoading={updateOrderMutation.isPending}
-              />
-            </div>
+          {/* Assignment & Progress */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wrench className="h-4 w-4" />
+                  Assignment & Priority
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Assigned Mechanic:</span>
+                  <span className="text-sm font-medium">{order.mechanic?.name || "Auto-assigning..."}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Priority:</span>
+                  <Badge variant={order.priority === 'urgent' ? 'destructive' : order.priority === 'high' ? 'default' : 'secondary'}>
+                    {order.priority}
+                  </Badge>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Status:</span>
+                  <Badge className={getStatusColor(order.status)}>
+                    {formatStatus(order.status)}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <DollarSign className="h-4 w-4" />
+                  Time & Billing
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {order.totalEstimate && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Total Estimate:</span>
+                    <span className="text-sm font-medium">${Number(order.totalEstimate).toLocaleString()}</span>
+                  </div>
+                )}
+                {order.estimatedHours && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Est. Hours:</span>
+                    <span className="text-sm">{order.estimatedHours}h</span>
+                  </div>
+                )}
+                {order.actualHours && Number(order.actualHours) > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Actual Hours:</span>
+                    <span className="text-sm">{order.actualHours}h</span>
+                  </div>
+                )}
+                {order.laborRate && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Labor Rate:</span>
+                    <span className="text-sm">${Number(order.laborRate)}/hr</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Form Actions */}
-          <div className="flex justify-between items-center pt-6 border-t border-gray-200 mt-6">
-            <div className="flex space-x-3">
-              <Button 
-                variant="outline"
-                onClick={() => window.print()}
-              >
-                Print
-              </Button>
-              <Button 
-                variant="outline"
-                onClick={() => {
-                  const subject = `Repair Order Update - ${order.orderNumber}`;
-                  const body = `Dear ${customer?.name},\n\nYour repair order ${order.orderNumber} has been updated.\n\nStatus: ${order.status}\n\nThank you for choosing our service.`;
-                  window.location.href = `mailto:${customer?.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                }}
-                disabled={!customer?.email}
-              >
-                Email Customer
-              </Button>
-            </div>
-            <Button 
-              variant="outline" 
-              onClick={() => onOpenChange(false)}
-            >
-              Close
-            </Button>
-          </div>
+          {/* Progress Notes */}
+          {order.progressNotes && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Clock className="h-4 w-4" />
+                  Progress Notes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{order.progressNotes}</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex justify-end space-x-3 pt-4 border-t">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button 
+            onClick={() => {
+              updateOrderMutation.mutate({ 
+                status: order.status === 'completed' ? 'delivered' : 'completed' 
+              });
+            }}
+            disabled={updateOrderMutation.isPending}
+            className={order.status === 'completed' ? "bg-green-600 hover:bg-green-700" : ""}
+          >
+            <CheckCircle2 className="w-4 h-4 mr-2" />
+            {order.status === 'completed' ? 'Mark as Delivered' : 'Mark as Complete'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
