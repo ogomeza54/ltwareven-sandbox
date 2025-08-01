@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Sidebar from "@/components/layout/sidebar";
 import TopBar from "@/components/layout/top-bar";
@@ -6,8 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Users, UserPlus, Wrench, Clock, DollarSign } from "lucide-react";
+import MechanicFormModal from "@/components/modals/mechanic-form-modal";
 
 export default function Mechanics() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
   const { data: mechanics = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/mechanics"],
   });
@@ -96,7 +100,10 @@ export default function Mechanics() {
 
           {/* Add Mechanic Button */}
           <div className="mb-6 flex justify-end">
-            <Button className="bg-primary text-white hover:bg-blue-700">
+            <Button 
+              className="bg-primary text-white hover:bg-blue-700"
+              onClick={() => setIsModalOpen(true)}
+            >
               <UserPlus className="w-4 h-4 mr-2" />
               Add Mechanic
             </Button>
@@ -120,7 +127,10 @@ export default function Mechanics() {
                       <p className="text-gray-500 mb-4">
                         Start by adding your first mechanic to the team.
                       </p>
-                      <Button className="bg-primary text-white hover:bg-blue-700">
+                      <Button 
+                        className="bg-primary text-white hover:bg-blue-700"
+                        onClick={() => setIsModalOpen(true)}
+                      >
                         <UserPlus className="w-4 h-4 mr-2" />
                         Add First Mechanic
                       </Button>
@@ -192,6 +202,11 @@ export default function Mechanics() {
           </div>
         </div>
       </main>
+      
+      <MechanicFormModal 
+        open={isModalOpen} 
+        onOpenChange={setIsModalOpen} 
+      />
     </div>
   );
 }
