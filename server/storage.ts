@@ -16,11 +16,16 @@ export interface IStorage {
   // Company operations
   getCompany(id: string): Promise<Company | undefined>;
   createCompany(company: InsertCompany): Promise<Company>;
+  getAllCompanies(): Promise<Company[]>;
   
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getUsersByCompany(companyId: string): Promise<User[]>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  getAllUsersWithCompany(): Promise<(User & { companyName?: string })[]>;
+  createUserPlaceholder(userData: { email: string; role: string; companyId: string }): Promise<User>;
+  updateUserRole(id: string, role: string, companyId: string): Promise<User>;
   
   // Mechanic operations
   getMechanicsByCompany(companyId: string): Promise<Mechanic[]>;
@@ -73,6 +78,9 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   // Company operations
+  async getAllCompanies(): Promise<Company[]> {
+    return await db.select().from(companies).orderBy(desc(companies.createdAt));
+  }
   async getCompany(id: string): Promise<Company | undefined> {
     const [company] = await db.select().from(companies).where(eq(companies.id, id));
     return company || undefined;
@@ -106,6 +114,59 @@ export class DatabaseStorage implements IStorage {
 
   async getUsersByCompany(companyId: string): Promise<User[]> {
     return await db.select().from(users).where(eq(users.companyId, companyId));
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
+  }
+
+  async getAllUsersWithCompany(): Promise<(User & { companyName?: string })[]> {
+    const result = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        profileImageUrl: users.profileImageUrl,
+        role: users.role,
+        companyId: users.companyId,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+        companyName: companies.name,
+      })
+      .from(users)
+      .leftJoin(companies, eq(users.companyId, companies.id))
+      .orderBy(desc(users.createdAt));
+
+    return result.map(user => ({
+      ...user,
+      companyName: user.companyName || undefined
+    }));
+  }
+
+  async createUserPlaceholder(userData: { email: string; role: string; companyId: string }): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values({
+        email: userData.email,
+        role: userData.role,
+        companyId: userData.companyId,
+        firstName: null,
+        lastName: null,
+        profileImageUrl: null,
+      })
+      .returning();
+    return user;
+  }
+
+  async updateUserRole(id: string, role: string, companyId: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ role, companyId, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
   }
 
   // Mechanic operations

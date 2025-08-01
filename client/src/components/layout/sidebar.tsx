@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useCompany } from "@/hooks/use-company";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { 
   Wrench, 
@@ -10,7 +11,7 @@ import {
   Users, 
   BarChart3,
   User,
-  ChevronDown
+  Shield
 } from "lucide-react";
 
 const navigation = [
@@ -24,7 +25,11 @@ const navigation = [
 
 export default function Sidebar() {
   const [location] = useLocation();
-  const { companyName, plan } = useCompany();
+  const { companyId } = useCompany();
+  const { user } = useAuth();
+  
+  const companyName = "Company Name"; // Will be fetched later
+  const plan = "Basic Plan"; // Will be fetched later
 
   return (
     <aside className="w-64 bg-white shadow-sm border-r border-gray-200 flex flex-col">
@@ -64,6 +69,23 @@ export default function Sidebar() {
               </li>
             );
           })}
+          
+          {/* Super Admin Menu */}
+          {user?.role === 'super_admin' && (
+            <li>
+              <Link href="/super-admin">
+                <a className={cn(
+                  "flex items-center space-x-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors",
+                  location === "/super-admin"
+                    ? "sidebar-active text-primary" 
+                    : "text-gray-700 hover:bg-gray-100"
+                )}>
+                  <Shield className="w-5 h-5" />
+                  <span>Super Admin</span>
+                </a>
+              </Link>
+            </li>
+          )}
         </ul>
       </nav>
 

@@ -30,7 +30,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: text("role").notNull().default("technician"),
+  role: text("role").notNull().default("technician"), // technician, manager, admin, super_admin
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

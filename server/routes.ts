@@ -305,6 +305,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Super Admin Routes
+  const isSuperAdmin = async (req: any, res: any, next: any) => {
+    if (!req.isAuthenticated() || !req.user?.claims?.sub) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const user = await storage.getUser(req.user.claims.sub);
+    if (!user || user.role !== 'super_admin') {
+      return res.status(403).json({ message: "Forbidden: Super admin access required" });
+    }
+    
+    next();
+  };
+
+  // Get all companies (super admin only)
+  app.get("/api/admin/companies", isAuthenticated, isSuperAdmin, async (req: any, res) => {
+    try {
+      const companies = await storage.getAllCompanies();
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch companies" });
+    }
+  });
+
+  // Create new company (super admin only)
+  app.post("/api/admin/companies", isAuthenticated, isSuperAdmin, async (req: any, res) => {
+    try {
+      const { name, plan } = req.body;
+      const company = await storage.createCompany({ name, plan });
+      res.status(201).json(company);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to create company" });
+    }
+  });
+
+  // Get all users (super admin only)
+  app.get("/api/admin/users", isAuthenticated, isSuperAdmin, async (req: any, res) => {
+    try {
+      const users = await storage.getAllUsersWithCompany();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  // Assign admin to company (super admin only)
+  app.post("/api/admin/assign-admin", isAuthenticated, isSuperAdmin, async (req: any, res) => {
+    try {
+      const { email, companyId } = req.body;
+      
+      // Check if user exists and update their role and company
+      let user = await storage.getUserByEmail(email);
+      if (!user) {
+        // Create a placeholder user that will be updated when they first log in
+        user = await storage.createUserPlaceholder({
+          email,
+          role: 'admin',
+          companyId
+        });
+      } else {
+        // Update existing user
+        user = await storage.updateUserRole(user.id, 'admin', companyId);
+      }
+      
+      res.json(user);
+    } catch (error) {
+      console.error('Failed to assign admin:', error);
+      res.status(400).json({ message: "Failed to assign admin" });
+    }
+  });
+
   // File serving for uploaded images
   app.get("/api/uploads/:filename", (req, res) => {
     const filename = req.params.filename;
