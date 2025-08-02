@@ -367,9 +367,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Parts Usage operations
-  async getPartsUsageByRepairOrder(repairOrderId: string): Promise<PartsUsage[]> {
-    return await db.select().from(partsUsage)
-      .where(eq(partsUsage.repairOrderId, repairOrderId));
+  async getPartsUsageByRepairOrder(repairOrderId: string): Promise<any[]> {
+    return await db.select({
+      id: partsUsage.id,
+      repairOrderId: partsUsage.repairOrderId,
+      partId: partsUsage.partId,
+      quantity: partsUsage.quantity,
+      unitPrice: partsUsage.unitPrice,
+      createdAt: partsUsage.createdAt,
+      part: {
+        id: inventoryParts.id,
+        name: inventoryParts.name,
+        partNumber: inventoryParts.partNumber,
+        description: inventoryParts.description,
+        price: inventoryParts.price,
+      }
+    })
+    .from(partsUsage)
+    .leftJoin(inventoryParts, eq(partsUsage.partId, inventoryParts.id))
+    .where(eq(partsUsage.repairOrderId, repairOrderId));
   }
 
   async createPartsUsage(insertPartsUsage: InsertPartsUsage): Promise<PartsUsage> {

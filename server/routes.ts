@@ -280,7 +280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(part);
     } catch (error) {
       console.error("Error creating inventory part:", error);
-      res.status(400).json({ message: "Failed to create inventory part", error: error.message });
+      res.status(400).json({ message: "Failed to create inventory part", error: (error as any).message });
     }
   });
 
@@ -304,6 +304,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Alternative endpoint for frontend compatibility
+  app.get("/api/parts-usage/:orderId", isAuthenticated, withCompanyContext, async (req, res) => {
+    try {
+      const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.orderId);
+      res.json(partsUsage);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch parts usage" });
+    }
+  });
+
   app.post("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
     try {
       const partsUsageData = {
@@ -314,6 +324,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const partsUsage = await storage.createPartsUsage(validatedPartsUsage);
       res.status(201).json(partsUsage);
     } catch (error) {
+      res.status(400).json({ message: "Failed to add parts to repair order" });
+    }
+  });
+
+  // Alternative endpoint for frontend compatibility
+  app.post("/api/parts-usage", isAuthenticated, withCompanyContext, async (req, res) => {
+    try {
+      const validatedPartsUsage = insertPartsUsageSchema.parse(req.body);
+      const partsUsage = await storage.createPartsUsage(validatedPartsUsage);
+      
+      // Update inventory stock
+      const part = await storage.getInventoryPart(req.body.partId);
+      if (part) {
+        await storage.updateInventoryPart(req.body.partId, {
+          quantityInStock: part.quantityInStock - req.body.quantity
+        });
+      }
+      
+      res.status(201).json(partsUsage);
+    } catch (error) {
+      console.error("Error adding parts usage:", error);
       res.status(400).json({ message: "Failed to add parts to repair order" });
     }
   });

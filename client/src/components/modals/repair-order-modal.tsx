@@ -16,8 +16,16 @@ import {
   Image as ImageIcon,
   Phone,
   Mail,
-  CheckCircle2
+  CheckCircle2,
+  Package,
+  Plus,
+  Edit3,
+  Trash2
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface RepairOrderModalProps {
   open: boolean;
@@ -32,13 +40,32 @@ export default function RepairOrderModal({
 }: RepairOrderModalProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [selectedPartId, setSelectedPartId] = useState("");
+  const [partQuantity, setPartQuantity] = useState(1);
 
   const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/repair-orders"],
     enabled: open,
   });
 
+  const { data: inventory = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory"],
+    enabled: open,
+  });
+
+  const { data: usedParts = [] } = useQuery<any[]>({
+    queryKey: ["/api/parts-usage", orderId],
+    enabled: open && !!orderId,
+  });
+
   const order = orders.find((o: any) => o.id === orderId);
+
+  // Initialize notes when order changes
+  if (order && notes !== order.progressNotes && !editingNotes) {
+    setNotes(order.progressNotes || "");
+  }
 
   const updateOrderMutation = useMutation({
     mutationFn: async (updates: any) => {
@@ -61,6 +88,43 @@ export default function RepairOrderModal({
       });
     },
   });
+
+  const addPartMutation = useMutation({
+    mutationFn: async () => {
+      const selectedPart = inventory.find((part: any) => part.id === selectedPartId);
+      if (!selectedPart) throw new Error("Part not found");
+      
+      const response = await apiRequest("POST", "/api/parts-usage", {
+        repairOrderId: orderId,
+        partId: selectedPartId,
+        quantity: partQuantity,
+        unitPrice: selectedPart.price,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/parts-usage", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      setSelectedPartId("");
+      setPartQuantity(1);
+      toast({
+        title: "Success",
+        description: "Part added to repair order",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to add part to repair order",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const saveNotes = () => {
+    updateOrderMutation.mutate({ progressNotes: notes });
+    setEditingNotes(false);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -312,19 +376,155 @@ export default function RepairOrderModal({
           </div>
 
           {/* Progress Notes */}
-          {order.progressNotes && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <div className="flex items-center gap-2">
                   <Clock className="h-4 w-4" />
                   Progress Notes
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{order.progressNotes}</p>
-              </CardContent>
-            </Card>
-          )}
+                </div>
+                {!editingNotes ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditingNotes(true)}
+                  >
+                    <Edit3 className="h-4 w-4 mr-1" />
+                    {order.progressNotes ? "Edit" : "Add Notes"}
+                  </Button>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditingNotes(false);
+                        setNotes(order.progressNotes || "");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={saveNotes}
+                      disabled={updateOrderMutation.isPending}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {editingNotes ? (
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add progress notes, updates, or observations..."
+                  className="min-h-[100px]"
+                />
+              ) : (
+                <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {order.progressNotes || (
+                    <span className="text-muted-foreground italic">
+                      No progress notes added yet. Click "Add Notes" to begin tracking progress.
+                    </span>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Parts Used */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Package className="h-4 w-4" />
+                Parts Used ({usedParts.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {usedParts.length > 0 ? (
+                <div className="space-y-3">
+                  {usedParts.map((usage: any) => (
+                    <div key={usage.id} className="flex justify-between items-center p-3 bg-muted rounded-lg">
+                      <div>
+                        <p className="font-medium">{usage.part?.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Part #{usage.part?.partNumber} • Qty: {usage.quantity}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">${(Number(usage.unitPrice) * usage.quantity).toFixed(2)}</p>
+                        <p className="text-sm text-muted-foreground">
+                          ${Number(usage.unitPrice).toFixed(2)} each
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="border-t pt-3">
+                    <div className="flex justify-between font-medium">
+                      <span>Parts Total:</span>
+                      <span>
+                        ${usedParts.reduce((total: number, usage: any) => 
+                          total + (Number(usage.unitPrice) * usage.quantity), 0
+                        ).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  No parts have been added to this repair order yet.
+                </p>
+              )}
+              
+              {/* Add Part Form */}
+              <div className="mt-4 p-4 border rounded-lg bg-muted/50">
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add Part
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <Label htmlFor="part-select">Part</Label>
+                    <Select value={selectedPartId} onValueChange={setSelectedPartId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a part" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {inventory.map((part: any) => (
+                          <SelectItem key={part.id} value={part.id}>
+                            {part.name} - ${Number(part.price).toFixed(2)} ({part.quantityInStock} in stock)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="quantity">Quantity</Label>
+                    <Input
+                      id="quantity"
+                      type="number"
+                      min="1"
+                      value={partQuantity}
+                      onChange={(e) => setPartQuantity(Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      onClick={() => addPartMutation.mutate()}
+                      disabled={!selectedPartId || partQuantity < 1 || addPartMutation.isPending}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Part
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Action Buttons */}
