@@ -242,10 +242,51 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Repair Order operations
-  async getRepairOrdersByCompany(companyId: string): Promise<RepairOrder[]> {
-    return await db.select().from(repairOrders)
-      .where(eq(repairOrders.companyId, companyId))
-      .orderBy(desc(repairOrders.createdAt));
+  async getRepairOrdersByCompany(companyId: string): Promise<any[]> {
+    return await db.select({
+      id: repairOrders.id,
+      orderNumber: repairOrders.orderNumber,
+      description: repairOrders.description,
+      priority: repairOrders.priority,
+      status: repairOrders.status,
+      estimatedHours: repairOrders.estimatedHours,
+      actualHours: repairOrders.actualHours,
+      laborRate: repairOrders.laborRate,
+      totalEstimate: repairOrders.totalEstimate,
+      progressNotes: repairOrders.progressNotes,
+      damagePhotos: repairOrders.damagePhotos,
+      createdAt: repairOrders.createdAt,
+      updatedAt: repairOrders.updatedAt,
+      companyId: repairOrders.companyId,
+      vehicle: {
+        id: vehicles.id,
+        year: vehicles.year,
+        make: vehicles.make,
+        model: vehicles.model,
+        vin: vehicles.vin,
+        licensePlate: vehicles.licensePlate,
+        color: vehicles.color,
+        mileage: vehicles.mileage,
+      },
+      customer: {
+        id: customers.id,
+        name: customers.name,
+        phone: customers.phone,
+        email: customers.email,
+      },
+      mechanic: {
+        id: mechanics.id,
+        name: mechanics.name,
+        specialization: mechanics.specialization,
+        hourlyRate: mechanics.hourlyRate,
+      }
+    })
+    .from(repairOrders)
+    .leftJoin(vehicles, eq(repairOrders.vehicleId, vehicles.id))
+    .leftJoin(customers, eq(repairOrders.customerId, customers.id))
+    .leftJoin(mechanics, eq(repairOrders.mechanicId, mechanics.id))
+    .where(eq(repairOrders.companyId, companyId))
+    .orderBy(desc(repairOrders.createdAt));
   }
 
   async getRepairOrder(id: string): Promise<RepairOrder | undefined> {
