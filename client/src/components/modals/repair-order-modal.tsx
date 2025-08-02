@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,9 +63,11 @@ export default function RepairOrderModal({
   const order = orders.find((o: any) => o.id === orderId);
 
   // Initialize notes when order changes
-  if (order && notes !== order.progressNotes && !editingNotes) {
-    setNotes(order.progressNotes || "");
-  }
+  useEffect(() => {
+    if (order && !editingNotes) {
+      setNotes(order.progressNotes || "");
+    }
+  }, [order?.id, order?.progressNotes, editingNotes]);
 
   const updateOrderMutation = useMutation({
     mutationFn: async (updates: any) => {
