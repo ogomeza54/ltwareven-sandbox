@@ -37,6 +37,9 @@ export default function Dashboard() {
   });
 
   const isSuperAdmin = user?.role === 'super_admin';
+  
+  console.log('User role:', user?.role);
+  console.log('Is super admin:', isSuperAdmin);
 
   const getStatusColor = (status: string) => {
     switch (status) {
