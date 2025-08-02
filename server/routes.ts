@@ -282,6 +282,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/inventory/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const updates = req.body;
+      const part = await storage.updateInventoryPart(req.params.id, updates);
+      res.json(part);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to update inventory part" });
+    }
+  });
+
   // Parts Usage
   app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
     try {

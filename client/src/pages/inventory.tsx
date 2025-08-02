@@ -5,11 +5,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Package, AlertTriangle, Plus } from "lucide-react";
+import { Search, Package, AlertTriangle, Plus, Edit } from "lucide-react";
 import { useState } from "react";
+import InventoryPartModal from "@/components/modals/inventory-part-modal";
 
 export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedPart, setSelectedPart] = useState<any>(null);
+
+  const handleEditPart = (part: any) => {
+    setSelectedPart(part);
+    setIsEditModalOpen(true);
+  };
 
   const { data: parts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
@@ -98,7 +107,10 @@ export default function Inventory() {
                 className="pl-10"
               />
             </div>
-            <Button className="bg-primary text-white hover:bg-blue-700 whitespace-nowrap">
+            <Button 
+              className="bg-primary text-white hover:bg-blue-700 whitespace-nowrap"
+              onClick={() => setIsAddModalOpen(true)}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Add Part
             </Button>
@@ -205,7 +217,13 @@ export default function Inventory() {
                     </div>
 
                     <div className="mt-4 flex space-x-2">
-                      <Button variant="outline" size="sm" className="flex-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => handleEditPart(part)}
+                      >
+                        <Edit className="w-3 h-3 mr-1" />
                         Edit
                       </Button>
                       <Button 
@@ -224,6 +242,21 @@ export default function Inventory() {
           </div>
         </div>
       </main>
+
+      {/* Modals */}
+      <InventoryPartModal
+        open={isAddModalOpen}
+        onOpenChange={setIsAddModalOpen}
+      />
+      
+      <InventoryPartModal
+        open={isEditModalOpen}
+        onOpenChange={(open) => {
+          setIsEditModalOpen(open);
+          if (!open) setSelectedPart(null);
+        }}
+        part={selectedPart}
+      />
     </div>
   );
 }
