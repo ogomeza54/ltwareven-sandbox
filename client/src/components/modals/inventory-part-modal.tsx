@@ -63,7 +63,7 @@ export default function InventoryPartModal({
     mutationFn: async (data: InventoryPartFormData) => {
       const partData = {
         ...data,
-        price: parseFloat(data.price),
+        price: data.price, // Keep as string since database expects decimal as string
         quantityInStock: parseInt(data.quantityInStock),
         lowStockThreshold: parseInt(data.lowStockThreshold),
       };
