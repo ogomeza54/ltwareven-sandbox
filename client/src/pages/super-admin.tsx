@@ -47,7 +47,7 @@ export default function SuperAdmin() {
   // Create company mutation
   const createCompanyMutation = useMutation({
     mutationFn: async (data: { name: string; plan: string }) => {
-      return await apiRequest("/api/admin/companies", "POST", data);
+      return await apiRequest("POST", "/api/admin/companies", data);
     },
     onSuccess: () => {
       toast({
@@ -70,7 +70,7 @@ export default function SuperAdmin() {
   // Assign admin mutation
   const assignAdminMutation = useMutation({
     mutationFn: async (data: { email: string; companyId: string }) => {
-      return await apiRequest("/api/admin/assign-admin", "POST", data);
+      return await apiRequest("POST", "/api/admin/assign-admin", data);
     },
     onSuccess: () => {
       toast({
