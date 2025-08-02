@@ -21,6 +21,7 @@ const navigation = [
   { name: "Repair Orders", href: "/repair-orders", icon: Hammer },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Mechanics", href: "/mechanics", icon: Users },
+  { name: "Super Admin", href: "/super-admin", icon: Shield },
   { name: "Reports", href: "/reports", icon: BarChart3 },
 ];
 

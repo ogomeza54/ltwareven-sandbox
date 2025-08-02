@@ -36,10 +36,7 @@ export default function Dashboard() {
     queryKey: ["/api/repair-orders"],
   });
 
-  const isSuperAdmin = user?.role === 'super_admin';
-  
-  console.log('User role:', user?.role);
-  console.log('Is super admin:', isSuperAdmin);
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -258,19 +255,7 @@ export default function Dashboard() {
                   </div>
                 </Button>
 
-                {isSuperAdmin && (
-                  <Link href="/super-admin">
-                    <Button variant="outline" className="w-full p-4 h-auto justify-start border-blue-200 hover:bg-blue-50">
-                      <div className="flex items-center space-x-3">
-                        <Shield className="text-xl text-blue-600" />
-                        <div className="text-left">
-                          <p className="font-medium text-blue-900">Super Admin</p>
-                          <p className="text-sm text-blue-600">Manage companies</p>
-                        </div>
-                      </div>
-                    </Button>
-                  </Link>
-                )}
+
               </CardContent>
             </Card>
           </div>
