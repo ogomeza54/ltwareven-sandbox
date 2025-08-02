@@ -7,7 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Building2, Users, UserPlus, Shield } from "lucide-react";
+import { Building2, Users, UserPlus, Shield, ArrowLeft, Home } from "lucide-react";
+import { Link } from "wouter";
 
 interface Company {
   id: string;
@@ -116,9 +117,26 @@ export default function SuperAdmin() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center gap-2 mb-6">
-        <Shield className="h-8 w-8 text-blue-600" />
-        <h1 className="text-3xl font-bold">Super Admin Dashboard</h1>
+      {/* Navigation Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <Shield className="h-8 w-8 text-blue-600" />
+          <h1 className="text-3xl font-bold">Super Admin Dashboard</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link href="/dashboard">
+            <Button variant="outline" className="flex items-center gap-2">
+              <Home className="h-4 w-4" />
+              Dashboard
+            </Button>
+          </Link>
+          <Link href="/">
+            <Button variant="outline" className="flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Landing
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
