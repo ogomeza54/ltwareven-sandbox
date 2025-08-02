@@ -17,12 +17,16 @@ import {
   Plus,
   Package,
   Calendar,
-  FileText
+  FileText,
+  Shield
 } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { Link } from "wouter";
 
 export default function Dashboard() {
   const [showIntakeModal, setShowIntakeModal] = useState(false);
+  const { user } = useAuth();
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
@@ -31,6 +35,8 @@ export default function Dashboard() {
   const { data: recentOrders, isLoading: ordersLoading } = useQuery({
     queryKey: ["/api/repair-orders"],
   });
+
+  const isSuperAdmin = user?.role === 'super_admin';
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -248,6 +254,20 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </Button>
+
+                {isSuperAdmin && (
+                  <Link href="/super-admin">
+                    <Button variant="outline" className="w-full p-4 h-auto justify-start border-blue-200 hover:bg-blue-50">
+                      <div className="flex items-center space-x-3">
+                        <Shield className="text-xl text-blue-600" />
+                        <div className="text-left">
+                          <p className="font-medium text-blue-900">Super Admin</p>
+                          <p className="text-sm text-blue-600">Manage companies</p>
+                        </div>
+                      </div>
+                    </Button>
+                  </Link>
+                )}
               </CardContent>
             </Card>
           </div>
