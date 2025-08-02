@@ -274,11 +274,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const partData = { ...req.body, companyId: req.userContext.companyId };
+      console.log("Creating inventory part with data:", partData);
       const validatedPart = insertInventoryPartSchema.parse(partData);
       const part = await storage.createInventoryPart(validatedPart);
       res.status(201).json(part);
     } catch (error) {
-      res.status(400).json({ message: "Failed to create inventory part" });
+      console.error("Error creating inventory part:", error);
+      res.status(400).json({ message: "Failed to create inventory part", error: error.message });
     }
   });
 
