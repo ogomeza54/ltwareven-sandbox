@@ -29,43 +29,50 @@ export interface IStorage {
   
   // Mechanic operations
   getMechanicsByCompany(companyId: string): Promise<Mechanic[]>;
-  getMechanic(id: string): Promise<Mechanic | undefined>;
+  getMechanic(id: string, companyId: string): Promise<Mechanic | undefined>;
   createMechanic(mechanic: InsertMechanic): Promise<Mechanic>;
-  updateMechanic(id: string, updates: Partial<Mechanic>): Promise<Mechanic>;
+  updateMechanic(id: string, companyId: string, updates: Partial<Mechanic>): Promise<Mechanic>;
+  deleteMechanic(id: string, companyId: string): Promise<void>;
   getAvailableMechanics(companyId: string): Promise<Mechanic[]>;
   
   // Customer operations
   getCustomersByCompany(companyId: string): Promise<Customer[]>;
-  getCustomer(id: string): Promise<Customer | undefined>;
+  getCustomer(id: string, companyId: string): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
+  updateCustomer(id: string, companyId: string, updates: Partial<Customer>): Promise<Customer>;
+  deleteCustomer(id: string, companyId: string): Promise<void>;
   getCustomerByPhone(phone: string, companyId: string): Promise<Customer | undefined>;
   
   // Vehicle operations
   getVehiclesByCompany(companyId: string): Promise<Vehicle[]>;
-  getVehicle(id: string): Promise<Vehicle | undefined>;
+  getVehicle(id: string, companyId: string): Promise<Vehicle | undefined>;
   createVehicle(vehicle: InsertVehicle): Promise<Vehicle>;
-  getVehiclesByCustomer(customerId: string): Promise<Vehicle[]>;
+  updateVehicle(id: string, companyId: string, updates: Partial<Vehicle>): Promise<Vehicle>;
+  deleteVehicle(id: string, companyId: string): Promise<void>;
+  getVehiclesByCustomer(customerId: string, companyId: string): Promise<Vehicle[]>;
   
   // Repair Order operations
   getRepairOrdersByCompany(companyId: string): Promise<RepairOrder[]>;
-  getRepairOrder(id: string): Promise<RepairOrder | undefined>;
+  getRepairOrder(id: string, companyId: string): Promise<RepairOrder | undefined>;
   createRepairOrder(repairOrder: InsertRepairOrder): Promise<RepairOrder>;
-  updateRepairOrder(id: string, updates: Partial<RepairOrder>): Promise<RepairOrder>;
-  getRepairOrdersByMechanic(mechanicId: string): Promise<RepairOrder[]>;
+  updateRepairOrder(id: string, companyId: string, updates: Partial<RepairOrder>): Promise<RepairOrder>;
+  deleteRepairOrder(id: string, companyId: string): Promise<void>;
+  getRepairOrdersByMechanic(mechanicId: string, companyId: string): Promise<RepairOrder[]>;
   getRepairOrdersByStatus(status: string, companyId: string): Promise<RepairOrder[]>;
   
   // Inventory operations
   getInventoryPartsByCompany(companyId: string): Promise<InventoryPart[]>;
-  getInventoryPart(id: string): Promise<InventoryPart | undefined>;
+  getInventoryPart(id: string, companyId: string): Promise<InventoryPart | undefined>;
   createInventoryPart(part: InsertInventoryPart): Promise<InventoryPart>;
-  updateInventoryPart(id: string, updates: Partial<InventoryPart>): Promise<InventoryPart>;
+  updateInventoryPart(id: string, companyId: string, updates: Partial<InventoryPart>): Promise<InventoryPart>;
+  deleteInventoryPart(id: string, companyId: string): Promise<void>;
   getLowStockParts(companyId: string): Promise<InventoryPart[]>;
   searchParts(query: string, companyId: string): Promise<InventoryPart[]>;
   
   // Parts Usage operations
-  getPartsUsageByRepairOrder(repairOrderId: string): Promise<PartsUsage[]>;
-  createPartsUsage(partsUsage: InsertPartsUsage): Promise<PartsUsage>;
-  deletePartsUsage(id: string): Promise<void>;
+  getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<PartsUsage[]>;
+  createPartsUsage(partsUsage: InsertPartsUsage, companyId: string): Promise<PartsUsage>;
+  deletePartsUsage(id: string, companyId: string): Promise<void>;
   
   // Dashboard stats
   getDashboardStats(companyId: string): Promise<{
@@ -174,8 +181,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(mechanics).where(eq(mechanics.companyId, companyId));
   }
 
-  async getMechanic(id: string): Promise<Mechanic | undefined> {
-    const [mechanic] = await db.select().from(mechanics).where(eq(mechanics.id, id));
+  async getMechanic(id: string, companyId: string): Promise<Mechanic | undefined> {
+    const [mechanic] = await db.select().from(mechanics)
+      .where(and(eq(mechanics.id, id), eq(mechanics.companyId, companyId)));
     return mechanic || undefined;
   }
 
@@ -184,12 +192,17 @@ export class DatabaseStorage implements IStorage {
     return mechanic;
   }
 
-  async updateMechanic(id: string, updates: Partial<Mechanic>): Promise<Mechanic> {
+  async updateMechanic(id: string, companyId: string, updates: Partial<Mechanic>): Promise<Mechanic> {
     const [mechanic] = await db.update(mechanics)
       .set(updates)
-      .where(eq(mechanics.id, id))
+      .where(and(eq(mechanics.id, id), eq(mechanics.companyId, companyId)))
       .returning();
     return mechanic;
+  }
+
+  async deleteMechanic(id: string, companyId: string): Promise<void> {
+    await db.delete(mechanics)
+      .where(and(eq(mechanics.id, id), eq(mechanics.companyId, companyId)));
   }
 
   async getAvailableMechanics(companyId: string): Promise<Mechanic[]> {
@@ -206,14 +219,28 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(customers).where(eq(customers.companyId, companyId));
   }
 
-  async getCustomer(id: string): Promise<Customer | undefined> {
-    const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+  async getCustomer(id: string, companyId: string): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
     return customer || undefined;
   }
 
   async createCustomer(insertCustomer: InsertCustomer): Promise<Customer> {
     const [customer] = await db.insert(customers).values(insertCustomer).returning();
     return customer;
+  }
+
+  async updateCustomer(id: string, companyId: string, updates: Partial<Customer>): Promise<Customer> {
+    const [customer] = await db.update(customers)
+      .set(updates)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
+      .returning();
+    return customer;
+  }
+
+  async deleteCustomer(id: string, companyId: string): Promise<void> {
+    await db.delete(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
   }
 
   async getCustomerByPhone(phone: string, companyId: string): Promise<Customer | undefined> {
@@ -227,8 +254,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(vehicles).where(eq(vehicles.companyId, companyId));
   }
 
-  async getVehicle(id: string): Promise<Vehicle | undefined> {
-    const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, id));
+  async getVehicle(id: string, companyId: string): Promise<Vehicle | undefined> {
+    const [vehicle] = await db.select().from(vehicles)
+      .where(and(eq(vehicles.id, id), eq(vehicles.companyId, companyId)));
     return vehicle || undefined;
   }
 
@@ -237,8 +265,22 @@ export class DatabaseStorage implements IStorage {
     return vehicle;
   }
 
-  async getVehiclesByCustomer(customerId: string): Promise<Vehicle[]> {
-    return await db.select().from(vehicles).where(eq(vehicles.customerId, customerId));
+  async updateVehicle(id: string, companyId: string, updates: Partial<Vehicle>): Promise<Vehicle> {
+    const [vehicle] = await db.update(vehicles)
+      .set(updates)
+      .where(and(eq(vehicles.id, id), eq(vehicles.companyId, companyId)))
+      .returning();
+    return vehicle;
+  }
+
+  async deleteVehicle(id: string, companyId: string): Promise<void> {
+    await db.delete(vehicles)
+      .where(and(eq(vehicles.id, id), eq(vehicles.companyId, companyId)));
+  }
+
+  async getVehiclesByCustomer(customerId: string, companyId: string): Promise<Vehicle[]> {
+    return await db.select().from(vehicles)
+      .where(and(eq(vehicles.customerId, customerId), eq(vehicles.companyId, companyId)));
   }
 
   // Repair Order operations
@@ -289,13 +331,13 @@ export class DatabaseStorage implements IStorage {
     .orderBy(desc(repairOrders.createdAt));
   }
 
-  async getRepairOrder(id: string): Promise<RepairOrder | undefined> {
-    const [order] = await db.select().from(repairOrders).where(eq(repairOrders.id, id));
+  async getRepairOrder(id: string, companyId: string): Promise<RepairOrder | undefined> {
+    const [order] = await db.select().from(repairOrders)
+      .where(and(eq(repairOrders.id, id), eq(repairOrders.companyId, companyId)));
     return order || undefined;
   }
 
   async createRepairOrder(insertRepairOrder: InsertRepairOrder): Promise<RepairOrder> {
-    // Generate order number
     const orderNumber = `RO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     
     const [order] = await db.insert(repairOrders)
@@ -304,17 +346,23 @@ export class DatabaseStorage implements IStorage {
     return order;
   }
 
-  async updateRepairOrder(id: string, updates: Partial<RepairOrder>): Promise<RepairOrder> {
+  async updateRepairOrder(id: string, companyId: string, updates: Partial<RepairOrder>): Promise<RepairOrder> {
     const [order] = await db.update(repairOrders)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(repairOrders.id, id))
+      .where(and(eq(repairOrders.id, id), eq(repairOrders.companyId, companyId)))
       .returning();
     return order;
   }
 
-  async getRepairOrdersByMechanic(mechanicId: string): Promise<RepairOrder[]> {
+  async deleteRepairOrder(id: string, companyId: string): Promise<void> {
+    await db.delete(partsUsage).where(eq(partsUsage.repairOrderId, id));
+    await db.delete(repairOrders)
+      .where(and(eq(repairOrders.id, id), eq(repairOrders.companyId, companyId)));
+  }
+
+  async getRepairOrdersByMechanic(mechanicId: string, companyId: string): Promise<RepairOrder[]> {
     return await db.select().from(repairOrders)
-      .where(eq(repairOrders.mechanicId, mechanicId))
+      .where(and(eq(repairOrders.mechanicId, mechanicId), eq(repairOrders.companyId, companyId)))
       .orderBy(desc(repairOrders.createdAt));
   }
 
@@ -331,8 +379,9 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(inventoryParts.name));
   }
 
-  async getInventoryPart(id: string): Promise<InventoryPart | undefined> {
-    const [part] = await db.select().from(inventoryParts).where(eq(inventoryParts.id, id));
+  async getInventoryPart(id: string, companyId: string): Promise<InventoryPart | undefined> {
+    const [part] = await db.select().from(inventoryParts)
+      .where(and(eq(inventoryParts.id, id), eq(inventoryParts.companyId, companyId)));
     return part || undefined;
   }
 
@@ -341,12 +390,17 @@ export class DatabaseStorage implements IStorage {
     return part;
   }
 
-  async updateInventoryPart(id: string, updates: Partial<InventoryPart>): Promise<InventoryPart> {
+  async updateInventoryPart(id: string, companyId: string, updates: Partial<InventoryPart>): Promise<InventoryPart> {
     const [part] = await db.update(inventoryParts)
       .set(updates)
-      .where(eq(inventoryParts.id, id))
+      .where(and(eq(inventoryParts.id, id), eq(inventoryParts.companyId, companyId)))
       .returning();
     return part;
+  }
+
+  async deleteInventoryPart(id: string, companyId: string): Promise<void> {
+    await db.delete(inventoryParts)
+      .where(and(eq(inventoryParts.id, id), eq(inventoryParts.companyId, companyId)));
   }
 
   async getLowStockParts(companyId: string): Promise<InventoryPart[]> {
@@ -367,7 +421,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Parts Usage operations
-  async getPartsUsageByRepairOrder(repairOrderId: string): Promise<any[]> {
+  async getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<any[]> {
+    const order = await db.select().from(repairOrders)
+      .where(and(eq(repairOrders.id, repairOrderId), eq(repairOrders.companyId, companyId)));
+    if (order.length === 0) return [];
+    
     return await db.select({
       id: partsUsage.id,
       repairOrderId: partsUsage.repairOrderId,
@@ -388,23 +446,33 @@ export class DatabaseStorage implements IStorage {
     .where(eq(partsUsage.repairOrderId, repairOrderId));
   }
 
-  async createPartsUsage(insertPartsUsage: InsertPartsUsage): Promise<PartsUsage> {
+  async createPartsUsage(insertPartsUsage: InsertPartsUsage, companyId: string): Promise<PartsUsage> {
+    const order = await db.select().from(repairOrders)
+      .where(and(eq(repairOrders.id, insertPartsUsage.repairOrderId), eq(repairOrders.companyId, companyId)));
+    if (order.length === 0) throw new Error("Repair order not found");
+    
     const [usage] = await db.insert(partsUsage).values(insertPartsUsage).returning();
     
-    // Update inventory quantity
     await db.update(inventoryParts)
       .set({
         quantityInStock: sql`${inventoryParts.quantityInStock} - ${insertPartsUsage.quantity}`
       })
-      .where(eq(inventoryParts.id, insertPartsUsage.partId));
+      .where(and(eq(inventoryParts.id, insertPartsUsage.partId), eq(inventoryParts.companyId, companyId)));
     
     return usage;
   }
 
-  async deletePartsUsage(id: string): Promise<void> {
-    const [usage] = await db.select().from(partsUsage).where(eq(partsUsage.id, id));
+  async deletePartsUsage(id: string, companyId: string): Promise<void> {
+    const [usage] = await db.select({
+      id: partsUsage.id,
+      partId: partsUsage.partId,
+      quantity: partsUsage.quantity,
+      repairOrderId: partsUsage.repairOrderId
+    }).from(partsUsage)
+      .innerJoin(repairOrders, eq(partsUsage.repairOrderId, repairOrders.id))
+      .where(and(eq(partsUsage.id, id), eq(repairOrders.companyId, companyId)));
+    
     if (usage) {
-      // Restore inventory quantity
       await db.update(inventoryParts)
         .set({
           quantityInStock: sql`${inventoryParts.quantityInStock} + ${usage.quantity}`

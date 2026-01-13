@@ -1,18 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import Sidebar from "@/components/layout/sidebar";
 import TopBar from "@/components/layout/top-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Package, AlertTriangle, Plus, Edit } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Search, Package, AlertTriangle, Plus, Edit, Trash2 } from "lucide-react";
 import { useState } from "react";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Inventory() {
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedPart, setSelectedPart] = useState<any>(null);
 
   const handleEditPart = (part: any) => {
@@ -20,8 +34,28 @@ export default function Inventory() {
     setIsEditModalOpen(true);
   };
 
+  const handleDeletePart = (part: any) => {
+    setSelectedPart(part);
+    setIsDeleteDialogOpen(true);
+  };
+
   const { data: parts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/inventory/${selectedPart?.id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      setIsDeleteDialogOpen(false);
+      setSelectedPart(null);
+      toast({ title: "Part deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete part", variant: "destructive" });
+    },
   });
 
   const filteredParts = parts.filter((part: any) =>
@@ -228,11 +262,10 @@ export default function Inventory() {
                       </Button>
                       <Button 
                         variant="outline" 
-                        size="sm" 
-                        className="flex-1"
-                        disabled={part.quantityInStock === 0}
+                        size="sm"
+                        onClick={() => handleDeletePart(part)}
                       >
-                        Use Part
+                        <Trash2 className="w-3 h-3 text-red-500" />
                       </Button>
                     </div>
                   </CardContent>
@@ -257,6 +290,26 @@ export default function Inventory() {
         }}
         part={selectedPart}
       />
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Part</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedPart?.name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteMutation.mutate()}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

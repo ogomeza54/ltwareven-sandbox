@@ -1,24 +1,53 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import Sidebar from "@/components/layout/sidebar";
 import TopBar from "@/components/layout/top-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Users, UserPlus, Wrench, Clock, DollarSign } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Users, UserPlus, Wrench, Clock, DollarSign, Trash2 } from "lucide-react";
 import MechanicFormModal from "@/components/modals/mechanic-form-modal";
 import MechanicEditModal from "@/components/modals/mechanic-edit-modal";
 import MechanicScheduleModal from "@/components/modals/mechanic-schedule-modal";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Mechanics() {
+  const { toast } = useToast();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedMechanic, setSelectedMechanic] = useState<any>(null);
   
   const { data: mechanics = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/mechanics"],
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/mechanics/${selectedMechanic?.id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/mechanics"] });
+      setDeleteDialogOpen(false);
+      setSelectedMechanic(null);
+      toast({ title: "Mechanic deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete mechanic", variant: "destructive" });
+    },
   });
 
   const availableMechanics = mechanics.filter((mechanic: any) => mechanic.isAvailable);
@@ -32,6 +61,11 @@ export default function Mechanics() {
   const handleViewSchedule = (mechanic: any) => {
     setSelectedMechanic(mechanic);
     setScheduleModalOpen(true);
+  };
+
+  const handleDeleteMechanic = (mechanic: any) => {
+    setSelectedMechanic(mechanic);
+    setDeleteDialogOpen(true);
   };
 
   return (
@@ -219,6 +253,13 @@ export default function Mechanics() {
                       >
                         Edit
                       </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleDeleteMechanic(mechanic)}
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -244,6 +285,26 @@ export default function Mechanics() {
         onOpenChange={setScheduleModalOpen}
         mechanic={selectedMechanic}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Mechanic</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedMechanic?.name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteMutation.mutate()}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

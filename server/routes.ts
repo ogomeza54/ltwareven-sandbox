@@ -113,7 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const order = await storage.getRepairOrder(req.params.id);
+      const order = await storage.getRepairOrder(req.params.id, req.userContext.companyId);
       if (!order) {
         return res.status(404).json({ message: "Repair order not found" });
       }
@@ -192,9 +192,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update mechanic workload
       if (assignedMechanicId) {
-        const mechanic = await storage.getMechanic(assignedMechanicId);
+        const mechanic = await storage.getMechanic(assignedMechanicId, req.userContext.companyId);
         if (mechanic) {
-          await storage.updateMechanic(assignedMechanicId, {
+          await storage.updateMechanic(assignedMechanicId, req.userContext.companyId, {
             currentWorkload: mechanic.currentWorkload + 1
           });
         }
@@ -209,11 +209,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const updates = req.body;
-      const order = await storage.updateRepairOrder(req.params.id, updates);
+      const { companyId, id, customerId, vehicleId, ...updates } = req.body;
+      const order = await storage.updateRepairOrder(req.params.id, req.userContext.companyId, updates);
       res.json(order);
     } catch (error) {
       res.status(400).json({ message: "Failed to update repair order" });
+    }
+  });
+
+  app.delete("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteRepairOrder(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(400).json({ message: "Failed to delete repair order" });
     }
   });
 
@@ -240,11 +249,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/mechanics/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const updates = req.body;
-      const mechanic = await storage.updateMechanic(req.params.id, updates);
+      const { companyId, id, ...updates } = req.body;
+      const mechanic = await storage.updateMechanic(req.params.id, req.userContext.companyId, updates);
       res.json(mechanic);
     } catch (error) {
       res.status(400).json({ message: "Failed to update mechanic" });
+    }
+  });
+
+  app.delete("/api/mechanics/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteMechanic(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(400).json({ message: "Failed to delete mechanic" });
+    }
+  });
+
+  // Customers
+  app.get("/api/customers", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const customers = await storage.getCustomersByCompany(req.userContext.companyId);
+      res.json(customers);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customers" });
+    }
+  });
+
+  app.get("/api/customers/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const customer = await storage.getCustomer(req.params.id, req.userContext.companyId);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      res.json(customer);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customer" });
+    }
+  });
+
+  app.post("/api/customers", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const customerData = { ...req.body, companyId: req.userContext.companyId };
+      const validatedCustomer = insertCustomerSchema.parse(customerData);
+      const customer = await storage.createCustomer(validatedCustomer);
+      res.status(201).json(customer);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to create customer" });
+    }
+  });
+
+  app.patch("/api/customers/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { companyId, id, ...updates } = req.body;
+      const customer = await storage.updateCustomer(req.params.id, req.userContext.companyId, updates);
+      res.json(customer);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to update customer" });
+    }
+  });
+
+  app.delete("/api/customers/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteCustomer(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(400).json({ message: "Failed to delete customer" });
+    }
+  });
+
+  // Vehicles
+  app.get("/api/vehicles", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const vehicles = await storage.getVehiclesByCompany(req.userContext.companyId);
+      res.json(vehicles);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch vehicles" });
+    }
+  });
+
+  app.get("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.id, req.userContext.companyId);
+      if (!vehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+      res.json(vehicle);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch vehicle" });
+    }
+  });
+
+  app.get("/api/vehicles/customer/:customerId", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const vehicles = await storage.getVehiclesByCustomer(req.params.customerId, req.userContext.companyId);
+      res.json(vehicles);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customer vehicles" });
+    }
+  });
+
+  app.post("/api/vehicles", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const vehicleData = { ...req.body, companyId: req.userContext.companyId };
+      const validatedVehicle = insertVehicleSchema.parse(vehicleData);
+      const vehicle = await storage.createVehicle(validatedVehicle);
+      res.status(201).json(vehicle);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to create vehicle" });
+    }
+  });
+
+  app.patch("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { companyId, id, customerId, ...updates } = req.body;
+      const vehicle = await storage.updateVehicle(req.params.id, req.userContext.companyId, updates);
+      res.json(vehicle);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to update vehicle" });
+    }
+  });
+
+  app.delete("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteVehicle(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(400).json({ message: "Failed to delete vehicle" });
     }
   });
 
@@ -286,62 +417,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/inventory/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const updates = req.body;
-      const part = await storage.updateInventoryPart(req.params.id, updates);
+      const { companyId, id, ...updates } = req.body;
+      const part = await storage.updateInventoryPart(req.params.id, req.userContext.companyId, updates);
       res.json(part);
     } catch (error) {
       res.status(400).json({ message: "Failed to update inventory part" });
     }
   });
 
+  app.delete("/api/inventory/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteInventoryPart(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) {
+      res.status(400).json({ message: "Failed to delete inventory part" });
+    }
+  });
+
   // Parts Usage
-  app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
+  app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.id);
+      const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.id, req.userContext.companyId);
       res.json(partsUsage);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch parts usage" });
     }
   });
 
-  // Alternative endpoint for frontend compatibility
-  app.get("/api/parts-usage/:orderId", isAuthenticated, withCompanyContext, async (req, res) => {
+  app.get("/api/parts-usage/:orderId", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.orderId);
+      const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.orderId, req.userContext.companyId);
       res.json(partsUsage);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch parts usage" });
     }
   });
 
-  app.post("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req, res) => {
+  app.post("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const partsUsageData = {
         ...req.body,
         repairOrderId: req.params.id
       };
       const validatedPartsUsage = insertPartsUsageSchema.parse(partsUsageData);
-      const partsUsage = await storage.createPartsUsage(validatedPartsUsage);
+      const partsUsage = await storage.createPartsUsage(validatedPartsUsage, req.userContext.companyId);
       res.status(201).json(partsUsage);
     } catch (error) {
       res.status(400).json({ message: "Failed to add parts to repair order" });
     }
   });
 
-  // Alternative endpoint for frontend compatibility
-  app.post("/api/parts-usage", isAuthenticated, withCompanyContext, async (req, res) => {
+  app.post("/api/parts-usage", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const validatedPartsUsage = insertPartsUsageSchema.parse(req.body);
-      const partsUsage = await storage.createPartsUsage(validatedPartsUsage);
-      
-      // Update inventory stock
-      const part = await storage.getInventoryPart(req.body.partId);
-      if (part) {
-        await storage.updateInventoryPart(req.body.partId, {
-          quantityInStock: part.quantityInStock - req.body.quantity
-        });
-      }
-      
+      const partsUsage = await storage.createPartsUsage(validatedPartsUsage, req.userContext.companyId);
       res.status(201).json(partsUsage);
     } catch (error) {
       console.error("Error adding parts usage:", error);
@@ -349,9 +478,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/parts-usage/:id", isAuthenticated, withCompanyContext, async (req, res) => {
+  app.delete("/api/parts-usage/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      await storage.deletePartsUsage(req.params.id);
+      await storage.deletePartsUsage(req.params.id, req.userContext.companyId);
       res.status(204).send();
     } catch (error) {
       res.status(400).json({ message: "Failed to remove parts usage" });

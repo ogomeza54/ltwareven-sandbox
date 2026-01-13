@@ -19,19 +19,24 @@ import { useState } from "react";
 export default function Reports() {
   const [timeRange, setTimeRange] = useState("this-month");
 
-  const { data: stats } = useQuery({
+  const { data: stats } = useQuery<{
+    activeOrders: number;
+    availableMechanics: number;
+    lowStockItems: number;
+    monthlyRevenue: number;
+  }>({
     queryKey: ["/api/dashboard/stats"],
   });
 
-  const { data: orders } = useQuery({
+  const { data: orders = [] } = useQuery<any[]>({
     queryKey: ["/api/repair-orders"],
   });
 
-  const { data: mechanics } = useQuery({
+  const { data: mechanics = [] } = useQuery<any[]>({
     queryKey: ["/api/mechanics"],
   });
 
-  const { data: inventory } = useQuery({
+  const { data: inventory = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
   });
 
@@ -210,7 +215,7 @@ export default function Reports() {
                           </span>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-600">{count}</span>
+                          <span className="text-sm text-gray-600">{count as number}</span>
                           <span className="text-xs text-gray-500">({percentage}%)</span>
                         </div>
                       </div>

@@ -12,7 +12,9 @@ import {
   BarChart3,
   User,
   Shield,
-  ChevronDown
+  ChevronDown,
+  Car,
+  UserCircle
 } from "lucide-react";
 
 const navigation = [
@@ -21,7 +23,8 @@ const navigation = [
   { name: "Repair Orders", href: "/repair-orders", icon: Hammer },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Mechanics", href: "/mechanics", icon: Users },
-  { name: "Super Admin", href: "/super-admin", icon: Shield },
+  { name: "Customers", href: "/customers", icon: UserCircle },
+  { name: "Vehicles", href: "/vehicles", icon: Car },
   { name: "Reports", href: "/reports", icon: BarChart3 },
 ];
 

@@ -10,6 +10,8 @@ import IntakeForm from "@/pages/intake-form";
 import RepairOrders from "@/pages/repair-orders";
 import Inventory from "@/pages/inventory";
 import Mechanics from "@/pages/mechanics";
+import Customers from "@/pages/customers";
+import Vehicles from "@/pages/vehicles";
 import Reports from "@/pages/reports";
 import Landing from "@/pages/landing";
 import Home from "@/pages/home";
@@ -31,6 +33,8 @@ function Router() {
           <Route path="/repair-orders" component={RepairOrders} />
           <Route path="/inventory" component={Inventory} />
           <Route path="/mechanics" component={Mechanics} />
+          <Route path="/customers" component={Customers} />
+          <Route path="/vehicles" component={Vehicles} />
           <Route path="/reports" component={Reports} />
           {user?.role === 'super_admin' && (
             <Route path="/super-admin" component={SuperAdmin} />
