@@ -20,20 +20,23 @@ export default function TopBar({ title, subtitle, onNewIntake }: TopBarProps) {
   };
 
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+    <header className="bg-slate-900 border-b border-slate-800 px-6 py-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-          <p className="text-sm text-gray-500">{subtitle}</p>
+          <h1 className="text-xl font-bold text-white">{title}</h1>
+          <p className="text-sm text-slate-400">{subtitle}</p>
         </div>
-        <div className="flex items-center space-x-4">
-          <button className="relative p-2 text-gray-400 hover:text-gray-600">
-            <Bell className="text-lg" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+        <div className="flex items-center space-x-3">
+          <button className="relative p-2 text-slate-400 hover:text-slate-200 transition-colors">
+            <Bell className="w-5 h-5" />
+            <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
               3
             </span>
           </button>
-          <Button onClick={handleNewIntake} className="bg-primary text-white hover:bg-blue-700">
+          <Button
+            onClick={handleNewIntake}
+            className="bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+          >
             <Plus className="mr-2 h-4 w-4" />
             New Intake
           </Button>

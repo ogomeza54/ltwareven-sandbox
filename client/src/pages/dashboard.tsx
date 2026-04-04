@@ -11,14 +11,11 @@ import {
   DollarSign,
   ArrowUp,
   ArrowDown,
-  Car,
   Truck,
-  Bike,
   Plus,
   Package,
   Calendar,
   FileText,
-  Shield
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,121 +33,108 @@ export default function Dashboard() {
     queryKey: ["/api/repair-orders"],
   });
 
-
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case "pending":
-        return "bg-blue-100 text-blue-800";
+        return "bg-blue-500/10 text-blue-400 border border-blue-500/20";
       case "in-progress":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-amber-500/10 text-amber-400 border border-amber-500/20";
       case "ready-pickup":
-        return "bg-green-100 text-green-800";
+        return "bg-green-500/10 text-green-400 border border-green-500/20";
       case "completed":
-        return "bg-gray-100 text-gray-800";
+        return "bg-slate-500/10 text-slate-400 border border-slate-500/20";
       case "waiting-parts":
-        return "bg-orange-100 text-orange-800";
+        return "bg-orange-500/10 text-orange-400 border border-orange-500/20";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-slate-500/10 text-slate-400 border border-slate-500/20";
     }
-  };
-
-  const getVehicleIcon = (make: string) => {
-    const makeLower = make.toLowerCase();
-    if (makeLower.includes("harley") || makeLower.includes("motorcycle")) {
-      return <Bike className="text-gray-600" />;
-    }
-    if (makeLower.includes("ford") && makeLower.includes("f-")) {
-      return <Truck className="text-gray-600" />;
-    }
-    return <Car className="text-gray-600" />;
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-slate-950">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto bg-slate-950">
         <TopBar
           title="Dashboard"
-          subtitle="Welcome back, manage your repair operations"
+          subtitle="Fleet operations overview"
           onNewIntake={() => setShowIntakeModal(true)}
         />
 
         <div className="p-6">
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+            <Card className="bg-slate-900 border-slate-800">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Active Orders</p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      {statsLoading ? "..." : stats?.activeOrders || 0}
+                    <p className="text-sm font-medium text-slate-400">Active Orders</p>
+                    <p className="text-3xl font-bold text-white mt-1">
+                      {statsLoading ? "—" : stats?.activeOrders || 0}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <ClipboardList className="text-primary text-xl" />
+                  <div className="w-12 h-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
+                    <ClipboardList className="text-amber-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-green-600 mt-2">
-                  <ArrowUp className="inline w-3 h-3 mr-1" />
+                <p className="text-xs text-green-400 mt-3 flex items-center gap-1">
+                  <ArrowUp className="w-3 h-3" />
                   12% from last week
                 </p>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-slate-900 border-slate-800">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Available Mechanics</p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      {statsLoading ? "..." : stats?.availableMechanics || 0}
+                    <p className="text-sm font-medium text-slate-400">Available Drivers</p>
+                    <p className="text-3xl font-bold text-white mt-1">
+                      {statsLoading ? "—" : stats?.availableMechanics || 0}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                    <Users className="text-green-600 text-xl" />
+                  <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center">
+                    <Users className="text-green-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">Out of 12 total mechanics</p>
+                <p className="text-xs text-slate-500 mt-3">Available for assignment</p>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-slate-900 border-slate-800">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      {statsLoading ? "..." : stats?.lowStockItems || 0}
+                    <p className="text-sm font-medium text-slate-400">Low Stock Items</p>
+                    <p className="text-3xl font-bold text-white mt-1">
+                      {statsLoading ? "—" : stats?.lowStockItems || 0}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                    <AlertTriangle className="text-yellow-600 text-xl" />
+                  <div className="w-12 h-12 bg-yellow-500/10 rounded-lg flex items-center justify-center">
+                    <AlertTriangle className="text-yellow-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-yellow-600 mt-2">
-                  <ArrowDown className="inline w-3 h-3 mr-1" />
+                <p className="text-xs text-yellow-400 mt-3 flex items-center gap-1">
+                  <ArrowDown className="w-3 h-3" />
                   Needs attention
                 </p>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-slate-900 border-slate-800">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      ${statsLoading ? "..." : (stats?.monthlyRevenue || 0).toLocaleString()}
+                    <p className="text-sm font-medium text-slate-400">Monthly Revenue</p>
+                    <p className="text-3xl font-bold text-white mt-1">
+                      ${statsLoading ? "—" : (stats?.monthlyRevenue || 0).toLocaleString()}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <DollarSign className="text-purple-600 text-xl" />
+                  <div className="w-12 h-12 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                    <DollarSign className="text-purple-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-green-600 mt-2">
-                  <ArrowUp className="inline w-3 h-3 mr-1" />
+                <p className="text-xs text-green-400 mt-3 flex items-center gap-1">
+                  <ArrowUp className="w-3 h-3" />
                   8% from last month
                 </p>
               </CardContent>
@@ -161,41 +145,47 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Recent Orders */}
             <div className="lg:col-span-2">
-              <Card>
-                <div className="px-6 py-4 border-b border-gray-200">
+              <Card className="bg-slate-900 border-slate-800">
+                <div className="px-6 py-4 border-b border-slate-800">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">Recent Orders</h3>
-                    <Button variant="ghost" size="sm" className="text-primary hover:text-blue-700">
-                      View All
-                    </Button>
+                    <h3 className="text-base font-semibold text-white">Recent Work Orders</h3>
+                    <Link href="/repair-orders">
+                      <Button variant="ghost" size="sm" className="text-amber-400 hover:text-amber-300 hover:bg-amber-500/10">
+                        View All
+                      </Button>
+                    </Link>
                   </div>
                 </div>
                 <CardContent className="p-6">
                   {ordersLoading ? (
-                    <p className="text-gray-500">Loading orders...</p>
+                    <p className="text-slate-500">Loading orders...</p>
                   ) : !recentOrders || recentOrders.length === 0 ? (
-                    <p className="text-gray-500">No recent orders found.</p>
+                    <div className="text-center py-8">
+                      <Truck className="w-10 h-10 text-slate-700 mx-auto mb-3" />
+                      <p className="text-slate-500">No recent work orders found.</p>
+                    </div>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-1">
                       {recentOrders.slice(0, 5).map((order: any) => (
-                        <div key={order.id} className="flex items-center justify-between py-4 border-b border-gray-100 last:border-b-0">
+                        <div key={order.id} className="flex items-center justify-between py-3 border-b border-slate-800 last:border-b-0">
                           <div className="flex items-center space-x-4">
-                            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                              {getVehicleIcon(order.vehicle?.make || "")}
+                            <div className="w-9 h-9 bg-slate-800 rounded-lg flex items-center justify-center">
+                              <Truck className="text-slate-500 w-4 h-4" />
                             </div>
                             <div>
-                              <p className="font-medium text-gray-900">
-                                {order.vehicle?.year} {order.vehicle?.make} {order.vehicle?.model} - {order.orderNumber}
+                              <p className="font-medium text-white text-sm">
+                                {order.vehicle?.year} {order.vehicle?.make} {order.vehicle?.model}
+                                <span className="text-slate-500 ml-2 font-normal text-xs">#{order.orderNumber}</span>
                               </p>
-                              <p className="text-sm text-gray-500">{order.customer?.name}</p>
+                              <p className="text-xs text-slate-500">{order.customer?.name}</p>
                             </div>
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
                               {order.status.replace("-", " ")}
                             </span>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {order.mechanic?.name || "Auto-assigning..."}
+                            <p className="text-xs text-slate-600 mt-1">
+                              {order.mechanic?.name || "Unassigned"}
                             </p>
                           </div>
                         </div>
@@ -207,55 +197,59 @@ export default function Dashboard() {
             </div>
 
             {/* Quick Actions */}
-            <Card>
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Quick Actions</h3>
+            <Card className="bg-slate-900 border-slate-800">
+              <div className="px-6 py-4 border-b border-slate-800">
+                <h3 className="text-base font-semibold text-white">Quick Actions</h3>
               </div>
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 space-y-2">
                 <Button 
-                  className="w-full bg-primary text-white p-4 h-auto justify-start hover:bg-blue-700"
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white p-4 h-auto justify-start"
                   onClick={() => setShowIntakeModal(true)}
                 >
                   <div className="flex items-center space-x-3">
-                    <Plus className="text-xl" />
+                    <Plus className="w-5 h-5" />
                     <div className="text-left">
-                      <p className="font-medium">New Intake Form</p>
-                      <p className="text-sm opacity-90">Start vehicle inspection</p>
+                      <p className="font-semibold text-sm">New Job Intake</p>
+                      <p className="text-xs opacity-80">Start vehicle inspection</p>
                     </div>
                   </div>
                 </Button>
 
-                <Button variant="secondary" className="w-full p-4 h-auto justify-start">
-                  <div className="flex items-center space-x-3">
-                    <Package className="text-xl" />
-                    <div className="text-left">
-                      <p className="font-medium">Check Inventory</p>
-                      <p className="text-sm text-gray-600">View stock levels</p>
+                <Link href="/inventory">
+                  <Button variant="ghost" className="w-full p-4 h-auto justify-start text-slate-300 hover:bg-slate-800 hover:text-white">
+                    <div className="flex items-center space-x-3">
+                      <Package className="w-5 h-5 text-slate-500" />
+                      <div className="text-left">
+                        <p className="font-medium text-sm">Check Inventory</p>
+                        <p className="text-xs text-slate-500">View stock levels</p>
+                      </div>
                     </div>
-                  </div>
-                </Button>
+                  </Button>
+                </Link>
 
-                <Button variant="secondary" className="w-full p-4 h-auto justify-start">
-                  <div className="flex items-center space-x-3">
-                    <Calendar className="text-xl" />
-                    <div className="text-left">
-                      <p className="font-medium">Mechanic Schedule</p>
-                      <p className="text-sm text-gray-600">View assignments</p>
+                <Link href="/mechanics">
+                  <Button variant="ghost" className="w-full p-4 h-auto justify-start text-slate-300 hover:bg-slate-800 hover:text-white">
+                    <div className="flex items-center space-x-3">
+                      <Calendar className="w-5 h-5 text-slate-500" />
+                      <div className="text-left">
+                        <p className="font-medium text-sm">Driver Schedule</p>
+                        <p className="text-xs text-slate-500">View assignments</p>
+                      </div>
                     </div>
-                  </div>
-                </Button>
+                  </Button>
+                </Link>
 
-                <Button variant="secondary" className="w-full p-4 h-auto justify-start">
-                  <div className="flex items-center space-x-3">
-                    <FileText className="text-xl" />
-                    <div className="text-left">
-                      <p className="font-medium">Generate Report</p>
-                      <p className="text-sm text-gray-600">Weekly summary</p>
+                <Link href="/reports">
+                  <Button variant="ghost" className="w-full p-4 h-auto justify-start text-slate-300 hover:bg-slate-800 hover:text-white">
+                    <div className="flex items-center space-x-3">
+                      <FileText className="w-5 h-5 text-slate-500" />
+                      <div className="text-left">
+                        <p className="font-medium text-sm">Generate Report</p>
+                        <p className="text-xs text-slate-500">Weekly summary</p>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-
-
+                  </Button>
+                </Link>
               </CardContent>
             </Card>
           </div>

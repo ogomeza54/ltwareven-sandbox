@@ -1,6 +1,6 @@
 # Overview
 
-This is a full-stack auto repair shop management system built with React, Express, and PostgreSQL. The application provides comprehensive tools for managing vehicle intake, repair orders, inventory, mechanics, and customer data in a multi-tenant SaaS architecture.
+This is a full-stack trucking business management system (HaulMaster Pro) built with React, Express, and PostgreSQL. The application provides comprehensive tools for managing job intake, work orders, fleet inventory, drivers/technicians, and client data in a multi-tenant SaaS architecture. The UI follows a professional dark trucking theme with amber/orange primary accents on slate-dark backgrounds.
 
 # User Preferences
 

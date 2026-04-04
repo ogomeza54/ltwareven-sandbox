@@ -197,8 +197,8 @@ export default function Vehicles() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Vehicle Management"
-          subtitle="View and manage all vehicles"
+          title="Fleet Management"
+          subtitle="View and manage all fleet vehicles"
         />
 
         <div className="p-6">

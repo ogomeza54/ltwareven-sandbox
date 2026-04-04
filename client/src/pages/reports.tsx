@@ -67,7 +67,7 @@ export default function Reports() {
       <main className="flex-1 overflow-auto">
         <TopBar
           title="Reports & Analytics"
-          subtitle="Comprehensive business insights and performance metrics"
+          subtitle="Fleet operations insights and performance metrics"
         />
 
         <div className="p-6">

@@ -124,8 +124,8 @@ export default function Customers() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Customer Management"
-          subtitle="View and manage your customers"
+          title="Client Management"
+          subtitle="View and manage your clients"
         />
 
         <div className="p-6">

@@ -72,8 +72,8 @@ export default function Inventory() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Inventory Management"
-          subtitle="Track parts and stock levels"
+          title="Parts & Inventory"
+          subtitle="Track parts and stock levels for your fleet"
         />
 
         <div className="p-6">

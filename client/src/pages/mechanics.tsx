@@ -73,8 +73,8 @@ export default function Mechanics() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Mechanics Management"
-          subtitle="Manage your team and assignments"
+          title="Drivers & Technicians"
+          subtitle="Manage your team and job assignments"
         />
 
         <div className="p-6">

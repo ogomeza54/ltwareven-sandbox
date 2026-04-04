@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Eye, Car, Truck, Bike } from "lucide-react";
+import { Search, Eye, Truck } from "lucide-react";
 import { useState } from "react";
 import RepairOrderModal from "@/components/modals/repair-order-modal";
 
@@ -28,29 +28,18 @@ export default function RepairOrders() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "pending":
-        return "bg-blue-100 text-blue-800";
+        return "bg-blue-500/10 text-blue-400 border-blue-500/20";
       case "in-progress":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-amber-500/10 text-amber-400 border-amber-500/20";
       case "ready-pickup":
-        return "bg-green-100 text-green-800";
+        return "bg-green-500/10 text-green-400 border-green-500/20";
       case "completed":
-        return "bg-gray-100 text-gray-800";
+        return "bg-slate-500/10 text-slate-400 border-slate-500/20";
       case "waiting-parts":
-        return "bg-orange-100 text-orange-800";
+        return "bg-orange-500/10 text-orange-400 border-orange-500/20";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-slate-500/10 text-slate-400 border-slate-500/20";
     }
-  };
-
-  const getVehicleIcon = (make: string) => {
-    const makeLower = make.toLowerCase();
-    if (makeLower.includes("harley") || makeLower.includes("motorcycle")) {
-      return <Bike className="text-gray-600 w-5 h-5" />;
-    }
-    if (makeLower.includes("ford") && makeLower.includes("f-")) {
-      return <Truck className="text-gray-600 w-5 h-5" />;
-    }
-    return <Car className="text-gray-600 w-5 h-5" />;
   };
 
   const filteredOrders = orders.filter((order: any) => {
@@ -69,17 +58,17 @@ export default function RepairOrders() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Repair Orders"
-          subtitle="Manage and track all repair orders"
+          title="Work Orders"
+          subtitle="Manage and track all active work orders"
         />
 
         <div className="p-6">
           {/* Filters */}
           <div className="mb-6 flex flex-col sm:flex-row gap-4">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
-                placeholder="Search by order number, customer, or vehicle..."
+                placeholder="Search by order number, client, or vehicle..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -101,22 +90,22 @@ export default function RepairOrders() {
           </div>
 
           {/* Orders List */}
-          <div className="space-y-4">
+          <div className="space-y-3">
             {isLoading ? (
               <Card>
                 <CardContent className="p-6">
-                  <p className="text-gray-500">Loading repair orders...</p>
+                  <p className="text-muted-foreground">Loading work orders...</p>
                 </CardContent>
               </Card>
             ) : !filteredOrders || filteredOrders.length === 0 ? (
               <Card>
                 <CardContent className="p-6">
                   <div className="text-center py-8">
-                    <Car className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No repair orders found</h3>
-                    <p className="text-gray-500">
+                    <Truck className="mx-auto h-12 w-12 text-muted-foreground/30 mb-4" />
+                    <h3 className="text-lg font-medium mb-2">No work orders found</h3>
+                    <p className="text-muted-foreground text-sm">
                       {orders.length === 0 
-                        ? "Create your first repair order by starting with an intake form."
+                        ? "Create your first work order by starting with a job intake."
                         : "Try adjusting your search or filter criteria."
                       }
                     </p>
@@ -125,34 +114,34 @@ export default function RepairOrders() {
               </Card>
             ) : (
               filteredOrders.map((order: any) => (
-                <Card key={order.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
+                <Card key={order.id} className="hover:border-amber-500/30 transition-colors">
+                  <CardContent className="p-5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                          {getVehicleIcon(order.vehicle?.make || "")}
+                        <div className="w-11 h-11 bg-accent rounded-lg flex items-center justify-center">
+                          <Truck className="text-muted-foreground w-5 h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold text-gray-900">
+                            <h3 className="font-semibold">
                               {order.vehicle?.year} {order.vehicle?.make} {order.vehicle?.model}
                             </h3>
-                            <Badge variant="outline" className="text-xs">
-                              {order.orderNumber}
+                            <Badge variant="outline" className="text-xs font-mono">
+                              #{order.orderNumber}
                             </Badge>
                           </div>
-                          <p className="text-sm text-gray-600">{order.customer?.name}</p>
-                          <p className="text-sm text-gray-500">{order.customer?.phone}</p>
+                          <p className="text-sm text-muted-foreground">{order.customer?.name}</p>
+                          <p className="text-sm text-muted-foreground/70">{order.customer?.phone}</p>
                         </div>
                       </div>
                       
                       <div className="flex items-center space-x-4">
                         <div className="text-right">
-                          <Badge className={getStatusColor(order.status)}>
+                          <Badge className={`${getStatusColor(order.status)} border`}>
                             {order.status.replace("-", " ")}
                           </Badge>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {order.mechanic?.name || "Auto-assigning..."}
+                          <p className="text-xs text-muted-foreground/60 mt-1">
+                            {order.mechanic?.name || "Unassigned"}
                           </p>
                           {order.priority === "urgent" && (
                             <Badge variant="destructive" className="text-xs mt-1">
@@ -173,14 +162,14 @@ export default function RepairOrders() {
                     </div>
                     
                     {order.description && (
-                      <div className="mt-4 pt-4 border-t border-gray-100">
-                        <p className="text-sm text-gray-600 line-clamp-2">
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <p className="text-sm text-muted-foreground line-clamp-2">
                           {order.description}
                         </p>
                       </div>
                     )}
                     
-                    <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground/60">
                       <span>Created: {new Date(order.createdAt).toLocaleDateString()}</span>
                       <span>
                         {order.totalEstimate && `Estimate: $${Number(order.totalEstimate).toLocaleString()}`}
