@@ -30,21 +30,24 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: text("role").notNull().default("technician"), // technician, manager, admin, super_admin
+  role: text("role").notNull().default("technician"),
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Mechanics table
+// Mechanics / Technicians table
 export const mechanics = pgTable("mechanics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   specialization: text("specialization").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  cdlClass: text("cdl_class"), // CDL Class A, B, C, or N/A
   hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   isAvailable: boolean("is_available").default(true).notNull(),
-  currentWorkload: integer("current_workload").default(0).notNull(),
-  maxWorkload: integer("max_workload").default(40).notNull(),
+  currentWorkload: integer("current_workload").default(0).notNull(), // active order count
+  maxWorkload: integer("max_workload").default(40).notNull(),        // max hours per period
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -59,7 +62,7 @@ export const customers = pgTable("customers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Vehicles table
+// Vehicles (fleet) table
 export const vehicles = pgTable("vehicles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   year: integer("year").notNull(),
@@ -74,7 +77,7 @@ export const vehicles = pgTable("vehicles", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Repair Orders table
+// Work Orders (Repair Orders) table
 export const repairOrders = pgTable("repair_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull().unique(),
@@ -82,9 +85,22 @@ export const repairOrders = pgTable("repair_orders", {
   customerId: varchar("customer_id").notNull().references(() => customers.id),
   mechanicId: varchar("mechanic_id").references(() => mechanics.id),
   inspectorId: varchar("inspector_id").notNull().references(() => users.id),
+
+  // Trucking-specific fields
+  serviceType: text("service_type"),         // engine, brakes, tires, DOT inspection, etc.
+  truckType: text("truck_type"),             // semi-truck, box truck, flatbed, tanker, etc.
+  trailerNumber: text("trailer_number"),      // trailer unit number if applicable
+  odometerIn: integer("odometer_in"),         // odometer reading at intake
+  odometerOut: integer("odometer_out"),       // odometer reading at delivery
+  dotInspectionRequired: boolean("dot_inspection_required").default(false),
+  scheduledDate: timestamp("scheduled_date"), // when work is scheduled to begin
+  completedDate: timestamp("completed_date"), // when work was completed
+  closedDate: timestamp("closed_date"),       // when order was closed/invoiced
+
   description: text("description").notNull(),
-  priority: text("priority").notNull().default("medium"),
-  status: text("status").notNull().default("pending"),
+  priority: text("priority").notNull().default("medium"), // low, medium, high, urgent
+  // Status lifecycle: open → in-progress → on-hold → completed → delivered → closed / abandoned
+  status: text("status").notNull().default("open"),
   estimatedHours: decimal("estimated_hours", { precision: 5, scale: 2 }),
   actualHours: decimal("actual_hours", { precision: 5, scale: 2 }).default("0"),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }),
@@ -109,7 +125,7 @@ export const inventoryParts = pgTable("inventory_parts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Parts Usage table (junction table for repair orders and parts)
+// Parts Usage table (junction table for work orders and parts)
 export const partsUsage = pgTable("parts_usage", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   repairOrderId: varchar("repair_order_id").notNull().references(() => repairOrders.id),
@@ -258,6 +274,51 @@ export const insertPartsUsageSchema = createInsertSchema(partsUsage).omit({
   id: true,
   createdAt: true,
 });
+
+// Status lifecycle constants
+export const WORK_ORDER_STATUSES = [
+  "open",
+  "in-progress",
+  "on-hold",
+  "completed",
+  "delivered",
+  "closed",
+  "abandoned",
+] as const;
+
+export const ACTIVE_STATUSES = ["open", "in-progress", "on-hold"] as const;
+
+export const SERVICE_TYPES = [
+  "Preventive Maintenance",
+  "Engine Repair",
+  "Brake Service",
+  "Tire Service",
+  "Electrical",
+  "Transmission",
+  "Suspension",
+  "Exhaust",
+  "Air Conditioning",
+  "DOT Inspection",
+  "Oil Change",
+  "Coolant Service",
+  "Fuel System",
+  "Body/Frame",
+  "Other",
+] as const;
+
+export const TRUCK_TYPES = [
+  "Semi-Truck (Day Cab)",
+  "Semi-Truck (Sleeper)",
+  "Box Truck",
+  "Flatbed",
+  "Tanker",
+  "Refrigerated (Reefer)",
+  "Dump Truck",
+  "Step Deck",
+  "Lowboy",
+  "Dry Van",
+  "Other",
+] as const;
 
 // Types
 export type Company = typeof companies.$inferSelect;

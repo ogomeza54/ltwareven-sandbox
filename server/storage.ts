@@ -10,7 +10,7 @@ import {
   type PartsUsage, type InsertPartsUsage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, sql, desc, asc } from "drizzle-orm";
+import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Company operations
@@ -34,6 +34,9 @@ export interface IStorage {
   updateMechanic(id: string, companyId: string, updates: Partial<Mechanic>): Promise<Mechanic>;
   deleteMechanic(id: string, companyId: string): Promise<void>;
   getAvailableMechanics(companyId: string): Promise<Mechanic[]>;
+  getMechanicsWithActiveHours(companyId: string): Promise<{ id: string; activeHours: number }[]>;
+  getMechanicsWithWorkload(companyId: string): Promise<any[]>;
+  recalculateMechanicWorkloads(companyId: string): Promise<void>;
   
   // Customer operations
   getCustomersByCompany(companyId: string): Promise<Customer[]>;
@@ -52,13 +55,14 @@ export interface IStorage {
   getVehiclesByCustomer(customerId: string, companyId: string): Promise<Vehicle[]>;
   
   // Repair Order operations
-  getRepairOrdersByCompany(companyId: string): Promise<RepairOrder[]>;
+  getRepairOrdersByCompany(companyId: string): Promise<any[]>;
   getRepairOrder(id: string, companyId: string): Promise<RepairOrder | undefined>;
   createRepairOrder(repairOrder: InsertRepairOrder): Promise<RepairOrder>;
   updateRepairOrder(id: string, companyId: string, updates: Partial<RepairOrder>): Promise<RepairOrder>;
   deleteRepairOrder(id: string, companyId: string): Promise<void>;
   getRepairOrdersByMechanic(mechanicId: string, companyId: string): Promise<RepairOrder[]>;
   getRepairOrdersByStatus(status: string, companyId: string): Promise<RepairOrder[]>;
+  getRepairOrdersByStatuses(statuses: string[], companyId: string): Promise<any[]>;
   
   // Inventory operations
   getInventoryPartsByCompany(companyId: string): Promise<InventoryPart[]>;
@@ -70,7 +74,7 @@ export interface IStorage {
   searchParts(query: string, companyId: string): Promise<InventoryPart[]>;
   
   // Parts Usage operations
-  getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<PartsUsage[]>;
+  getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<any[]>;
   createPartsUsage(partsUsage: InsertPartsUsage, companyId: string): Promise<PartsUsage>;
   deletePartsUsage(id: string, companyId: string): Promise<void>;
   
@@ -84,10 +88,11 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  // Company operations
+  // ── Company ──────────────────────────────────────────────────────────────────
   async getAllCompanies(): Promise<Company[]> {
     return await db.select().from(companies).orderBy(desc(companies.createdAt));
   }
+
   async getCompany(id: string): Promise<Company | undefined> {
     const [company] = await db.select().from(companies).where(eq(companies.id, id));
     return company || undefined;
@@ -98,7 +103,7 @@ export class DatabaseStorage implements IStorage {
     return company;
   }
 
-  // User operations
+  // ── Users ────────────────────────────────────────────────────────────────────
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user || undefined;
@@ -110,10 +115,7 @@ export class DatabaseStorage implements IStorage {
       .values(userData)
       .onConflictDoUpdate({
         target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
+        set: { ...userData, updatedAt: new Date() },
       })
       .returning();
     return user;
@@ -145,24 +147,13 @@ export class DatabaseStorage implements IStorage {
       .from(users)
       .leftJoin(companies, eq(users.companyId, companies.id))
       .orderBy(desc(users.createdAt));
-
-    return result.map(user => ({
-      ...user,
-      companyName: user.companyName || undefined
-    }));
+    return result.map(u => ({ ...u, companyName: u.companyName || undefined }));
   }
 
   async createUserPlaceholder(userData: { email: string; role: string; companyId: string }): Promise<User> {
     const [user] = await db
       .insert(users)
-      .values({
-        email: userData.email,
-        role: userData.role,
-        companyId: userData.companyId,
-        firstName: null,
-        lastName: null,
-        profileImageUrl: null,
-      })
+      .values({ email: userData.email, role: userData.role, companyId: userData.companyId })
       .returning();
     return user;
   }
@@ -176,9 +167,11 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  // Mechanic operations
+  // ── Mechanics ────────────────────────────────────────────────────────────────
   async getMechanicsByCompany(companyId: string): Promise<Mechanic[]> {
-    return await db.select().from(mechanics).where(eq(mechanics.companyId, companyId));
+    return await db.select().from(mechanics)
+      .where(eq(mechanics.companyId, companyId))
+      .orderBy(asc(mechanics.name));
   }
 
   async getMechanic(id: string, companyId: string): Promise<Mechanic | undefined> {
@@ -201,20 +194,99 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMechanic(id: string, companyId: string): Promise<void> {
-    await db.delete(mechanics)
-      .where(and(eq(mechanics.id, id), eq(mechanics.companyId, companyId)));
+    await db.delete(mechanics).where(and(eq(mechanics.id, id), eq(mechanics.companyId, companyId)));
   }
 
   async getAvailableMechanics(companyId: string): Promise<Mechanic[]> {
     return await db.select().from(mechanics)
-      .where(and(
-        eq(mechanics.companyId, companyId),
-        eq(mechanics.isAvailable, true)
-      ))
+      .where(and(eq(mechanics.companyId, companyId), eq(mechanics.isAvailable, true)))
       .orderBy(asc(mechanics.currentWorkload));
   }
 
-  // Customer operations
+  /**
+   * Returns mechanics with their real-time active estimated hours
+   * (sum of estimatedHours from orders with status: open, in-progress, on-hold)
+   */
+  async getMechanicsWithActiveHours(companyId: string): Promise<{ id: string; activeHours: number }[]> {
+    const result = await db
+      .select({
+        id: mechanics.id,
+        activeHours: sql<number>`COALESCE(SUM(CAST(${repairOrders.estimatedHours} AS numeric)), 0)`,
+      })
+      .from(mechanics)
+      .leftJoin(
+        repairOrders,
+        and(
+          eq(repairOrders.mechanicId, mechanics.id),
+          sql`${repairOrders.status} IN ('open', 'in-progress', 'on-hold')`
+        )
+      )
+      .where(eq(mechanics.companyId, companyId))
+      .groupBy(mechanics.id);
+
+    return result.map(r => ({ id: r.id, activeHours: Number(r.activeHours) }));
+  }
+
+  /**
+   * Returns all mechanics with comprehensive workload data for the load-balance view.
+   */
+  async getMechanicsWithWorkload(companyId: string): Promise<any[]> {
+    const mechanicsList = await this.getMechanicsByCompany(companyId);
+    const activeHoursData = await this.getMechanicsWithActiveHours(companyId);
+    const hoursMap = new Map(activeHoursData.map(m => [m.id, m.activeHours]));
+
+    // Get active order counts per mechanic
+    const orderCounts = await db
+      .select({
+        mechanicId: repairOrders.mechanicId,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(repairOrders)
+      .where(and(
+        eq(repairOrders.companyId, companyId),
+        sql`${repairOrders.status} IN ('open', 'in-progress', 'on-hold')`
+      ))
+      .groupBy(repairOrders.mechanicId);
+
+    const countMap = new Map(orderCounts.map(r => [r.mechanicId, Number(r.count)]));
+
+    return mechanicsList.map(m => ({
+      ...m,
+      activeOrderCount: countMap.get(m.id) ?? 0,
+      activeHours: hoursMap.get(m.id) ?? 0,
+      loadPercent: m.maxWorkload > 0
+        ? Math.min(100, Math.round(((hoursMap.get(m.id) ?? 0) / m.maxWorkload) * 100))
+        : 0,
+    }));
+  }
+
+  /**
+   * Recalculates currentWorkload (active order count) for all mechanics in a company.
+   */
+  async recalculateMechanicWorkloads(companyId: string): Promise<void> {
+    const orderCounts = await db
+      .select({
+        mechanicId: repairOrders.mechanicId,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(repairOrders)
+      .where(and(
+        eq(repairOrders.companyId, companyId),
+        sql`${repairOrders.status} IN ('open', 'in-progress', 'on-hold')`
+      ))
+      .groupBy(repairOrders.mechanicId);
+
+    const countMap = new Map(orderCounts.map(r => [r.mechanicId, Number(r.count)]));
+
+    const allMechanics = await this.getMechanicsByCompany(companyId);
+    for (const m of allMechanics) {
+      await db.update(mechanics)
+        .set({ currentWorkload: countMap.get(m.id) ?? 0 })
+        .where(eq(mechanics.id, m.id));
+    }
+  }
+
+  // ── Customers ────────────────────────────────────────────────────────────────
   async getCustomersByCompany(companyId: string): Promise<Customer[]> {
     return await db.select().from(customers).where(eq(customers.companyId, companyId));
   }
@@ -239,8 +311,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteCustomer(id: string, companyId: string): Promise<void> {
-    await db.delete(customers)
-      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
+    await db.delete(customers).where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
   }
 
   async getCustomerByPhone(phone: string, companyId: string): Promise<Customer | undefined> {
@@ -249,7 +320,7 @@ export class DatabaseStorage implements IStorage {
     return customer || undefined;
   }
 
-  // Vehicle operations
+  // ── Vehicles ─────────────────────────────────────────────────────────────────
   async getVehiclesByCompany(companyId: string): Promise<Vehicle[]> {
     return await db.select().from(vehicles).where(eq(vehicles.companyId, companyId));
   }
@@ -274,8 +345,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteVehicle(id: string, companyId: string): Promise<void> {
-    await db.delete(vehicles)
-      .where(and(eq(vehicles.id, id), eq(vehicles.companyId, companyId)));
+    await db.delete(vehicles).where(and(eq(vehicles.id, id), eq(vehicles.companyId, companyId)));
   }
 
   async getVehiclesByCustomer(customerId: string, companyId: string): Promise<Vehicle[]> {
@@ -283,7 +353,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(vehicles.customerId, customerId), eq(vehicles.companyId, companyId)));
   }
 
-  // Repair Order operations
+  // ── Repair Orders / Work Orders ───────────────────────────────────────────────
   async getRepairOrdersByCompany(companyId: string): Promise<any[]> {
     return await db.select({
       id: repairOrders.id,
@@ -291,6 +361,15 @@ export class DatabaseStorage implements IStorage {
       description: repairOrders.description,
       priority: repairOrders.priority,
       status: repairOrders.status,
+      serviceType: repairOrders.serviceType,
+      truckType: repairOrders.truckType,
+      trailerNumber: repairOrders.trailerNumber,
+      odometerIn: repairOrders.odometerIn,
+      odometerOut: repairOrders.odometerOut,
+      dotInspectionRequired: repairOrders.dotInspectionRequired,
+      scheduledDate: repairOrders.scheduledDate,
+      completedDate: repairOrders.completedDate,
+      closedDate: repairOrders.closedDate,
       estimatedHours: repairOrders.estimatedHours,
       actualHours: repairOrders.actualHours,
       laborRate: repairOrders.laborRate,
@@ -321,6 +400,7 @@ export class DatabaseStorage implements IStorage {
         name: mechanics.name,
         specialization: mechanics.specialization,
         hourlyRate: mechanics.hourlyRate,
+        phone: mechanics.phone,
       }
     })
     .from(repairOrders)
@@ -338,8 +418,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRepairOrder(insertRepairOrder: InsertRepairOrder): Promise<RepairOrder> {
-    const orderNumber = `RO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-    
+    const orderNumber = `WO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     const [order] = await db.insert(repairOrders)
       .values({ ...insertRepairOrder, orderNumber })
       .returning();
@@ -372,7 +451,25 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(repairOrders.createdAt));
   }
 
-  // Inventory operations
+  async getRepairOrdersByStatuses(statuses: string[], companyId: string): Promise<any[]> {
+    return await db.select({
+      id: repairOrders.id,
+      orderNumber: repairOrders.orderNumber,
+      mechanicId: repairOrders.mechanicId,
+      priority: repairOrders.priority,
+      status: repairOrders.status,
+      estimatedHours: repairOrders.estimatedHours,
+      serviceType: repairOrders.serviceType,
+    })
+    .from(repairOrders)
+    .where(and(
+      eq(repairOrders.companyId, companyId),
+      sql`${repairOrders.status} = ANY(ARRAY[${sql.join(statuses.map(s => sql`${s}`), sql`, `)}])`
+    ))
+    .orderBy(desc(repairOrders.createdAt));
+  }
+
+  // ── Inventory ────────────────────────────────────────────────────────────────
   async getInventoryPartsByCompany(companyId: string): Promise<InventoryPart[]> {
     return await db.select().from(inventoryParts)
       .where(eq(inventoryParts.companyId, companyId))
@@ -420,7 +517,7 @@ export class DatabaseStorage implements IStorage {
       .limit(10);
   }
 
-  // Parts Usage operations
+  // ── Parts Usage ───────────────────────────────────────────────────────────────
   async getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<any[]> {
     const order = await db.select().from(repairOrders)
       .where(and(eq(repairOrders.id, repairOrderId), eq(repairOrders.companyId, companyId)));
@@ -447,16 +544,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPartsUsage(insertPartsUsage: InsertPartsUsage, companyId: string): Promise<PartsUsage> {
+    // Verify the repair order belongs to this company
     const order = await db.select().from(repairOrders)
       .where(and(eq(repairOrders.id, insertPartsUsage.repairOrderId), eq(repairOrders.companyId, companyId)));
-    if (order.length === 0) throw new Error("Repair order not found");
+    if (order.length === 0) throw new Error("Work order not found");
     
     const [usage] = await db.insert(partsUsage).values(insertPartsUsage).returning();
     
+    // Deduct inventory
     await db.update(inventoryParts)
-      .set({
-        quantityInStock: sql`${inventoryParts.quantityInStock} - ${insertPartsUsage.quantity}`
-      })
+      .set({ quantityInStock: sql`${inventoryParts.quantityInStock} - ${insertPartsUsage.quantity}` })
       .where(and(eq(inventoryParts.id, insertPartsUsage.partId), eq(inventoryParts.companyId, companyId)));
     
     return usage;
@@ -467,23 +564,21 @@ export class DatabaseStorage implements IStorage {
       id: partsUsage.id,
       partId: partsUsage.partId,
       quantity: partsUsage.quantity,
-      repairOrderId: partsUsage.repairOrderId
     }).from(partsUsage)
       .innerJoin(repairOrders, eq(partsUsage.repairOrderId, repairOrders.id))
       .where(and(eq(partsUsage.id, id), eq(repairOrders.companyId, companyId)));
     
     if (usage) {
+      // Restore inventory
       await db.update(inventoryParts)
-        .set({
-          quantityInStock: sql`${inventoryParts.quantityInStock} + ${usage.quantity}`
-        })
+        .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${usage.quantity}` })
         .where(eq(inventoryParts.id, usage.partId));
       
       await db.delete(partsUsage).where(eq(partsUsage.id, id));
     }
   }
 
-  // Dashboard stats
+  // ── Dashboard Stats ────────────────────────────────────────────────────────────
   async getDashboardStats(companyId: string): Promise<{
     activeOrders: number;
     availableMechanics: number;
@@ -494,15 +589,12 @@ export class DatabaseStorage implements IStorage {
       .from(repairOrders)
       .where(and(
         eq(repairOrders.companyId, companyId),
-        sql`${repairOrders.status} IN ('pending', 'in-progress', 'waiting-parts')`
+        sql`${repairOrders.status} IN ('open', 'in-progress', 'on-hold')`
       ));
 
     const availableMechanicsResult = await db.select({ count: sql<number>`count(*)` })
       .from(mechanics)
-      .where(and(
-        eq(mechanics.companyId, companyId),
-        eq(mechanics.isAvailable, true)
-      ));
+      .where(and(eq(mechanics.companyId, companyId), eq(mechanics.isAvailable, true)));
 
     const lowStockResult = await db.select({ count: sql<number>`count(*)` })
       .from(inventoryParts)
@@ -514,12 +606,12 @@ export class DatabaseStorage implements IStorage {
     const monthlyRevenueResult = await db.select({ 
       total: sql<number>`COALESCE(SUM(${repairOrders.totalEstimate}), 0)` 
     })
-      .from(repairOrders)
-      .where(and(
-        eq(repairOrders.companyId, companyId),
-        eq(repairOrders.status, 'completed'),
-        sql`${repairOrders.updatedAt} >= date_trunc('month', CURRENT_DATE)`
-      ));
+    .from(repairOrders)
+    .where(and(
+      eq(repairOrders.companyId, companyId),
+      sql`${repairOrders.status} IN ('closed', 'delivered')`,
+      sql`${repairOrders.updatedAt} >= date_trunc('month', CURRENT_DATE)`
+    ));
 
     return {
       activeOrders: Number(activeOrdersResult[0]?.count || 0),

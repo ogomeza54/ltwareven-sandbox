@@ -5,7 +5,8 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
-  insertPartsUsageSchema 
+  insertPartsUsageSchema,
+  ACTIVE_STATUSES
 } from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
@@ -50,33 +51,102 @@ const withCompanyContext = async (req: any, res: any, next: any) => {
   }
 };
 
-// Auto-assignment algorithm
-async function autoAssignMechanic(companyId: string, priority: string = 'medium'): Promise<string | null> {
-  const availableMechanics = await storage.getAvailableMechanics(companyId);
+/**
+ * Load-balancing auto-assignment algorithm.
+ * Assigns the work order to the mechanic with the lowest current active workload
+ * (measured in estimated hours). For urgent/high priority, prefers senior/specialist.
+ */
+async function autoAssignMechanic(
+  companyId: string, 
+  priority: string = 'medium',
+  estimatedHours: number = 0
+): Promise<string | null> {
+  const available = await storage.getAvailableMechanics(companyId);
   
-  if (availableMechanics.length === 0) {
-    return null;
+  if (available.length === 0) return null;
+
+  // Get real-time workload for each available mechanic (sum of estimated hours on active orders)
+  const mechanicsWithLoad = await storage.getMechanicsWithActiveHours(companyId);
+  const loadMap = new Map(mechanicsWithLoad.map(m => [m.id, m.activeHours]));
+
+  // Enrich available mechanics with their real-time load
+  const enriched = available.map(m => ({
+    ...m,
+    activeHours: loadMap.get(m.id) ?? 0,
+    // Capacity remaining (maxWorkload treated as max hours target)
+    capacityRemaining: m.maxWorkload - (loadMap.get(m.id) ?? 0),
+  }));
+
+  // Filter out mechanics who are over-capacity (leave a small buffer for new job)
+  const withCapacity = enriched.filter(m => m.capacityRemaining >= 0);
+  const candidates = withCapacity.length > 0 ? withCapacity : enriched; // fallback to all if all over capacity
+
+  // Sort by active hours ascending (least busy first)
+  const sorted = [...candidates].sort((a, b) => a.activeHours - b.activeHours);
+
+  // For urgent/high priority, prefer specialists or senior technicians
+  if (priority === 'high' || priority === 'urgent') {
+    const specialists = sorted.filter(m => 
+      m.specialization.toLowerCase().includes('specialist') || 
+      m.specialization.toLowerCase().includes('senior') ||
+      m.specialization.toLowerCase().includes('lead')
+    );
+    if (specialists.length > 0) return specialists[0].id;
   }
 
-  // Sort by current workload (ascending) to assign to least busy mechanic
-  const sortedMechanics = availableMechanics.sort((a, b) => a.currentWorkload - b.currentWorkload);
-  
-  // For high priority jobs, prefer specialists if available
-  if (priority === 'high' || priority === 'urgent') {
-    const specialists = sortedMechanics.filter(m => 
-      m.specialization.toLowerCase().includes('specialist') || 
-      m.specialization.toLowerCase().includes('senior')
-    );
-    if (specialists.length > 0) {
-      return specialists[0].id;
+  return sorted[0].id;
+}
+
+/**
+ * Rebalance all active (open/in-progress) work orders across available mechanics.
+ * Algorithm: round-robin by least active hours after sorting orders by priority.
+ */
+async function rebalanceWorkOrders(companyId: string): Promise<{ reassigned: number }> {
+  const [activeOrders, available] = await Promise.all([
+    storage.getRepairOrdersByStatuses(['open', 'in-progress'], companyId),
+    storage.getAvailableMechanics(companyId),
+  ]);
+
+  if (available.length === 0 || activeOrders.length === 0) return { reassigned: 0 };
+
+  // Sort orders by priority (urgent first)
+  const priorityWeight = { urgent: 4, high: 3, medium: 2, low: 1 };
+  const sorted = [...activeOrders].sort((a, b) => 
+    (priorityWeight[b.priority as keyof typeof priorityWeight] || 1) - 
+    (priorityWeight[a.priority as keyof typeof priorityWeight] || 1)
+  );
+
+  // Track cumulative hours per mechanic during this rebalance
+  const hoursMap = new Map<string, number>(available.map(m => [m.id, 0]));
+  let reassigned = 0;
+
+  for (const order of sorted) {
+    // Pick mechanic with fewest assigned hours in this batch
+    let bestMechanic = available[0];
+    let minHours = hoursMap.get(available[0].id) ?? 0;
+    
+    for (const m of available) {
+      const h = hoursMap.get(m.id) ?? 0;
+      if (h < minHours) { minHours = h; bestMechanic = m; }
+    }
+
+    const estHours = Number(order.estimatedHours) || 2; // default 2h if not set
+    hoursMap.set(bestMechanic.id, (hoursMap.get(bestMechanic.id) ?? 0) + estHours);
+
+    // Only update if assignment changed
+    if (order.mechanicId !== bestMechanic.id) {
+      await storage.updateRepairOrder(order.id, companyId, { mechanicId: bestMechanic.id });
+      reassigned++;
     }
   }
 
-  return sortedMechanics[0].id;
+  // Recalculate workloads for all mechanics
+  await storage.recalculateMechanicWorkloads(companyId);
+
+  return { reassigned };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Auth middleware
   await setupAuth(app);
 
   // Auth routes
@@ -86,7 +156,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
       res.json(user);
     } catch (error) {
-      console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
     }
   });
@@ -101,33 +170,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Repair Orders
+  // ── Work Orders ──────────────────────────────────────────────────────────────
+
   app.get("/api/repair-orders", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const orders = await storage.getRepairOrdersByCompany(req.userContext.companyId);
       res.json(orders);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch repair orders" });
+      res.status(500).json({ message: "Failed to fetch work orders" });
     }
   });
 
   app.get("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const order = await storage.getRepairOrder(req.params.id, req.userContext.companyId);
-      if (!order) {
-        return res.status(404).json({ message: "Repair order not found" });
-      }
+      if (!order) return res.status(404).json({ message: "Work order not found" });
       res.json(order);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch repair order" });
+      res.status(500).json({ message: "Failed to fetch work order" });
     }
   });
 
+  // Create new work order via intake form (multipart form data)
   app.post("/api/repair-orders", isAuthenticated, withCompanyContext, upload.array('damagePhotos', 10), async (req: any, res) => {
     try {
       const body = req.body;
       
-      // Parse the request body
       const customerData = {
         name: body.customerName,
         phone: body.phoneNumber,
@@ -149,16 +217,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Find or create customer
       let customer = await storage.getCustomerByPhone(customerData.phone, req.userContext.companyId);
       if (!customer) {
-        const validatedCustomer = insertCustomerSchema.parse(customerData);
-        customer = await storage.createCustomer(validatedCustomer);
+        customer = await storage.createCustomer(insertCustomerSchema.parse(customerData));
       }
 
       // Create vehicle
-      const validatedVehicle = insertVehicleSchema.parse({
-        ...vehicleData,
-        customerId: customer.id
-      });
-      const vehicle = await storage.createVehicle(validatedVehicle);
+      const vehicle = await storage.createVehicle(
+        insertVehicleSchema.parse({ ...vehicleData, customerId: customer.id })
+      );
 
       // Handle file uploads
       const damagePhotos: string[] = [];
@@ -171,10 +236,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Auto-assign mechanic
-      const assignedMechanicId = await autoAssignMechanic(req.userContext.companyId, body.priority);
+      const estimatedHours = body.estimatedHours ? parseFloat(body.estimatedHours) : 0;
+      const assignedMechanicId = await autoAssignMechanic(req.userContext.companyId, body.priority, estimatedHours);
 
-      // Create repair order
       const repairOrderData = {
         vehicleId: vehicle.id,
         customerId: customer.id,
@@ -182,15 +246,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         inspectorId: req.userContext.userId,
         description: body.repairDescription,
         priority: body.priority || 'medium',
-        status: 'pending',
+        status: 'open',
+        serviceType: body.serviceType || null,
+        truckType: body.truckType || null,
+        trailerNumber: body.trailerNumber || null,
+        odometerIn: body.odometerIn ? parseInt(body.odometerIn) : null,
+        dotInspectionRequired: body.dotInspectionRequired === 'true',
+        scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+        estimatedHours: estimatedHours > 0 ? String(estimatedHours) : null,
+        laborRate: body.laborRate ? String(body.laborRate) : null,
+        totalEstimate: body.totalEstimate ? String(body.totalEstimate) : null,
         damagePhotos,
         companyId: req.userContext.companyId
       };
 
-      const validatedRepairOrder = insertRepairOrderSchema.parse(repairOrderData);
-      const repairOrder = await storage.createRepairOrder(validatedRepairOrder);
+      const validatedOrder = insertRepairOrderSchema.parse(repairOrderData);
+      const repairOrder = await storage.createRepairOrder(validatedOrder);
 
-      // Update mechanic workload
+      // Increment mechanic workload counter
       if (assignedMechanicId) {
         const mechanic = await storage.getMechanic(assignedMechanicId, req.userContext.companyId);
         if (mechanic) {
@@ -202,37 +275,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(201).json(repairOrder);
     } catch (error) {
-      console.error("Failed to create repair order:", error);
-      res.status(400).json({ message: "Failed to create repair order" });
+      console.error("Failed to create work order:", error);
+      res.status(400).json({ message: "Failed to create work order", error: (error as any).message });
     }
   });
 
   app.patch("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const { companyId, id, customerId, vehicleId, ...updates } = req.body;
+
+      // Get current order to detect status changes
+      const currentOrder = await storage.getRepairOrder(req.params.id, req.userContext.companyId);
+      if (!currentOrder) return res.status(404).json({ message: "Work order not found" });
+
+      // Handle status transitions that require timestamp updates
+      if (updates.status && updates.status !== currentOrder.status) {
+        const now = new Date();
+        if (updates.status === 'completed') updates.completedDate = now;
+        if (updates.status === 'closed' || updates.status === 'delivered') updates.closedDate = now;
+
+        // When closing/completing/abandoning, decrement mechanic workload
+        const closingStatuses = ['completed', 'delivered', 'closed', 'abandoned'];
+        const wasActive = ACTIVE_STATUSES.includes(currentOrder.status as any);
+        const isNowInactive = closingStatuses.includes(updates.status);
+
+        if (wasActive && isNowInactive && currentOrder.mechanicId) {
+          const mechanic = await storage.getMechanic(currentOrder.mechanicId, req.userContext.companyId);
+          if (mechanic && mechanic.currentWorkload > 0) {
+            await storage.updateMechanic(currentOrder.mechanicId, req.userContext.companyId, {
+              currentWorkload: mechanic.currentWorkload - 1
+            });
+          }
+        }
+
+        // When reopening (e.g. abandoned → open), increment workload back
+        const reopeningStatuses = ['open', 'in-progress'];
+        const wasInactive = closingStatuses.includes(currentOrder.status);
+        const isNowActive = reopeningStatuses.includes(updates.status);
+
+        if (wasInactive && isNowActive && currentOrder.mechanicId) {
+          const mechanic = await storage.getMechanic(currentOrder.mechanicId, req.userContext.companyId);
+          if (mechanic) {
+            await storage.updateMechanic(currentOrder.mechanicId, req.userContext.companyId, {
+              currentWorkload: mechanic.currentWorkload + 1
+            });
+          }
+        }
+      }
+
       const order = await storage.updateRepairOrder(req.params.id, req.userContext.companyId, updates);
       res.json(order);
     } catch (error) {
-      res.status(400).json({ message: "Failed to update repair order" });
+      console.error("Failed to update work order:", error);
+      res.status(400).json({ message: "Failed to update work order" });
     }
   });
 
   app.delete("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      // Decrement mechanic workload if order is active
+      const order = await storage.getRepairOrder(req.params.id, req.userContext.companyId);
+      if (order && order.mechanicId && ACTIVE_STATUSES.includes(order.status as any)) {
+        const mechanic = await storage.getMechanic(order.mechanicId, req.userContext.companyId);
+        if (mechanic && mechanic.currentWorkload > 0) {
+          await storage.updateMechanic(order.mechanicId, req.userContext.companyId, {
+            currentWorkload: mechanic.currentWorkload - 1
+          });
+        }
+      }
       await storage.deleteRepairOrder(req.params.id, req.userContext.companyId);
       res.status(204).send();
     } catch (error) {
-      res.status(400).json({ message: "Failed to delete repair order" });
+      res.status(400).json({ message: "Failed to delete work order" });
     }
   });
 
-  // Mechanics
+  // Rebalance work orders across mechanics
+  app.post("/api/repair-orders/rebalance", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const result = await rebalanceWorkOrders(req.userContext.companyId);
+      res.json({ message: `Rebalanced: ${result.reassigned} orders reassigned`, ...result });
+    } catch (error) {
+      console.error("Failed to rebalance:", error);
+      res.status(500).json({ message: "Failed to rebalance work orders" });
+    }
+  });
+
+  // ── Mechanics ────────────────────────────────────────────────────────────────
+
   app.get("/api/mechanics", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const mechanics = await storage.getMechanicsByCompany(req.userContext.companyId);
       res.json(mechanics);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch mechanics" });
+    }
+  });
+
+  // Mechanics with live workload (active orders + hours)
+  app.get("/api/mechanics/workload", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const workload = await storage.getMechanicsWithWorkload(req.userContext.companyId);
+      res.json(workload);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch mechanic workload" });
     }
   });
 
@@ -266,7 +412,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Customers
+  // ── Customers ────────────────────────────────────────────────────────────────
+
   app.get("/api/customers", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const customers = await storage.getCustomersByCompany(req.userContext.companyId);
@@ -279,9 +426,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const customer = await storage.getCustomer(req.params.id, req.userContext.companyId);
-      if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
-      }
+      if (!customer) return res.status(404).json({ message: "Customer not found" });
       res.json(customer);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch customer" });
@@ -318,7 +463,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Vehicles
+  // ── Vehicles ─────────────────────────────────────────────────────────────────
+
   app.get("/api/vehicles", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const vehicles = await storage.getVehiclesByCompany(req.userContext.companyId);
@@ -331,9 +477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const vehicle = await storage.getVehicle(req.params.id, req.userContext.companyId);
-      if (!vehicle) {
-        return res.status(404).json({ message: "Vehicle not found" });
-      }
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
       res.json(vehicle);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch vehicle" });
@@ -379,7 +523,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Inventory
+  // ── Inventory ────────────────────────────────────────────────────────────────
+
   app.get("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const parts = await storage.getInventoryPartsByCompany(req.userContext.companyId);
@@ -392,9 +537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/inventory/search", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const query = req.query.q as string;
-      if (!query) {
-        return res.json([]);
-      }
+      if (!query) return res.json([]);
       const parts = await storage.searchParts(query, req.userContext.companyId);
       res.json(parts);
     } catch (error) {
@@ -405,7 +548,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const partData = { ...req.body, companyId: req.userContext.companyId };
-      console.log("Creating inventory part with data:", partData);
       const validatedPart = insertInventoryPartSchema.parse(partData);
       const part = await storage.createInventoryPart(validatedPart);
       res.status(201).json(part);
@@ -434,7 +576,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Parts Usage
+  // ── Parts Usage ──────────────────────────────────────────────────────────────
+
   app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const partsUsage = await storage.getPartsUsageByRepairOrder(req.params.id, req.userContext.companyId);
@@ -455,15 +598,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const partsUsageData = {
-        ...req.body,
-        repairOrderId: req.params.id
-      };
+      const partsUsageData = { ...req.body, repairOrderId: req.params.id };
       const validatedPartsUsage = insertPartsUsageSchema.parse(partsUsageData);
       const partsUsage = await storage.createPartsUsage(validatedPartsUsage, req.userContext.companyId);
       res.status(201).json(partsUsage);
     } catch (error) {
-      res.status(400).json({ message: "Failed to add parts to repair order" });
+      res.status(400).json({ message: "Failed to add parts to work order" });
     }
   });
 
@@ -474,7 +614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(partsUsage);
     } catch (error) {
       console.error("Error adding parts usage:", error);
-      res.status(400).json({ message: "Failed to add parts to repair order" });
+      res.status(400).json({ message: "Failed to add parts to work order" });
     }
   });
 
@@ -487,21 +627,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Super Admin Routes
+  // ── Super Admin ──────────────────────────────────────────────────────────────
+
   const isSuperAdmin = async (req: any, res: any, next: any) => {
     if (!req.isAuthenticated() || !req.user?.claims?.sub) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    
     const user = await storage.getUser(req.user.claims.sub);
     if (!user || user.role !== 'super_admin') {
       return res.status(403).json({ message: "Forbidden: Super admin access required" });
     }
-    
     next();
   };
 
-  // Get all companies (super admin only)
   app.get("/api/admin/companies", isAuthenticated, isSuperAdmin, async (req: any, res) => {
     try {
       const companies = await storage.getAllCompanies();
@@ -511,7 +649,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create new company (super admin only)
   app.post("/api/admin/companies", isAuthenticated, isSuperAdmin, async (req: any, res) => {
     try {
       const { name, plan } = req.body;
@@ -522,7 +659,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all users (super admin only)
   app.get("/api/admin/users", isAuthenticated, isSuperAdmin, async (req: any, res) => {
     try {
       const users = await storage.getAllUsersWithCompany();
@@ -532,37 +668,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Assign admin to company (super admin only)
   app.post("/api/admin/assign-admin", isAuthenticated, isSuperAdmin, async (req: any, res) => {
     try {
       const { email, companyId } = req.body;
-      
-      // Check if user exists and update their role and company
       let user = await storage.getUserByEmail(email);
       if (!user) {
-        // Create a placeholder user that will be updated when they first log in
-        user = await storage.createUserPlaceholder({
-          email,
-          role: 'admin',
-          companyId
-        });
+        user = await storage.createUserPlaceholder({ email, role: 'admin', companyId });
       } else {
-        // Update existing user
         user = await storage.updateUserRole(user.id, 'admin', companyId);
       }
-      
       res.json(user);
     } catch (error) {
-      console.error('Failed to assign admin:', error);
       res.status(400).json({ message: "Failed to assign admin" });
     }
   });
 
-  // File serving for uploaded images
+  // File serving
   app.get("/api/uploads/:filename", (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(uploadsDir, filename);
-    
     if (fs.existsSync(filepath)) {
       res.sendFile(filepath);
     } else {
