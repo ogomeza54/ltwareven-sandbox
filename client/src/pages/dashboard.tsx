@@ -87,7 +87,7 @@ export default function Dashboard() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-slate-400">Available Drivers</p>
+                    <p className="text-sm font-medium text-slate-400">Available Technicians</p>
                     <p className="text-3xl font-bold text-white mt-1">
                       {statsLoading ? "—" : stats?.availableMechanics || 0}
                     </p>
