@@ -292,7 +292,7 @@ export default function RepairOrders() {
                       {mechanicsLoading ? (
                         <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">Loading...</td></tr>
                       ) : mechanicsWorkload.length === 0 ? (
-                        <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">No technicians found. Add technicians in the Drivers section.</td></tr>
+                        <tr><td colSpan={8} className="text-center py-12 text-muted-foreground">No technicians found. Add them in the Technicians section.</td></tr>
                       ) : (
                         mechanicsWorkload.map((m: any) => (
                           <tr key={m.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">

@@ -22,7 +22,7 @@ const navigation = [
   { name: "Job Intake", href: "/intake-form", icon: ClipboardList },
   { name: "Work Orders", href: "/repair-orders", icon: Wrench },
   { name: "Parts & Inventory", href: "/inventory", icon: Package },
-  { name: "Drivers", href: "/mechanics", icon: Users },
+  { name: "Technicians", href: "/mechanics", icon: Users },
   { name: "Clients", href: "/customers", icon: UserCircle },
   { name: "Fleet", href: "/vehicles", icon: Truck },
   { name: "Reports", href: "/reports", icon: BarChart3 },
