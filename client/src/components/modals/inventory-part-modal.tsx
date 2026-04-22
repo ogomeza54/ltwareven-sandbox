@@ -57,8 +57,8 @@ export default function InventoryPartModal({
         partNumber: data.partNumber || "",
         description: data.description || "",
         price: data.price || "0",
-        quantityInStock: data.quantityInStock ? parseInt(data.quantityInStock) : 0,
-        lowStockThreshold: data.lowStockThreshold ? parseInt(data.lowStockThreshold) : 5,
+        quantityInStock: Math.max(0, parseInt(data.quantityInStock || "0") || 0),
+        lowStockThreshold: Math.max(0, parseInt(data.lowStockThreshold || "5") || 5),
       };
       
       if (isEditing) {
