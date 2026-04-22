@@ -33,24 +33,8 @@ export default function Sidebar() {
   const { companyId } = useCompany();
   const { user } = useAuth();
   
-  const companyName = "Company Name";
-  const plan = "Fleet Operations";
-
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
-      {/* Company Header */}
-      <div className="p-4 border-b border-slate-800">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center">
-            <Truck className="text-white w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="font-semibold text-white text-sm">{companyName}</h2>
-            <p className="text-xs text-slate-500">{plan}</p>
-          </div>
-        </div>
-      </div>
-
       {/* Navigation */}
       <nav className="flex-1 p-3">
         <ul className="space-y-0.5">
