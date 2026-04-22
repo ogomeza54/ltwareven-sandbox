@@ -13,21 +13,12 @@ import { apiRequest } from "@/lib/queryClient";
 import { Package, DollarSign, Hash, AlertTriangle } from "lucide-react";
 
 const inventoryPartSchema = z.object({
-  name: z.string().min(1, "Part name is required"),
-  partNumber: z.string().min(1, "Part number is required"),
+  name: z.string().optional().or(z.literal("")),
+  partNumber: z.string().optional().or(z.literal("")),
   description: z.string().optional(),
-  price: z.string().min(1, "Price is required").refine(
-    (val) => !isNaN(parseFloat(val)) && parseFloat(val) > 0,
-    "Price must be a positive number"
-  ),
-  quantityInStock: z.string().min(1, "Quantity is required").refine(
-    (val) => !isNaN(parseInt(val)) && parseInt(val) >= 0,
-    "Quantity must be a non-negative number"
-  ),
-  lowStockThreshold: z.string().min(1, "Low stock threshold is required").refine(
-    (val) => !isNaN(parseInt(val)) && parseInt(val) >= 0,
-    "Threshold must be a non-negative number"
-  ),
+  price: z.string().optional().or(z.literal("")),
+  quantityInStock: z.string().optional().or(z.literal("")),
+  lowStockThreshold: z.string().optional().or(z.literal("")),
 });
 
 type InventoryPartFormData = z.infer<typeof inventoryPartSchema>;
@@ -62,10 +53,12 @@ export default function InventoryPartModal({
   const createPartMutation = useMutation({
     mutationFn: async (data: InventoryPartFormData) => {
       const partData = {
-        ...data,
-        price: data.price, // Keep as string since database expects decimal as string
-        quantityInStock: parseInt(data.quantityInStock),
-        lowStockThreshold: parseInt(data.lowStockThreshold),
+        name: data.name || "Unnamed Part",
+        partNumber: data.partNumber || "",
+        description: data.description || "",
+        price: data.price || "0",
+        quantityInStock: data.quantityInStock ? parseInt(data.quantityInStock) : 0,
+        lowStockThreshold: data.lowStockThreshold ? parseInt(data.lowStockThreshold) : 5,
       };
       
       if (isEditing) {
@@ -125,7 +118,7 @@ export default function InventoryPartModal({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Part Name *</FormLabel>
+                    <FormLabel>Part Name</FormLabel>
                     <FormControl>
                       <Input 
                         placeholder="e.g., Brake Pad Set"
@@ -144,7 +137,7 @@ export default function InventoryPartModal({
                   <FormItem>
                     <FormLabel className="flex items-center gap-1">
                       <Hash className="h-3 w-3" />
-                      Part Number *
+                      Part Number
                     </FormLabel>
                     <FormControl>
                       <Input 
@@ -184,7 +177,7 @@ export default function InventoryPartModal({
                   <FormItem>
                     <FormLabel className="flex items-center gap-1">
                       <DollarSign className="h-3 w-3" />
-                      Price *
+                      Price
                     </FormLabel>
                     <FormControl>
                       <Input 
@@ -205,7 +198,7 @@ export default function InventoryPartModal({
                 name="quantityInStock"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Quantity in Stock *</FormLabel>
+                    <FormLabel>Quantity in Stock</FormLabel>
                     <FormControl>
                       <Input 
                         type="number"
@@ -226,7 +219,7 @@ export default function InventoryPartModal({
                   <FormItem>
                     <FormLabel className="flex items-center gap-1">
                       <AlertTriangle className="h-3 w-3" />
-                      Low Stock Alert *
+                      Low Stock Alert
                     </FormLabel>
                     <FormControl>
                       <Input 
