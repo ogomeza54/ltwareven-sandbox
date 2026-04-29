@@ -111,6 +111,9 @@ export default function InventoryCountModal({
       });
       const data = await res.json();
       if (res.status === 409) {
+        if (data.pendingReview) {
+          throw new Error("A count session is waiting for admin review. You cannot start a new count until it is approved or rejected.");
+        }
         if (!data.sessionId) {
           throw new Error("A count session is already in progress. Please refresh and try again.");
         }
@@ -128,8 +131,8 @@ export default function InventoryCountModal({
       }
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
     },
-    onError: () => {
-      toast({ title: "Failed to start count", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: error.message || "Failed to start count", variant: "destructive" });
     },
   });
 

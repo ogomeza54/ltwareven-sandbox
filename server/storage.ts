@@ -845,7 +845,8 @@ export class DatabaseStorage implements IStorage {
 
   async getOpenCountSession(companyId: string): Promise<InventoryCountSession | undefined> {
     const [session] = await db.select().from(inventoryCountSessions)
-      .where(and(eq(inventoryCountSessions.companyId, companyId), eq(inventoryCountSessions.status, "draft")))
+      .where(and(eq(inventoryCountSessions.companyId, companyId), inArray(inventoryCountSessions.status, ["draft", "submitted"])))
+      .orderBy(sql`CASE WHEN ${inventoryCountSessions.status} = 'submitted' THEN 0 ELSE 1 END`)
       .limit(1);
     return session;
   }

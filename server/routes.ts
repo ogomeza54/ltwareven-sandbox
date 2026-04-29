@@ -908,6 +908,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const existing = await storage.getOpenCountSession(req.userContext.companyId);
       if (existing) {
+        if (existing.status === "submitted") {
+          return res.status(409).json({ message: "A count session is pending admin review. You cannot start a new count until it is approved or rejected.", pendingReview: true });
+        }
         return res.status(409).json({ message: "A draft count session already exists", sessionId: existing.id });
       }
       const rawScope = req.body?.scope;
