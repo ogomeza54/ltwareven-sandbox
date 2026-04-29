@@ -1,0 +1,220 @@
+Please implement the following critical changes to the shop/inventory workflow. These are high-priority and should be structured cleanly for future QuickBooks integration.
+
+1) Convert Inventory Intake into Invoice-Based Intake
+
+Goal: Inventory intake should behave like an invoice, not a single-item entry form.
+
+Requirements
+Allow multiple inventory line items to be added in a single intake transaction.
+Each intake record should support:
+Multiple parts/items
+Tax amount
+Delivery fee / freight fee
+Invoice total amount
+System should support reconciling/calculating line item subtotal + tax + delivery fee against the final invoice total.
+Show validation if totals do not match or are outside an acceptable tolerance.
+Store this intake as a structured record that can later map cleanly to QuickBooks bill/invoice syncing.
+Data Model Suggestion
+
+Create an inventory_intake header + inventory_intake_items child table pattern:
+
+inventory_intake
+vendor
+invoice_number
+invoice_date
+subtotal
+tax_amount
+delivery_fee
+total_amount
+reconciliation_status
+notes
+inventory_intake_items
+inventory_intake_id
+part/item
+qty
+unit_cost
+line_total
+2) Fix Inventory Intake Form Font Color
+
+Goal: Improve usability/readability.
+
+Requirements
+Change all light gray form text/labels/placeholders on the inventory intake form to black (or dark, accessible contrast equivalent).
+Verify across:
+labels
+input text
+placeholder text (if appropriate)
+dropdown text
+helper text if currently too light
+Acceptance Criteria
+Form is fully readable under standard lighting.
+Text meets basic accessibility contrast standards.
+3) Remove Unnecessary Client Info for Job Orders (When Servicing Internal Fleet)
+
+Goal: Simplify the job order intake form for internal fleet service.
+
+Requirements
+Remove or conditionally hide client information fields when the company is servicing its own fleet.
+Add a new required field:
+Customer Type (dropdown)
+Company Fleet
+Owner Operator
+Third Party
+Behavior
+Default selection = Company Fleet
+4) Add Tractor Database / Lookup by Tractor Number
+
+Goal: Minimize clicks for the shop manager.
+
+Requirements
+Create or use a database table for tractors/vehicles, keyed by tractor number.
+Add searchable lookup in the job order intake form:
+Search by truck/tractor number
+Default workflow should assume Company Fleet
+When a tractor number is selected/found:
+Auto-populate relevant vehicle details (examples depending on current schema):
+tractor number
+VIN
+make/model
+year
+mileage (if tracked)
+assigned driver (if tracked)
+unit status / notes (if tracked)
+UX Flow
+Job order form opens
+Customer Type defaults to Company Fleet
+User searches by truck number
+Matching tractor is selected
+Vehicle details auto-populate
+5) Conditional Fields Based on Customer Type
+
+Goal: Only show extra fields when needed.
+
+Requirements
+If Customer Type = Company Fleet
+Hide client/customer info fields that are not relevant
+Use tractor lookup flow only
+If Customer Type = Owner Operator or Third Party
+Show the client/customer information section
+Require the relevant fields (based on existing form structure)
+Keep those fields editable
+Acceptance Criteria
+Form dynamically updates when dropdown changes
+Validation rules follow visible fields only
+6) Add Invoice Creation Option for Owner Operator / Third Party
+
+Goal: Support billing workflow when servicing non-company units.
+
+Requirements
+If Customer Type = Owner Operator or Third Party, provide an option to:
+Create Invoice
+Invoice should be associated with:
+job order
+customer/client
+service/labor/parts used
+This should be designed to support future QuickBooks sync/export
+Suggested UX
+Checkbox or button:
+Create Invoice for Customer
+On save/close of job order:
+Either create draft invoice automatically
+Or route to invoice creation screen prefilled from job order
+7) Add Admin Inventory Adjustment Module
+
+Goal: Admin needs ability to make manual inventory corrections.
+
+Requirements
+Create an Inventory Adjustment module/page/action available to Admin
+Admin can:
+increase quantity
+decrease quantity
+adjust to exact count
+add reason/notes
+capture timestamp + user performing adjustment
+Suggested Fields
+item / SKU / part number
+current qty
+adjustment type:
+add
+subtract
+set exact count
+quantity change / new quantity
+reason
+reference / note
+Audit Trail
+Log all adjustments in an inventory_adjustments table:
+item_id
+previous_qty
+new_qty
+delta
+reason
+user_id
+created_at
+8) Add Shop Inventory Count Workflow
+
+Goal: Shop needs ability to perform physical inventory counts.
+
+Requirements
+Shop users need a separate workflow for Inventory Count / Cycle Count
+This should be different from raw admin adjustments where possible
+Suggested Workflow
+Start a count session
+Select items (or count all items in a category/location)
+Enter physical counts
+System compares:
+system qty vs counted qty
+Show variance
+Allow submission for reconciliation
+Option:
+shop submits count
+admin approves final adjustment (recommended)
+Suggested Tables
+inventory_count_sessions
+inventory_count_items
+9) Prepare for QuickBooks Integration (Critical)
+
+Goal: Design all new workflows so they can map cleanly into QuickBooks later.
+
+Requirements
+
+Review and structure new data with future sync in mind:
+
+Inventory intake (invoice-style)
+Vendor invoices / bills
+Customer invoices from job orders
+Tax handling
+Delivery/freight handling
+Reconciliation status
+Reference IDs / external sync IDs
+Implementation Notes
+
+Add placeholder fields where helpful:
+
+quickbooks_sync_status
+quickbooks_id
+quickbooks_last_synced_at
+external_reference_number
+
+Important: Do not hardcode assumptions that would block QuickBooks integration later.
+
+Priority Order (Recommended)
+Inventory intake as invoice-based intake
+Job order customer type + Company Fleet default
+Tractor lookup by tractor number + auto-populate
+Conditional form behavior for Company Fleet vs Owner Operator vs Third Party
+Invoice creation option for Owner Operator / Third Party
+Admin inventory adjustment module
+Shop inventory count workflow
+Inventory form font color fix
+QuickBooks-ready data model review across all above changes
+Acceptance Criteria Summary
+Inventory intake supports multi-line invoice entry with tax + delivery + total reconciliation
+Inventory intake form text is readable (black/dark text)
+Job order form uses Customer Type dropdown
+Company Fleet is default
+Tractor lookup by tractor number auto-fills data
+Client info only appears when Owner Operator or Third Party
+Non-company jobs can create invoices
+Admin can perform inventory adjustments
+Shop can perform inventory counts
+New tables/fields are built to support future QuickBooks integration
