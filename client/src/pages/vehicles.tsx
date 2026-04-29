@@ -572,6 +572,25 @@ export default function Vehicles() {
                 </Select>
               </div>
             </div>
+            <div>
+              <Label>Owner (optional for fleet units)</Label>
+              <Select
+                value={formData.customerId || "__none__"}
+                onValueChange={(value) => setFormData({ ...formData, customerId: value === "__none__" ? "" : value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No customer (company fleet)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No customer (company fleet) —</SelectItem>
+                  {customers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.name} - {customer.phone}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="edit-year">Year</Label>
