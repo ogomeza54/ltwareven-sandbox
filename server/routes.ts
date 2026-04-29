@@ -577,8 +577,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "At least one line item is required" });
       }
 
-      // Validate items
+      // Validate items — every line item must be linked to a catalog part
       for (const item of items) {
+        if (!item.partId) {
+          return res.status(400).json({ message: "Each line item must be linked to a catalog part (partId required)" });
+        }
         if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
           return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
         }
@@ -593,12 +596,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const diff = Math.abs(calculatedTotal - enteredTotal);
       const reconciliationStatus =
         enteredTotal === 0
-          ? "unmatched"
+          ? "warning"
           : diff <= 0.01
           ? "matched"
-          : diff <= 1.0
-          ? "warning"
-          : "unmatched";
+          : "warning";
 
       const header = {
         vendor: headerRaw.vendor.trim(),

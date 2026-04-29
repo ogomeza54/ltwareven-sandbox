@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { 
-  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle, Search, X, Link2, Unlink
+  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink
 } from "lucide-react";
 
 interface LineItem {
@@ -48,7 +48,7 @@ function sumLines(items: LineItem[]): number {
   return items.reduce((sum, item) => sum + parseFloat(item.lineTotal || "0"), 0);
 }
 
-type ReconciliationStatus = "matched" | "warning" | "unmatched" | "empty";
+type ReconciliationStatus = "matched" | "warning" | "empty";
 
 function getReconciliation(subtotal: number, tax: number, delivery: number, total: string): ReconciliationStatus {
   const entered = parseFloat(total);
@@ -56,8 +56,7 @@ function getReconciliation(subtotal: number, tax: number, delivery: number, tota
   const calculated = subtotal + tax + delivery;
   const diff = Math.abs(calculated - entered);
   if (diff <= 0.01) return "matched";
-  if (diff <= 1.0) return "warning";
-  return "unmatched";
+  return "warning";
 }
 
 export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInventoryModalProps) {
@@ -179,9 +178,18 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       toast({ title: "Vendor required", description: "Please enter a vendor name.", variant: "destructive" });
       return;
     }
-    const hasItems = items.some(i => i.partNameSnapshot.trim());
-    if (!hasItems) {
+    const filledItems = items.filter(i => i.partNameSnapshot.trim());
+    if (filledItems.length === 0) {
       toast({ title: "Items required", description: "Add at least one line item.", variant: "destructive" });
+      return;
+    }
+    const unlinked = filledItems.filter(i => !i.partId);
+    if (unlinked.length > 0) {
+      toast({
+        title: "All items must be linked to a catalog part",
+        description: `${unlinked.length} item(s) are not linked. Search and select each part from your catalog, or add new parts first.`,
+        variant: "destructive",
+      });
       return;
     }
     createMutation.mutate();
@@ -194,14 +202,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         <CheckCircle2 className="h-3 w-3" /> Totals Match
       </Badge>
     );
-    if (reconciliation === "warning") return (
-      <Badge className="bg-amber-500 text-white gap-1">
-        <AlertTriangle className="h-3 w-3" /> Small Variance
-      </Badge>
-    );
     return (
-      <Badge className="bg-red-600 text-white gap-1">
-        <XCircle className="h-3 w-3" /> Totals Mismatch
+      <Badge className="bg-amber-500 text-white gap-1">
+        <AlertTriangle className="h-3 w-3" /> Invoice Total Differs
       </Badge>
     );
   };
@@ -269,7 +272,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Search to link a part from your catalog — linked items automatically update stock. Unlinked rows are recorded on the invoice but won't change stock counts.
+              Each line item must be linked to a part in your catalog — this ensures stock quantities are updated automatically when you receive. Use "Add Part" on the inventory page first if a part isn't in your catalog yet.
             </p>
 
             <div className="border rounded-lg overflow-hidden">
@@ -443,8 +446,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </div>
             )}
 
-            {reconciliation === "unmatched" && totalAmount && (
-              <p className="text-right text-xs text-red-500">
+            {reconciliation === "warning" && totalAmount && (
+              <p className="text-right text-xs text-amber-500">
                 Difference: ${Math.abs(calculatedTotal - parseFloat(totalAmount || "0")).toFixed(2)}
               </p>
             )}

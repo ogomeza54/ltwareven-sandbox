@@ -102,7 +102,7 @@ export default function InventoryPartModal({
             <Package className="h-5 w-5 text-primary" />
             {isEditing ? 'Edit Inventory Part' : 'Add New Inventory Part'}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-foreground/70">
             {isEditing 
               ? 'Update the details of this inventory part'
               : 'Enter the details for the new inventory part'
