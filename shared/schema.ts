@@ -393,6 +393,7 @@ export const inventoryAdjustments = pgTable("inventory_adjustments", {
   adjustmentType: text("adjustment_type").notNull(), // add | subtract | set
   reason: text("reason").notNull(),
   referenceNote: text("reference_note"),
+  countSessionId: varchar("count_session_id").references(() => inventoryCountSessions.id),
   userId: varchar("user_id").notNull().references(() => users.id),
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -410,6 +411,10 @@ export const inventoryAdjustmentsRelations = relations(inventoryAdjustments, ({ 
   company: one(companies, {
     fields: [inventoryAdjustments.companyId],
     references: [companies.id],
+  }),
+  countSession: one(inventoryCountSessions, {
+    fields: [inventoryAdjustments.countSessionId],
+    references: [inventoryCountSessions.id],
   }),
 }));
 
@@ -449,6 +454,7 @@ export const inventoryCountSessionsRelations = relations(inventoryCountSessions,
   startedBy: one(users, { fields: [inventoryCountSessions.startedByUserId], references: [users.id] }),
   reviewedBy: one(users, { fields: [inventoryCountSessions.reviewedByUserId], references: [users.id] }),
   items: many(inventoryCountItems),
+  adjustments: many(inventoryAdjustments),
 }));
 
 export const inventoryCountItemsRelations = relations(inventoryCountItems, ({ one }) => ({

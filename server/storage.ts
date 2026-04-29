@@ -107,6 +107,7 @@ export interface IStorage {
   }): Promise<InventoryAdjustment>;
   getInventoryAdjustmentsByCompany(companyId: string): Promise<any[]>;
   getAllInventoryAdjustments(): Promise<any[]>;
+  getAdjustmentsByCountSession(sessionId: string, companyId: string): Promise<any[]>;
 
   // Inventory Count Session operations
   createCountSession(companyId: string, userId: string, scope?: "all" | "low_stock" | "category", categoryFilter?: string | null): Promise<InventoryCountSession>;
@@ -772,6 +773,7 @@ export class DatabaseStorage implements IStorage {
       adjustmentType: inventoryAdjustments.adjustmentType,
       reason: inventoryAdjustments.reason,
       referenceNote: inventoryAdjustments.referenceNote,
+      countSessionId: inventoryAdjustments.countSessionId,
       userId: inventoryAdjustments.userId,
       createdAt: inventoryAdjustments.createdAt,
       partName: inventoryParts.name,
@@ -795,6 +797,7 @@ export class DatabaseStorage implements IStorage {
       adjustmentType: inventoryAdjustments.adjustmentType,
       reason: inventoryAdjustments.reason,
       referenceNote: inventoryAdjustments.referenceNote,
+      countSessionId: inventoryAdjustments.countSessionId,
       userId: inventoryAdjustments.userId,
       companyId: inventoryAdjustments.companyId,
       createdAt: inventoryAdjustments.createdAt,
@@ -805,6 +808,28 @@ export class DatabaseStorage implements IStorage {
     .from(inventoryAdjustments)
     .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
     .leftJoin(users, eq(inventoryAdjustments.userId, users.id))
+    .orderBy(desc(inventoryAdjustments.createdAt));
+  }
+
+  async getAdjustmentsByCountSession(sessionId: string, companyId: string): Promise<any[]> {
+    return await db.select({
+      id: inventoryAdjustments.id,
+      partId: inventoryAdjustments.partId,
+      previousQty: inventoryAdjustments.previousQty,
+      newQty: inventoryAdjustments.newQty,
+      delta: inventoryAdjustments.delta,
+      adjustmentType: inventoryAdjustments.adjustmentType,
+      reason: inventoryAdjustments.reason,
+      createdAt: inventoryAdjustments.createdAt,
+      partName: inventoryParts.name,
+      partNumber: inventoryParts.partNumber,
+    })
+    .from(inventoryAdjustments)
+    .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
+    .where(and(
+      eq(inventoryAdjustments.countSessionId, sessionId),
+      eq(inventoryAdjustments.companyId, companyId),
+    ))
     .orderBy(desc(inventoryAdjustments.createdAt));
   }
 
@@ -996,8 +1021,9 @@ export class DatabaseStorage implements IStorage {
           newQty,
           delta,
           adjustmentType,
-          reason: `Physical count #${id.slice(0, 8)} — variance correction`,
+          reason: `Physical count — variance correction`,
           referenceNote: `Inventory count session approved`,
+          countSessionId: id,
           userId: reviewedByUserId,
           companyId,
         });

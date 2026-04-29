@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   ClipboardList, CheckCircle2, XCircle, ArrowUp, ArrowDown, Minus, Save, Send,
-  AlertTriangle, Package,
+  AlertTriangle, Package, SlidersHorizontal,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -65,6 +65,16 @@ export default function InventoryCountModal({
       return res.json();
     },
     enabled: !!activeSessionId && open,
+  });
+
+  const { data: sessionAdjustments = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/count-sessions", activeSessionId, "adjustments"],
+    queryFn: async () => {
+      const res = await fetch(`/api/inventory/count-sessions/${activeSessionId}/adjustments`);
+      if (!res.ok) throw new Error("Failed to load adjustments");
+      return res.json();
+    },
+    enabled: !!activeSessionId && open && session?.status === "approved",
   });
 
   useEffect(() => {
@@ -428,6 +438,54 @@ export default function InventoryCountModal({
                     rows={2}
                     className="resize-none"
                   />
+                </div>
+              )}
+
+              {/* Adjustments created from this session (approved view) */}
+              {isReadOnly && session.status === "approved" && (
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Adjustments Applied
+                  </div>
+                  {sessionAdjustments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground px-1">No stock adjustments were applied (all variances were zero).</p>
+                  ) : (
+                    <div className="rounded-lg border border-slate-700 overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-700 bg-slate-800/50">
+                            <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Part</th>
+                            <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Before</th>
+                            <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">After</th>
+                            <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionAdjustments.map((adj: any, i: number) => (
+                            <tr key={adj.id} className={`border-b border-slate-800 ${i % 2 === 0 ? "" : "bg-slate-900/30"}`}>
+                              <td className="px-4 py-2.5">
+                                <div className="font-medium">{adj.partName}</div>
+                                {adj.partNumber && (
+                                  <div className="text-xs text-muted-foreground">#{adj.partNumber}</div>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{adj.previousQty}</td>
+                              <td className="px-4 py-2.5 text-right font-mono font-semibold">{adj.newQty}</td>
+                              <td className="px-4 py-2.5 text-right">
+                                <span className={`flex items-center justify-end gap-1 font-mono font-medium ${
+                                  adj.delta > 0 ? "text-green-400" : adj.delta < 0 ? "text-red-400" : "text-muted-foreground"
+                                }`}>
+                                  {adj.delta > 0 ? <ArrowUp className="h-3 w-3" /> : adj.delta < 0 ? <ArrowDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+                                  {adj.delta > 0 ? `+${adj.delta}` : adj.delta}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

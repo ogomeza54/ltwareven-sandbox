@@ -645,9 +645,18 @@ export default function Inventory() {
                                 </span>
                               </div>
                             </td>
-                            <td className="px-4 py-3 max-w-[180px]">
+                            <td className="px-4 py-3 max-w-[200px]">
                               <div className="truncate" title={adj.reason}>{adj.reason}</div>
-                              {adj.referenceNote && (
+                              {adj.countSessionId && (
+                                <button
+                                  className="text-xs text-amber-400 hover:text-amber-300 hover:underline mt-0.5 flex items-center gap-1"
+                                  onClick={() => handleOpenCountSession({ id: adj.countSessionId })}
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  Source: Count Session #{adj.countSessionId.slice(0, 8)}
+                                </button>
+                              )}
+                              {!adj.countSessionId && adj.referenceNote && (
                                 <div className="text-xs text-muted-foreground truncate" title={adj.referenceNote}>
                                   Ref: {adj.referenceNote}
                                 </div>

@@ -962,6 +962,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/inventory/count-sessions/:id/adjustments", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const adjustments = await storage.getAdjustmentsByCountSession(req.params.id, req.userContext.companyId);
+      res.json(adjustments);
+    } catch (error) {
+      console.error("Failed to fetch session adjustments:", error);
+      res.status(500).json({ message: "Failed to fetch session adjustments" });
+    }
+  });
+
   // ── Parts Usage ──────────────────────────────────────────────────────────────
 
   app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {
