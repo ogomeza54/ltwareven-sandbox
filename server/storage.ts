@@ -1,5 +1,6 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
+  inventoryIntakes, inventoryIntakeItems,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -7,7 +8,9 @@ import {
   type Vehicle, type InsertVehicle,
   type RepairOrder, type InsertRepairOrder,
   type InventoryPart, type InsertInventoryPart,
-  type PartsUsage, type InsertPartsUsage
+  type PartsUsage, type InsertPartsUsage,
+  type InventoryIntake, type InsertInventoryIntake,
+  type InventoryIntakeItem, type InsertInventoryIntakeItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -77,6 +80,16 @@ export interface IStorage {
   getPartsUsageByRepairOrder(repairOrderId: string, companyId: string): Promise<any[]>;
   createPartsUsage(partsUsage: InsertPartsUsage, companyId: string): Promise<PartsUsage>;
   deletePartsUsage(id: string, companyId: string): Promise<void>;
+
+  // Inventory Intake operations
+  getInventoryIntakesByCompany(companyId: string): Promise<any[]>;
+  getInventoryIntake(id: string, companyId: string): Promise<any | undefined>;
+  createInventoryIntake(
+    intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string }>,
+    companyId: string,
+    userId: string
+  ): Promise<InventoryIntake>;
   
   // Dashboard stats
   getDashboardStats(companyId: string): Promise<{
@@ -576,6 +589,74 @@ export class DatabaseStorage implements IStorage {
       
       await db.delete(partsUsage).where(eq(partsUsage.id, id));
     }
+  }
+
+  // ── Inventory Intakes ─────────────────────────────────────────────────────────
+  async getInventoryIntakesByCompany(companyId: string): Promise<any[]> {
+    const intakes = await db.select().from(inventoryIntakes)
+      .where(eq(inventoryIntakes.companyId, companyId))
+      .orderBy(desc(inventoryIntakes.createdAt));
+
+    // Get item counts per intake
+    const counts = await db.select({
+      intakeId: inventoryIntakeItems.inventoryIntakeId,
+      itemCount: sql<number>`COUNT(*)`,
+    }).from(inventoryIntakeItems)
+      .where(eq(inventoryIntakeItems.companyId, companyId))
+      .groupBy(inventoryIntakeItems.inventoryIntakeId);
+
+    const countMap = new Map(counts.map(c => [c.intakeId, Number(c.itemCount)]));
+    return intakes.map(i => ({ ...i, itemCount: countMap.get(i.id) ?? 0 }));
+  }
+
+  async getInventoryIntake(id: string, companyId: string): Promise<any | undefined> {
+    const [intake] = await db.select().from(inventoryIntakes)
+      .where(and(eq(inventoryIntakes.id, id), eq(inventoryIntakes.companyId, companyId)));
+    if (!intake) return undefined;
+
+    const items = await db.select().from(inventoryIntakeItems)
+      .where(eq(inventoryIntakeItems.inventoryIntakeId, id))
+      .orderBy(asc(inventoryIntakeItems.createdAt));
+
+    return { ...intake, items };
+  }
+
+  async createInventoryIntake(
+    intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string }>,
+    companyId: string,
+    userId: string
+  ): Promise<InventoryIntake> {
+    const [intake] = await db.insert(inventoryIntakes)
+      .values({ ...intakeHeader, companyId, createdByUserId: userId })
+      .returning();
+
+    // Insert line items
+    if (items.length > 0) {
+      await db.insert(inventoryIntakeItems).values(
+        items.map(item => ({
+          inventoryIntakeId: intake.id,
+          partId: item.partId || null,
+          partNameSnapshot: item.partNameSnapshot,
+          partNumberSnapshot: item.partNumberSnapshot,
+          qty: item.qty,
+          unitCost: item.unitCost,
+          lineTotal: item.lineTotal,
+          companyId,
+        }))
+      );
+
+      // Increment part quantities for linked parts
+      for (const item of items) {
+        if (item.partId) {
+          await db.update(inventoryParts)
+            .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}` })
+            .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
+        }
+      }
+    }
+
+    return intake;
   }
 
   // ── Dashboard Stats ────────────────────────────────────────────────────────────

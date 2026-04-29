@@ -545,6 +545,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Inventory Intakes (invoice-style receiving) ───────────────────────────────
+
+  app.get("/api/inventory/intakes", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const intakes = await storage.getInventoryIntakesByCompany(req.userContext.companyId);
+      res.json(intakes);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch inventory intakes" });
+    }
+  });
+
+  app.get("/api/inventory/intakes/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const intake = await storage.getInventoryIntake(req.params.id, req.userContext.companyId);
+      if (!intake) return res.status(404).json({ message: "Intake not found" });
+      res.json(intake);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch intake" });
+    }
+  });
+
+  app.post("/api/inventory/intakes", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { items, ...headerRaw } = req.body;
+
+      if (!headerRaw.vendor || !headerRaw.vendor.trim()) {
+        return res.status(400).json({ message: "Vendor is required" });
+      }
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "At least one line item is required" });
+      }
+
+      // Validate items
+      for (const item of items) {
+        if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
+          return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
+        }
+      }
+
+      // Calculate reconciliation status
+      const calculatedTotal =
+        Number(headerRaw.subtotal || 0) +
+        Number(headerRaw.taxAmount || 0) +
+        Number(headerRaw.deliveryFee || 0);
+      const enteredTotal = Number(headerRaw.totalAmount || 0);
+      const diff = Math.abs(calculatedTotal - enteredTotal);
+      const reconciliationStatus =
+        enteredTotal === 0
+          ? "unmatched"
+          : diff <= 0.01
+          ? "matched"
+          : diff <= 1.0
+          ? "warning"
+          : "unmatched";
+
+      const header = {
+        vendor: headerRaw.vendor.trim(),
+        invoiceNumber: headerRaw.invoiceNumber || null,
+        invoiceDate: headerRaw.invoiceDate ? new Date(headerRaw.invoiceDate) : null,
+        subtotal: String(headerRaw.subtotal || "0"),
+        taxAmount: String(headerRaw.taxAmount || "0"),
+        deliveryFee: String(headerRaw.deliveryFee || "0"),
+        totalAmount: String(headerRaw.totalAmount || "0"),
+        reconciliationStatus,
+        notes: headerRaw.notes || null,
+        quickbooksSyncStatus: "not_synced",
+        quickbooksId: null,
+        quickbooksLastSyncedAt: null,
+        externalReferenceNumber: headerRaw.externalReferenceNumber || null,
+      };
+
+      const intake = await storage.createInventoryIntake(
+        header,
+        items,
+        req.userContext.companyId,
+        req.userContext.userId
+      );
+
+      res.status(201).json(intake);
+    } catch (error) {
+      console.error("Failed to create inventory intake:", error);
+      res.status(400).json({ message: "Failed to create inventory intake", error: (error as any).message });
+    }
+  });
+
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const partData = { ...req.body, companyId: req.userContext.companyId };

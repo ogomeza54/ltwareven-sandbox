@@ -125,6 +125,43 @@ export const inventoryParts = pgTable("inventory_parts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Inventory Intake (invoice-style receiving) — header record
+export const inventoryIntakes = pgTable("inventory_intakes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vendor: text("vendor").notNull(),
+  invoiceNumber: text("invoice_number"),
+  invoiceDate: timestamp("invoice_date"),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  deliveryFee: decimal("delivery_fee", { precision: 12, scale: 2 }).notNull().default("0"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  // "matched" | "warning" | "unmatched"
+  reconciliationStatus: text("reconciliation_status").notNull().default("unmatched"),
+  notes: text("notes"),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id),
+  // QuickBooks integration placeholders
+  quickbooksSyncStatus: text("quickbooks_sync_status").default("not_synced"),
+  quickbooksId: text("quickbooks_id"),
+  quickbooksLastSyncedAt: timestamp("quickbooks_last_synced_at"),
+  externalReferenceNumber: text("external_reference_number"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Inventory Intake Items — line items for each intake
+export const inventoryIntakeItems = pgTable("inventory_intake_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  inventoryIntakeId: varchar("inventory_intake_id").notNull().references(() => inventoryIntakes.id),
+  partId: varchar("part_id").references(() => inventoryParts.id),
+  partNameSnapshot: text("part_name_snapshot").notNull(),
+  partNumberSnapshot: text("part_number_snapshot").notNull().default(""),
+  qty: integer("qty").notNull(),
+  unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  lineTotal: decimal("line_total", { precision: 12, scale: 2 }).notNull(),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Parts Usage table (junction table for work orders and parts)
 export const partsUsage = pgTable("parts_usage", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -143,6 +180,7 @@ export const companiesRelations = relations(companies, ({ many }) => ({
   vehicles: many(vehicles),
   repairOrders: many(repairOrders),
   inventoryParts: many(inventoryParts),
+  inventoryIntakes: many(inventoryIntakes),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -212,6 +250,34 @@ export const inventoryPartsRelations = relations(inventoryParts, ({ one, many })
     references: [companies.id],
   }),
   usage: many(partsUsage),
+  intakeItems: many(inventoryIntakeItems),
+}));
+
+export const inventoryIntakesRelations = relations(inventoryIntakes, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [inventoryIntakes.companyId],
+    references: [companies.id],
+  }),
+  createdBy: one(users, {
+    fields: [inventoryIntakes.createdByUserId],
+    references: [users.id],
+  }),
+  items: many(inventoryIntakeItems),
+}));
+
+export const inventoryIntakeItemsRelations = relations(inventoryIntakeItems, ({ one }) => ({
+  intake: one(inventoryIntakes, {
+    fields: [inventoryIntakeItems.inventoryIntakeId],
+    references: [inventoryIntakes.id],
+  }),
+  part: one(inventoryParts, {
+    fields: [inventoryIntakeItems.partId],
+    references: [inventoryParts.id],
+  }),
+  company: one(companies, {
+    fields: [inventoryIntakeItems.companyId],
+    references: [companies.id],
+  }),
 }));
 
 export const partsUsageRelations = relations(partsUsage, ({ one }) => ({
@@ -271,6 +337,16 @@ export const insertInventoryPartSchema = createInsertSchema(inventoryParts).omit
 });
 
 export const insertPartsUsageSchema = createInsertSchema(partsUsage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertInventoryIntakeSchema = createInsertSchema(inventoryIntakes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertInventoryIntakeItemSchema = createInsertSchema(inventoryIntakeItems).omit({
   id: true,
   createdAt: true,
 });
@@ -345,3 +421,9 @@ export type InsertInventoryPart = z.infer<typeof insertInventoryPartSchema>;
 
 export type PartsUsage = typeof partsUsage.$inferSelect;
 export type InsertPartsUsage = z.infer<typeof insertPartsUsageSchema>;
+
+export type InventoryIntake = typeof inventoryIntakes.$inferSelect;
+export type InsertInventoryIntake = z.infer<typeof insertInventoryIntakeSchema>;
+
+export type InventoryIntakeItem = typeof inventoryIntakeItems.$inferSelect;
+export type InsertInventoryIntakeItem = z.infer<typeof insertInventoryIntakeItemSchema>;
