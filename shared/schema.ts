@@ -126,6 +126,7 @@ export const inventoryParts = pgTable("inventory_parts", {
   name: text("name").notNull(),
   partNumber: text("part_number").notNull(),
   description: text("description"),
+  category: text("category"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   quantityInStock: integer("quantity_in_stock").notNull().default(0),
   lowStockThreshold: integer("low_stock_threshold").notNull().default(5),

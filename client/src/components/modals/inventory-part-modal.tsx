@@ -15,6 +15,7 @@ import { Package, DollarSign, Hash, AlertTriangle } from "lucide-react";
 const inventoryPartSchema = z.object({
   name: z.string().optional().or(z.literal("")),
   partNumber: z.string().optional().or(z.literal("")),
+  category: z.string().optional(),
   description: z.string().optional(),
   price: z.string().optional().or(z.literal("")),
   quantityInStock: z.string().optional().or(z.literal("")),
@@ -43,6 +44,7 @@ export default function InventoryPartModal({
     defaultValues: {
       name: part?.name || "",
       partNumber: part?.partNumber || "",
+      category: part?.category || "",
       description: part?.description || "",
       price: part?.price?.toString() || "",
       quantityInStock: part?.quantityInStock?.toString() || "0",
@@ -55,6 +57,7 @@ export default function InventoryPartModal({
       const partData = {
         name: data.name || "Unnamed Part",
         partNumber: data.partNumber || "",
+        category: data.category?.trim() || null,
         description: data.description || "",
         price: data.price || "0",
         quantityInStock: Math.max(0, parseInt(data.quantityInStock || "0") || 0),
@@ -152,6 +155,24 @@ export default function InventoryPartModal({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="category"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-foreground">Category</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g., Brakes, Engine, Electrical"
+                      className="text-foreground placeholder:text-foreground/50"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

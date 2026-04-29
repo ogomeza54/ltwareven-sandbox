@@ -109,7 +109,7 @@ export interface IStorage {
   getAllInventoryAdjustments(): Promise<any[]>;
 
   // Inventory Count Session operations
-  createCountSession(companyId: string, userId: string, scope?: "all" | "low_stock"): Promise<InventoryCountSession>;
+  createCountSession(companyId: string, userId: string, scope?: "all" | "low_stock" | "category", categoryFilter?: string | null): Promise<InventoryCountSession>;
   getCountSessionsByCompany(companyId: string): Promise<any[]>;
   getCountSession(id: string, companyId: string): Promise<any | undefined>;
   updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void>;
@@ -810,7 +810,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── Inventory Count Sessions ──────────────────────────────────────────────────
 
-  async createCountSession(companyId: string, userId: string, scope: "all" | "low_stock" = "all"): Promise<InventoryCountSession> {
+  async createCountSession(companyId: string, userId: string, scope: "all" | "low_stock" | "category" = "all", categoryFilter?: string | null): Promise<InventoryCountSession> {
     const [session] = await db.insert(inventoryCountSessions).values({
       companyId,
       status: "draft",
@@ -818,9 +818,12 @@ export class DatabaseStorage implements IStorage {
     }).returning();
 
     const allParts = await this.getInventoryPartsByCompany(companyId);
-    const parts = scope === "low_stock"
-      ? allParts.filter(p => p.quantityInStock <= p.lowStockThreshold)
-      : allParts;
+    let parts = allParts;
+    if (scope === "low_stock") {
+      parts = allParts.filter(p => p.quantityInStock <= p.lowStockThreshold);
+    } else if (scope === "category" && categoryFilter) {
+      parts = allParts.filter(p => p.category && p.category.toLowerCase() === categoryFilter.toLowerCase());
+    }
 
     if (parts.length > 0) {
       await db.insert(inventoryCountItems).values(

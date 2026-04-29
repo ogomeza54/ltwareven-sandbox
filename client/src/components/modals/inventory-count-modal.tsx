@@ -37,14 +37,25 @@ export default function InventoryCountModal({
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessionId ?? null);
   const [localCounts, setLocalCounts] = useState<Record<string, string>>({});
   const [adminNotes, setAdminNotes] = useState("");
-  const [scope, setScope] = useState<"all" | "low_stock">("all");
+  const [scope, setScope] = useState<"all" | "low_stock" | "category">("all");
+  const [categoryFilter, setCategoryFilter] = useState("");
 
   useEffect(() => {
     setActiveSessionId(sessionId ?? null);
     setLocalCounts({});
     setAdminNotes("");
     setScope("all");
+    setCategoryFilter("");
   }, [sessionId, open]);
+
+  const { data: allParts = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory"],
+    enabled: !activeSessionId && open,
+  });
+
+  const availableCategories = Array.from(new Set(
+    allParts.map((p: any) => p.category).filter(Boolean)
+  )).sort();
 
   const { data: session, isLoading: sessionLoading } = useQuery<any>({
     queryKey: ["/api/inventory/count-sessions", activeSessionId],
@@ -76,7 +87,11 @@ export default function InventoryCountModal({
 
   const startCountMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/inventory/count-sessions", { scope });
+      const body: any = { scope };
+      if (scope === "category" && categoryFilter.trim()) {
+        body.categoryFilter = categoryFilter.trim();
+      }
+      const res = await apiRequest("POST", "/api/inventory/count-sessions", body);
       return res.json();
     },
     onSuccess: (data) => {
@@ -212,11 +227,11 @@ export default function InventoryCountModal({
             <ClipboardList className="h-5 w-5 text-amber-500" />
             {!activeSessionId
               ? "Start Inventory Count"
-              : session?.status === "draft"
+              : isDraft
               ? "Physical Count Sheet"
               : isAdmin && isSubmitted
-              ? "Review Count — Approve or Reject"
-              : `Count Session — ${session ? statusBadge(session.status) : ""}`}
+              ? <span>Review Count — Approve or Reject</span>
+              : <span className="flex items-center gap-2">Count Session {session && statusBadge(session.status)}</span>}
           </DialogTitle>
         </DialogHeader>
 
@@ -236,7 +251,7 @@ export default function InventoryCountModal({
 
               <div className="space-y-3">
                 <Label className="text-sm font-medium">Parts to count</Label>
-                <RadioGroup value={scope} onValueChange={(v) => setScope(v as "all" | "low_stock")} className="space-y-2">
+                <RadioGroup value={scope} onValueChange={(v) => { setScope(v as "all" | "low_stock" | "category"); setCategoryFilter(""); }} className="space-y-2">
                   <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
                     scope === "all" ? "border-amber-500/60 bg-amber-500/5" : "border-slate-700 hover:border-slate-600"
                   }`}>
@@ -261,13 +276,47 @@ export default function InventoryCountModal({
                       </div>
                     </div>
                   </label>
+                  <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                    scope === "category" ? "border-amber-500/60 bg-amber-500/5" : "border-slate-700 hover:border-slate-600"
+                  }`}>
+                    <RadioGroupItem value="category" className="mt-0.5" />
+                    <div className="flex items-start gap-2 flex-1">
+                      <ClipboardList className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">By Category</p>
+                        <p className="text-xs text-muted-foreground mb-2">Only parts in a specific category</p>
+                        {scope === "category" && (
+                          availableCategories.length > 0 ? (
+                            <select
+                              className="w-full rounded-md border border-slate-700 bg-slate-900 text-sm px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500"
+                              value={categoryFilter}
+                              onChange={e => setCategoryFilter(e.target.value)}
+                            >
+                              <option value="">Select category...</option>
+                              {availableCategories.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <Input
+                              placeholder="Type category name..."
+                              className="h-8 text-sm"
+                              value={categoryFilter}
+                              onChange={e => setCategoryFilter(e.target.value)}
+                              onClick={e => e.preventDefault()}
+                            />
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </label>
                 </RadioGroup>
               </div>
 
               <Button
                 className="bg-amber-500 hover:bg-amber-600 text-white w-full"
                 onClick={() => startCountMutation.mutate()}
-                disabled={startCountMutation.isPending}
+                disabled={startCountMutation.isPending || (scope === "category" && !categoryFilter.trim())}
               >
                 {startCountMutation.isPending ? "Starting..." : "Begin Count"}
               </Button>
