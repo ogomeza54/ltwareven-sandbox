@@ -19,7 +19,7 @@ import {
 import {
   Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
-  ClipboardList, Eye,
+  ClipboardList, Eye, Download,
 } from "lucide-react";
 import { useState } from "react";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
@@ -140,6 +140,56 @@ export default function Inventory() {
     if (delta > 0) return <ArrowUp className="h-3 w-3 text-green-400" />;
     if (delta < 0) return <ArrowDown className="h-3 w-3 text-red-400" />;
     return <Minus className="h-3 w-3 text-slate-400" />;
+  };
+
+  const handleExportAdjustmentsCSV = () => {
+    const headers = [
+      "Date",
+      "Time",
+      "Part",
+      "Part Number",
+      "Type",
+      "Before",
+      "After",
+      "Delta",
+      "Reason",
+      "Performed By",
+      "Source Count Session",
+    ];
+
+    const escapeCell = (value: any) => {
+      const str = value == null ? "" : String(value);
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const rows = adjustments.map((adj: any) => {
+      const date = new Date(adj.createdAt);
+      return [
+        date.toLocaleDateString(),
+        date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        adj.partName ?? "",
+        adj.partNumber ?? "",
+        adj.adjustmentType === "add" ? "Add" : adj.adjustmentType === "subtract" ? "Subtract" : "Set to",
+        adj.previousQty,
+        adj.newQty,
+        adj.delta,
+        adj.reason ?? "",
+        adj.performedBy ?? "",
+        adj.countSessionId ?? "",
+      ].map(escapeCell).join(",");
+    });
+
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `adjustment-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -564,6 +614,19 @@ export default function Inventory() {
             {/* Adjustment History Tab (admin only) */}
             {isAdmin && (
               <TabsContent value="adjustments" className="space-y-4">
+                {!adjustmentsLoading && adjustments.length > 0 && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      onClick={handleExportAdjustmentsCSV}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Export CSV
+                    </Button>
+                  </div>
+                )}
                 {adjustmentsLoading ? (
                   <p className="text-muted-foreground">Loading adjustment history...</p>
                 ) : adjustments.length === 0 ? (
@@ -589,6 +652,7 @@ export default function Inventory() {
                           <th className="text-right px-4 py-3 text-muted-foreground font-medium">Delta</th>
                           <th className="text-left px-4 py-3 text-muted-foreground font-medium">Reason</th>
                           <th className="text-left px-4 py-3 text-muted-foreground font-medium">By</th>
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">Source Count Session</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -647,16 +711,7 @@ export default function Inventory() {
                             </td>
                             <td className="px-4 py-3 max-w-[200px]">
                               <div className="truncate" title={adj.reason}>{adj.reason}</div>
-                              {adj.countSessionId && (
-                                <button
-                                  className="text-xs text-amber-400 hover:text-amber-300 hover:underline mt-0.5 flex items-center gap-1"
-                                  onClick={() => handleOpenCountSession({ id: adj.countSessionId })}
-                                >
-                                  <FileText className="h-3 w-3" />
-                                  Source: Count Session #{adj.countSessionId.slice(0, 8)}
-                                </button>
-                              )}
-                              {!adj.countSessionId && adj.referenceNote && (
+                              {adj.referenceNote && (
                                 <div className="text-xs text-muted-foreground truncate" title={adj.referenceNote}>
                                   Ref: {adj.referenceNote}
                                 </div>
@@ -664,6 +719,19 @@ export default function Inventory() {
                             </td>
                             <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
                               {adj.performedBy}
+                            </td>
+                            <td className="px-4 py-3 text-xs whitespace-nowrap">
+                              {adj.countSessionId ? (
+                                <button
+                                  className="text-amber-400 hover:text-amber-300 hover:underline flex items-center gap-1"
+                                  onClick={() => handleOpenCountSession({ id: adj.countSessionId })}
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  #{adj.countSessionId.slice(0, 8)}
+                                </button>
+                              ) : (
+                                <span className="text-muted-foreground/40">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}
