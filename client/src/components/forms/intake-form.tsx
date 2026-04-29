@@ -399,7 +399,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
                       </FormItem>
                     )} />
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 opacity-70 pointer-events-none">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 opacity-70 pointer-events-none">
                     <FormField control={form.control} name="vin" render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-xs text-muted-foreground">VIN</FormLabel>
@@ -418,12 +418,6 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
                         <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
                       </FormItem>
                     )} />
-                    <FormField control={form.control} name="truckType" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-xs text-muted-foreground">Truck Type</FormLabel>
-                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
-                      </FormItem>
-                    )} />
                   </div>
                 </div>
               )}
@@ -432,10 +426,19 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField control={form.control} name="truckType" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Truck Type</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <FormLabel>
+                      Truck Type
+                      {selectedFleetVehicle && <span className="ml-1 text-xs text-muted-foreground">(auto-filled)</span>}
+                    </FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={!!selectedFleetVehicle}
+                    >
                       <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                        <SelectTrigger className={selectedFleetVehicle ? "opacity-70 pointer-events-none" : ""}>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {TRUCK_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
