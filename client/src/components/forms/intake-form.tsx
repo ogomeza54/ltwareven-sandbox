@@ -29,6 +29,7 @@ interface FleetVehicle {
   color: string | null;
   mileage: number | null;
   unitStatus: string | null;
+  truckType: string | null;
 }
 
 // ── Form schema ───────────────────────────────────────────────────────────────
@@ -161,6 +162,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
     form.setValue("licensePlate", vehicle.licensePlate || "");
     form.setValue("color", vehicle.color || "");
     form.setValue("mileage", vehicle.mileage != null ? String(vehicle.mileage) : "");
+    form.setValue("truckType", vehicle.truckType || "");
   };
 
   const clearFleetSelection = () => {

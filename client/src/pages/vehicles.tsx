@@ -55,6 +55,7 @@ interface Vehicle {
   tractorNumber: string | null;
   unitStatus: string | null;
   fleetType: string | null;
+  truckType: string | null;
   companyId: string;
   createdAt: string;
 }
@@ -84,6 +85,7 @@ export default function Vehicles() {
     tractorNumber: "",
     unitStatus: "",
     fleetType: "",
+    truckType: "",
   });
 
   const { data: vehicles = [], isLoading } = useQuery<Vehicle[]>({
@@ -114,6 +116,7 @@ export default function Vehicles() {
         tractorNumber: data.tractorNumber || null,
         unitStatus: data.unitStatus || null,
         fleetType: data.fleetType || null,
+        truckType: data.truckType || null,
       });
     },
     onSuccess: () => {
@@ -140,6 +143,7 @@ export default function Vehicles() {
         tractorNumber: data.tractorNumber || null,
         unitStatus: data.unitStatus || null,
         fleetType: data.fleetType || null,
+        truckType: data.truckType || null,
       });
     },
     onSuccess: () => {
@@ -181,6 +185,7 @@ export default function Vehicles() {
       tractorNumber: "",
       unitStatus: "",
       fleetType: "",
+      truckType: "",
     });
   };
 
@@ -198,6 +203,7 @@ export default function Vehicles() {
       tractorNumber: vehicle.tractorNumber || "",
       unitStatus: vehicle.unitStatus || "",
       fleetType: vehicle.fleetType || "",
+      truckType: vehicle.truckType || "",
     });
     setIsEditModalOpen(true);
   };
@@ -374,15 +380,38 @@ export default function Vehicles() {
               </div>
             </div>
 
-            {/* Tractor number */}
-            <div>
-              <Label htmlFor="tractorNumber">Tractor / Unit Number</Label>
-              <Input
-                id="tractorNumber"
-                value={formData.tractorNumber}
-                onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
-                placeholder="T-042"
-              />
+            {/* Tractor number + truck type */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="tractorNumber">Tractor / Unit Number</Label>
+                <Input
+                  id="tractorNumber"
+                  value={formData.tractorNumber}
+                  onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
+                  placeholder="T-042"
+                />
+              </div>
+              <div>
+                <Label>Truck Type</Label>
+                <Select
+                  value={formData.truckType}
+                  onValueChange={(value) => setFormData({ ...formData, truckType: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="semi-truck">Semi Truck</SelectItem>
+                    <SelectItem value="box-truck">Box Truck</SelectItem>
+                    <SelectItem value="flatbed">Flatbed</SelectItem>
+                    <SelectItem value="tanker">Tanker</SelectItem>
+                    <SelectItem value="refrigerated">Refrigerated</SelectItem>
+                    <SelectItem value="dump-truck">Dump Truck</SelectItem>
+                    <SelectItem value="tow-truck">Tow Truck</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Customer owner (optional for fleet) */}
@@ -523,14 +552,37 @@ export default function Vehicles() {
                 </Select>
               </div>
             </div>
-            <div>
-              <Label htmlFor="edit-tractorNumber">Tractor / Unit Number</Label>
-              <Input
-                id="edit-tractorNumber"
-                value={formData.tractorNumber}
-                onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
-                placeholder="T-042"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit-tractorNumber">Tractor / Unit Number</Label>
+                <Input
+                  id="edit-tractorNumber"
+                  value={formData.tractorNumber}
+                  onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
+                  placeholder="T-042"
+                />
+              </div>
+              <div>
+                <Label>Truck Type</Label>
+                <Select
+                  value={formData.truckType}
+                  onValueChange={(value) => setFormData({ ...formData, truckType: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="semi-truck">Semi Truck</SelectItem>
+                    <SelectItem value="box-truck">Box Truck</SelectItem>
+                    <SelectItem value="flatbed">Flatbed</SelectItem>
+                    <SelectItem value="tanker">Tanker</SelectItem>
+                    <SelectItem value="refrigerated">Refrigerated</SelectItem>
+                    <SelectItem value="dump-truck">Dump Truck</SelectItem>
+                    <SelectItem value="tow-truck">Tow Truck</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
