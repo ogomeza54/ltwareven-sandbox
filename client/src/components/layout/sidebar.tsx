@@ -15,10 +15,14 @@ import {
   User,
   Shield,
   ChevronDown,
-  Fuel,
   UserCircle,
   Building2,
 } from "lucide-react";
+
+interface CompanyOption {
+  id: string;
+  name: string;
+}
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Gauge },
@@ -33,12 +37,10 @@ const navigation = [
 
 export default function Sidebar() {
   const [location] = useLocation();
-  const { companyId } = useCompany();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
-  const activeCompanyName = (user as any)?.activeCompanyName ?? null;
 
-  const { data: companies = [] } = useQuery<any[]>({
+  const { data: companies = [] } = useQuery<CompanyOption[]>({
     queryKey: ["/api/admin/companies"],
     enabled: isSuperAdmin,
   });
@@ -52,7 +54,8 @@ export default function Sidebar() {
     },
   });
 
-  const effectiveCompanyId = (user as any)?.effectiveCompanyId ?? companyId;
+  // effectiveCompanyId comes directly from user.companyId (which is already set to the effective one)
+  const effectiveCompanyId = user?.companyId ?? null;
 
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
@@ -107,21 +110,21 @@ export default function Sidebar() {
               className="w-full rounded-md border border-slate-700 bg-slate-800 text-xs px-2.5 py-2 text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none pr-7"
               value={effectiveCompanyId ?? ""}
               onChange={(e) => {
-                const val = e.target.value;
-                switchMutation.mutate(val || null);
+                const val = e.target.value || null;
+                switchMutation.mutate(val);
               }}
               disabled={switchMutation.isPending}
             >
               <option value="">— My Account —</option>
-              {companies.map((c: any) => (
+              {companies.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
           </div>
-          {activeCompanyName && (
+          {user?.activeCompanyName && (
             <p className="text-xs text-amber-400/70 mt-1.5 truncate">
-              Active: {activeCompanyName}
+              Active: {user.activeCompanyName}
             </p>
           )}
         </div>

@@ -163,16 +163,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
 
-      let effectiveCompanyId = user.companyId;
+      const ownCompanyId = user.companyId;
+      const sessionOverride = (req.session as any)?.superAdminActiveCompanyId as string | undefined;
+      // Only treat as a genuine switch when the override is set AND differs from own company
+      const isSwitched =
+        user.role === "super_admin" &&
+        !!sessionOverride &&
+        sessionOverride !== ownCompanyId;
+
+      let effectiveCompanyId = ownCompanyId;
       let activeCompanyName: string | null = null;
 
-      if (user.role === "super_admin" && (req.session as any)?.superAdminActiveCompanyId) {
-        effectiveCompanyId = (req.session as any).superAdminActiveCompanyId;
+      if (isSwitched) {
+        effectiveCompanyId = sessionOverride!;
         const company = await storage.getCompany(effectiveCompanyId);
         activeCompanyName = company?.name ?? null;
       }
 
-      res.json({ ...user, effectiveCompanyId, activeCompanyName });
+      // companyId in the response is the effective (possibly switched) company so
+      // all existing API filtering keeps working without modification.
+      res.json({ ...user, companyId: effectiveCompanyId, ownCompanyId, activeCompanyName });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -188,9 +198,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Only super admins can switch companies" });
       }
 
-      const { companyId } = req.body;
+      const { companyId } = req.body as { companyId: string | null };
 
-      if (companyId === null || companyId === undefined) {
+      // Treat switching to own company or explicit null as "exit"
+      if (companyId === null || companyId === undefined || companyId === user.companyId) {
         delete (req.session as any).superAdminActiveCompanyId;
       } else {
         const company = await storage.getCompany(companyId);

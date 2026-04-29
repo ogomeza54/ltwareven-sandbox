@@ -141,6 +141,7 @@ export async function setupAuth(app: Express) {
   });
 
   app.get("/api/logout", (req, res) => {
+    delete (req.session as any).superAdminActiveCompanyId;
     req.logout(() => {
       res.redirect(
         client.buildEndSessionUrl(config, {

@@ -8,7 +8,11 @@ const BANNER_HEIGHT = 36;
 
 export default function SuperAdminBanner() {
   const { user } = useAuth();
-  const isSwitched = user?.role === "super_admin" && !!(user as any).activeCompanyName;
+  // Banner shows only when a super admin is genuinely viewing a different company
+  const isSwitched =
+    user?.role === "super_admin" &&
+    !!user.activeCompanyName &&
+    user.companyId !== user.ownCompanyId;
 
   useEffect(() => {
     if (isSwitched) {
@@ -40,7 +44,7 @@ export default function SuperAdminBanner() {
       <div className="flex items-center gap-2">
         <Building2 className="h-4 w-4 shrink-0" />
         <span>
-          Viewing as: <span className="font-bold">{(user as any).activeCompanyName}</span>
+          Viewing as: <span className="font-bold">{user!.activeCompanyName}</span>
         </span>
         <span className="text-slate-700 text-xs hidden sm:inline">— all data is scoped to this company</span>
       </div>
