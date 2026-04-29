@@ -27,6 +27,7 @@ interface FleetVehicle {
   vin: string | null;
   licensePlate: string | null;
   color: string | null;
+  mileage: number | null;
   unitStatus: string | null;
 }
 
@@ -159,6 +160,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
     form.setValue("vin", vehicle.vin || "");
     form.setValue("licensePlate", vehicle.licensePlate || "");
     form.setValue("color", vehicle.color || "");
+    form.setValue("mileage", vehicle.mileage != null ? String(vehicle.mileage) : "");
   };
 
   const clearFleetSelection = () => {
@@ -171,6 +173,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
     form.setValue("vin", "");
     form.setValue("licensePlate", "");
     form.setValue("color", "");
+    form.setValue("mileage", "");
   };
 
   const createWorkOrderMutation = useMutation({

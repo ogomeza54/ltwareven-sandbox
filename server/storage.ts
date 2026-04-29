@@ -691,6 +691,8 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(vehicles)
       .where(and(
         eq(vehicles.companyId, companyId),
+        // Restrict to actual fleet units: explicitly flagged as company-fleet OR no customer owner
+        sql`(${vehicles.fleetType} = 'company-fleet' OR ${vehicles.customerId} IS NULL)`,
         sql`(
           ${vehicles.tractorNumber} ILIKE ${'%' + search + '%'} OR
           ${vehicles.vin} ILIKE ${'%' + search + '%'} OR

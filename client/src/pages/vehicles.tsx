@@ -81,6 +81,9 @@ export default function Vehicles() {
     color: "",
     mileage: "",
     customerId: "",
+    tractorNumber: "",
+    unitStatus: "",
+    fleetType: "",
   });
 
   const { data: vehicles = [], isLoading } = useQuery<Vehicle[]>({
@@ -107,6 +110,10 @@ export default function Vehicles() {
         vin: data.vin || null,
         licensePlate: data.licensePlate || null,
         color: data.color || null,
+        customerId: data.customerId || null,
+        tractorNumber: data.tractorNumber || null,
+        unitStatus: data.unitStatus || null,
+        fleetType: data.fleetType || null,
       });
     },
     onSuccess: () => {
@@ -129,6 +136,10 @@ export default function Vehicles() {
         vin: data.vin || null,
         licensePlate: data.licensePlate || null,
         color: data.color || null,
+        customerId: data.customerId || null,
+        tractorNumber: data.tractorNumber || null,
+        unitStatus: data.unitStatus || null,
+        fleetType: data.fleetType || null,
       });
     },
     onSuccess: () => {
@@ -167,6 +178,9 @@ export default function Vehicles() {
       color: "",
       mileage: "",
       customerId: "",
+      tractorNumber: "",
+      unitStatus: "",
+      fleetType: "",
     });
   };
 
@@ -181,6 +195,9 @@ export default function Vehicles() {
       color: vehicle.color || "",
       mileage: vehicle.mileage?.toString() || "",
       customerId: vehicle.customerId || "",
+      tractorNumber: vehicle.tractorNumber || "",
+      unitStatus: vehicle.unitStatus || "",
+      fleetType: vehicle.fleetType || "",
     });
     setIsEditModalOpen(true);
   };
@@ -249,7 +266,8 @@ export default function Vehicles() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Vehicle</TableHead>
-                    <TableHead>Owner</TableHead>
+                    <TableHead>Tractor #</TableHead>
+                    <TableHead>Owner / Type</TableHead>
                     <TableHead>License Plate</TableHead>
                     <TableHead>VIN</TableHead>
                     <TableHead>Mileage</TableHead>
@@ -259,13 +277,13 @@ export default function Vehicles() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8">
+                      <TableCell colSpan={7} className="text-center py-8">
                         Loading vehicles...
                       </TableCell>
                     </TableRow>
                   ) : filteredVehicles.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8">
+                      <TableCell colSpan={7} className="text-center py-8">
                         <Car className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                         <p className="text-gray-500">No vehicles found</p>
                       </TableCell>
@@ -281,7 +299,19 @@ export default function Vehicles() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>{getCustomerName(vehicle.customerId)}</TableCell>
+                        <TableCell>
+                          {vehicle.tractorNumber ? (
+                            <span className="font-mono text-amber-400 font-medium">{vehicle.tractorNumber}</span>
+                          ) : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p>{getCustomerName(vehicle.customerId)}</p>
+                            {vehicle.unitStatus && (
+                              <p className="text-xs text-muted-foreground capitalize">{vehicle.unitStatus}</p>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{vehicle.licensePlate || "-"}</TableCell>
                         <TableCell className="font-mono text-sm">{vehicle.vin || "-"}</TableCell>
                         <TableCell>{vehicle.mileage ? `${vehicle.mileage.toLocaleString()} mi` : "-"}</TableCell>
@@ -304,19 +334,66 @@ export default function Vehicles() {
       </main>
 
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Add New Vehicle</DialogTitle>
+            <DialogTitle>Add Vehicle / Fleet Unit</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-1">
+            {/* Fleet type */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Fleet Type</Label>
+                <Select
+                  value={formData.fleetType}
+                  onValueChange={(value) => setFormData({ ...formData, fleetType: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company-fleet">Company Fleet</SelectItem>
+                    <SelectItem value="external">External / Customer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Unit Status</Label>
+                <Select
+                  value={formData.unitStatus}
+                  onValueChange={(value) => setFormData({ ...formData, unitStatus: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">In Maintenance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Tractor number */}
             <div>
-              <Label htmlFor="customerId">Owner</Label>
+              <Label htmlFor="tractorNumber">Tractor / Unit Number</Label>
+              <Input
+                id="tractorNumber"
+                value={formData.tractorNumber}
+                onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
+                placeholder="T-042"
+              />
+            </div>
+
+            {/* Customer owner (optional for fleet) */}
+            <div>
+              <Label htmlFor="customerId">Owner (optional for fleet units)</Label>
               <Select
                 value={formData.customerId}
                 onValueChange={(value) => setFormData({ ...formData, customerId: value })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select customer" />
+                  <SelectValue placeholder="No customer (company fleet)" />
                 </SelectTrigger>
                 <SelectContent>
                   {customers.map((customer) => (
@@ -327,6 +404,7 @@ export default function Vehicles() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="year">Year</Label>
@@ -338,21 +416,21 @@ export default function Vehicles() {
                 />
               </div>
               <div>
-                <Label htmlFor="make">Make</Label>
+                <Label htmlFor="make">Make *</Label>
                 <Input
                   id="make"
                   value={formData.make}
                   onChange={(e) => setFormData({ ...formData, make: e.target.value })}
-                  placeholder="Toyota"
+                  placeholder="Freightliner"
                 />
               </div>
               <div>
-                <Label htmlFor="model">Model</Label>
+                <Label htmlFor="model">Model *</Label>
                 <Input
                   id="model"
                   value={formData.model}
                   onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  placeholder="Camry"
+                  placeholder="Cascadia"
                 />
               </div>
             </div>
@@ -396,9 +474,9 @@ export default function Vehicles() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
-            <Button 
+            <Button
               onClick={() => createMutation.mutate(formData)}
-              disabled={createMutation.isPending || !formData.customerId || !formData.make || !formData.model}
+              disabled={createMutation.isPending || !formData.make || !formData.model}
             >
               {createMutation.isPending ? "Adding..." : "Add Vehicle"}
             </Button>
@@ -407,11 +485,53 @@ export default function Vehicles() {
       </Dialog>
 
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Vehicle</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Fleet Type</Label>
+                <Select
+                  value={formData.fleetType}
+                  onValueChange={(value) => setFormData({ ...formData, fleetType: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company-fleet">Company Fleet</SelectItem>
+                    <SelectItem value="external">External / Customer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Unit Status</Label>
+                <Select
+                  value={formData.unitStatus}
+                  onValueChange={(value) => setFormData({ ...formData, unitStatus: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">In Maintenance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="edit-tractorNumber">Tractor / Unit Number</Label>
+              <Input
+                id="edit-tractorNumber"
+                value={formData.tractorNumber}
+                onChange={(e) => setFormData({ ...formData, tractorNumber: e.target.value })}
+                placeholder="T-042"
+              />
+            </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="edit-year">Year</Label>
