@@ -203,7 +203,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
       }
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/repair-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/mechanics/workload"] });
@@ -214,6 +214,13 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
         title: "Work order created",
         description: `${typeLabel} job created and auto-assigned via load balancer.`,
       });
+      if (data?.invoiceWarning) {
+        toast({
+          title: "Invoice note",
+          description: data.invoiceWarning,
+          variant: "destructive",
+        });
+      }
       form.reset();
       setSelectedFiles([]);
       setSelectedFleetVehicle(null);
@@ -371,25 +378,53 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
               )} />
 
               {selectedFleetVehicle && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 opacity-70 pointer-events-none">
-                  <FormField control={form.control} name="vehicleYear" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs text-muted-foreground">Year</FormLabel>
-                      <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="vehicleMake" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs text-muted-foreground">Make</FormLabel>
-                      <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="vehicleModel" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs text-muted-foreground">Model</FormLabel>
-                      <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
-                    </FormItem>
-                  )} />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 opacity-70 pointer-events-none">
+                    <FormField control={form.control} name="vehicleYear" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Year</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="vehicleMake" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Make</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="vehicleModel" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Model</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 opacity-70 pointer-events-none">
+                    <FormField control={form.control} name="vin" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">VIN</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40 font-mono text-xs" /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="licensePlate" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">License Plate</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="mileage" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Mileage</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="truckType" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">Truck Type</FormLabel>
+                        <FormControl><Input {...field} readOnly className="bg-muted/40" /></FormControl>
+                      </FormItem>
+                    )} />
+                  </div>
                 </div>
               )}
 

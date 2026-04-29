@@ -41,6 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Car, Plus, Pencil, Trash2, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { TRUCK_TYPES } from "@shared/schema";
 
 interface Vehicle {
   id: string;
@@ -401,14 +402,7 @@ export default function Vehicles() {
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="semi-truck">Semi Truck</SelectItem>
-                    <SelectItem value="box-truck">Box Truck</SelectItem>
-                    <SelectItem value="flatbed">Flatbed</SelectItem>
-                    <SelectItem value="tanker">Tanker</SelectItem>
-                    <SelectItem value="refrigerated">Refrigerated</SelectItem>
-                    <SelectItem value="dump-truck">Dump Truck</SelectItem>
-                    <SelectItem value="tow-truck">Tow Truck</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {TRUCK_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -572,14 +566,7 @@ export default function Vehicles() {
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="semi-truck">Semi Truck</SelectItem>
-                    <SelectItem value="box-truck">Box Truck</SelectItem>
-                    <SelectItem value="flatbed">Flatbed</SelectItem>
-                    <SelectItem value="tanker">Tanker</SelectItem>
-                    <SelectItem value="refrigerated">Refrigerated</SelectItem>
-                    <SelectItem value="dump-truck">Dump Truck</SelectItem>
-                    <SelectItem value="tow-truck">Tow Truck</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {TRUCK_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
