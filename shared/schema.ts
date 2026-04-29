@@ -420,6 +420,50 @@ export const insertInventoryAdjustmentSchema = createInsertSchema(inventoryAdjus
 export type InventoryAdjustment = typeof inventoryAdjustments.$inferSelect;
 export type InsertInventoryAdjustment = z.infer<typeof insertInventoryAdjustmentSchema>;
 
+// Inventory Count Sessions — shop count workflow
+export const inventoryCountSessions = pgTable("inventory_count_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  status: text("status").notNull().default("draft"), // draft | submitted | approved | rejected
+  startedByUserId: varchar("started_by_user_id").references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  reviewedByUserId: varchar("reviewed_by_user_id").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  adminNotes: text("admin_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const inventoryCountItems = pgTable("inventory_count_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => inventoryCountSessions.id),
+  partId: varchar("part_id").notNull().references(() => inventoryParts.id),
+  systemQtySnapshot: integer("system_qty_snapshot").notNull(),
+  countedQty: integer("counted_qty"),
+  variance: integer("variance"),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+});
+
+export const inventoryCountSessionsRelations = relations(inventoryCountSessions, ({ one, many }) => ({
+  company: one(companies, { fields: [inventoryCountSessions.companyId], references: [companies.id] }),
+  startedBy: one(users, { fields: [inventoryCountSessions.startedByUserId], references: [users.id] }),
+  reviewedBy: one(users, { fields: [inventoryCountSessions.reviewedByUserId], references: [users.id] }),
+  items: many(inventoryCountItems),
+}));
+
+export const inventoryCountItemsRelations = relations(inventoryCountItems, ({ one }) => ({
+  session: one(inventoryCountSessions, { fields: [inventoryCountItems.sessionId], references: [inventoryCountSessions.id] }),
+  part: one(inventoryParts, { fields: [inventoryCountItems.partId], references: [inventoryParts.id] }),
+  company: one(companies, { fields: [inventoryCountItems.companyId], references: [companies.id] }),
+}));
+
+export const insertInventoryCountSessionSchema = createInsertSchema(inventoryCountSessions).omit({ id: true, createdAt: true });
+export const insertInventoryCountItemSchema = createInsertSchema(inventoryCountItems).omit({ id: true });
+
+export type InventoryCountSession = typeof inventoryCountSessions.$inferSelect;
+export type InsertInventoryCountSession = z.infer<typeof insertInventoryCountSessionSchema>;
+export type InventoryCountItem = typeof inventoryCountItems.$inferSelect;
+export type InsertInventoryCountItem = z.infer<typeof insertInventoryCountItemSchema>;
+
 // Status lifecycle constants
 export const WORK_ORDER_STATUSES = [
   "open",

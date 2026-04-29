@@ -834,6 +834,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Inventory Count Sessions ──────────────────────────────────────────────────
+
+  app.get("/api/inventory/count-sessions", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const sessions = await storage.getCountSessionsByCompany(req.userContext.companyId);
+      res.json(sessions);
+    } catch (error) {
+      console.error("Failed to fetch count sessions:", error);
+      res.status(500).json({ message: "Failed to fetch count sessions" });
+    }
+  });
+
+  app.post("/api/inventory/count-sessions", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const session = await storage.createCountSession(req.userContext.companyId, req.userContext.userId);
+      res.status(201).json(session);
+    } catch (error) {
+      console.error("Failed to create count session:", error);
+      res.status(400).json({ message: "Failed to start inventory count" });
+    }
+  });
+
+  app.get("/api/inventory/count-sessions/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const session = await storage.getCountSession(req.params.id, req.userContext.companyId);
+      if (!session) return res.status(404).json({ message: "Count session not found" });
+      res.json(session);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch count session" });
+    }
+  });
+
+  app.patch("/api/inventory/count-sessions/:id/items", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items)) return res.status(400).json({ message: "items must be an array" });
+      await storage.updateCountItems(req.params.id, items, req.userContext.companyId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to update count items:", error);
+      res.status(400).json({ message: "Failed to update count items" });
+    }
+  });
+
+  app.post("/api/inventory/count-sessions/:id/submit", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const session = await storage.submitCountSession(req.params.id, req.userContext.companyId);
+      res.json(session);
+    } catch (error) {
+      console.error("Failed to submit count session:", error);
+      res.status(400).json({ message: "Failed to submit count session" });
+    }
+  });
+
+  app.post("/api/inventory/count-sessions/:id/approve", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const role = req.userContext.role;
+      if (role !== "admin" && role !== "super_admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const { adminNotes } = req.body;
+      const session = await storage.approveCountSession(
+        req.params.id,
+        req.userContext.companyId,
+        req.userContext.userId,
+        adminNotes
+      );
+      res.json(session);
+    } catch (error) {
+      console.error("Failed to approve count session:", error);
+      res.status(400).json({ message: "Failed to approve count session" });
+    }
+  });
+
+  app.post("/api/inventory/count-sessions/:id/reject", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const role = req.userContext.role;
+      if (role !== "admin" && role !== "super_admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const { adminNotes } = req.body;
+      const session = await storage.rejectCountSession(
+        req.params.id,
+        req.userContext.companyId,
+        req.userContext.userId,
+        adminNotes
+      );
+      res.json(session);
+    } catch (error) {
+      console.error("Failed to reject count session:", error);
+      res.status(400).json({ message: "Failed to reject count session" });
+    }
+  });
+
   // ── Parts Usage ──────────────────────────────────────────────────────────────
 
   app.get("/api/repair-orders/:id/parts", isAuthenticated, withCompanyContext, async (req: any, res) => {

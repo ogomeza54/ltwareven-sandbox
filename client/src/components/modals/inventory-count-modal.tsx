@@ -1,0 +1,407 @@
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  ClipboardList, CheckCircle2, XCircle, ArrowUp, ArrowDown, Minus, Save, Send,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+
+interface InventoryCountModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sessionId?: string | null;
+  isAdmin?: boolean;
+}
+
+export default function InventoryCountModal({
+  open,
+  onOpenChange,
+  sessionId,
+  isAdmin = false,
+}: InventoryCountModalProps) {
+  const { toast } = useToast();
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(sessionId ?? null);
+  const [localCounts, setLocalCounts] = useState<Record<string, string>>({});
+  const [adminNotes, setAdminNotes] = useState("");
+
+  useEffect(() => {
+    setActiveSessionId(sessionId ?? null);
+    setLocalCounts({});
+    setAdminNotes("");
+  }, [sessionId, open]);
+
+  const { data: session, isLoading: sessionLoading } = useQuery<any>({
+    queryKey: ["/api/inventory/count-sessions", activeSessionId],
+    queryFn: async () => {
+      const res = await fetch(`/api/inventory/count-sessions/${activeSessionId}`);
+      if (!res.ok) throw new Error("Failed to load session");
+      return res.json();
+    },
+    enabled: !!activeSessionId && open,
+  });
+
+  useEffect(() => {
+    if (session?.items) {
+      const initial: Record<string, string> = {};
+      session.items.forEach((item: any) => {
+        if (item.countedQty !== null && item.countedQty !== undefined) {
+          initial[item.id] = String(item.countedQty);
+        }
+      });
+      setLocalCounts(prev => {
+        const merged = { ...initial };
+        Object.keys(prev).forEach(k => {
+          if (prev[k] !== "") merged[k] = prev[k];
+        });
+        return merged;
+      });
+    }
+  }, [session]);
+
+  const startCountMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/inventory/count-sessions");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setActiveSessionId(data.id);
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to start count", variant: "destructive" });
+    },
+  });
+
+  const saveItemsMutation = useMutation({
+    mutationFn: async () => {
+      const items = Object.entries(localCounts)
+        .map(([itemId, val]) => ({
+          itemId,
+          countedQty: val === "" ? null : parseInt(val, 10),
+        }))
+        .filter(({ countedQty }) => countedQty === null || !isNaN(countedQty!));
+
+      await apiRequest("PATCH", `/api/inventory/count-sessions/${activeSessionId}/items`, { items });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions", activeSessionId] });
+      toast({ title: "Progress saved" });
+    },
+    onError: () => {
+      toast({ title: "Failed to save progress", variant: "destructive" });
+    },
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      const items = Object.entries(localCounts)
+        .map(([itemId, val]) => ({
+          itemId,
+          countedQty: val === "" ? null : parseInt(val, 10),
+        }))
+        .filter(({ countedQty }) => countedQty === null || !isNaN(countedQty!));
+
+      if (items.length > 0) {
+        await apiRequest("PATCH", `/api/inventory/count-sessions/${activeSessionId}/items`, { items });
+      }
+      const res = await apiRequest("POST", `/api/inventory/count-sessions/${activeSessionId}/submit`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions", activeSessionId] });
+      toast({ title: "Count submitted for admin review" });
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({ title: "Failed to submit count", variant: "destructive" });
+    },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/inventory/count-sessions/${activeSessionId}/approve`, { adminNotes });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/adjustments"] });
+      toast({ title: "Count approved — inventory updated" });
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({ title: "Failed to approve count", variant: "destructive" });
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/inventory/count-sessions/${activeSessionId}/reject`, { adminNotes });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
+      toast({ title: "Count rejected" });
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({ title: "Failed to reject count", variant: "destructive" });
+    },
+  });
+
+  const getVariance = (itemId: string, snapshot: number): number | null => {
+    const val = localCounts[itemId];
+    if (val === undefined || val === "") return null;
+    const counted = parseInt(val, 10);
+    if (isNaN(counted)) return null;
+    return counted - snapshot;
+  };
+
+  const varianceIcon = (v: number | null) => {
+    if (v === null) return null;
+    if (v > 0) return <ArrowUp className="h-3 w-3 text-green-400" />;
+    if (v < 0) return <ArrowDown className="h-3 w-3 text-red-400" />;
+    return <Minus className="h-3 w-3 text-slate-400" />;
+  };
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      draft: "border-slate-500/40 text-slate-400",
+      submitted: "border-amber-500/40 text-amber-400",
+      approved: "border-green-500/40 text-green-400",
+      rejected: "border-red-500/40 text-red-400",
+    };
+    return (
+      <Badge variant="outline" className={map[status] ?? ""}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    );
+  };
+
+  const totalEntered = session?.items
+    ? Object.keys(localCounts).filter(k => localCounts[k] !== "").length
+    : 0;
+  const totalItems = session?.items?.length ?? 0;
+
+  const isReadOnly = session?.status === "approved" || session?.status === "rejected";
+  const isSubmitted = session?.status === "submitted";
+  const isDraft = session?.status === "draft";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <ClipboardList className="h-5 w-5 text-amber-500" />
+            {!activeSessionId
+              ? "Start Inventory Count"
+              : session?.status === "draft"
+              ? "Physical Count Sheet"
+              : isAdmin && isSubmitted
+              ? "Review Count — Approve or Reject"
+              : `Count Session — ${session ? statusBadge(session.status) : ""}`}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* No session yet — start prompt */}
+          {!activeSessionId && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <ClipboardList className="h-16 w-16 text-amber-500/30" />
+              <div className="text-center">
+                <p className="text-lg font-medium mb-1">Start a Physical Count</p>
+                <p className="text-sm text-muted-foreground max-w-sm">
+                  A snapshot of current stock levels will be captured. Enter your physical counts part-by-part, then submit for admin review.
+                </p>
+              </div>
+              <Button
+                className="bg-amber-500 hover:bg-amber-600 text-white"
+                onClick={() => startCountMutation.mutate()}
+                disabled={startCountMutation.isPending}
+              >
+                {startCountMutation.isPending ? "Starting..." : "Start Count Now"}
+              </Button>
+            </div>
+          )}
+
+          {/* Loading */}
+          {activeSessionId && sessionLoading && (
+            <p className="text-muted-foreground p-6">Loading count sheet...</p>
+          )}
+
+          {/* Session loaded */}
+          {activeSessionId && session && (
+            <div className="space-y-4">
+              {/* Session header info */}
+              <div className="flex flex-wrap items-center gap-3 px-1 pb-2 border-b border-slate-700">
+                {statusBadge(session.status)}
+                {session.startedByName && (
+                  <span className="text-sm text-muted-foreground">Started by {session.startedByName}</span>
+                )}
+                <span className="text-sm text-muted-foreground">
+                  {new Date(session.createdAt).toLocaleDateString()} {new Date(session.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                {isDraft && (
+                  <span className="text-sm text-muted-foreground ml-auto">
+                    {totalEntered} / {totalItems} entered
+                  </span>
+                )}
+              </div>
+
+              {/* Admin notes (read-only display) */}
+              {session.adminNotes && (
+                <div className="rounded-md border border-slate-700 bg-slate-800/40 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Admin Notes</p>
+                  <p className="text-sm">{session.adminNotes}</p>
+                </div>
+              )}
+
+              {/* Count sheet table */}
+              <div className="rounded-lg border border-slate-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-800/50">
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">Part</th>
+                      <th className="text-right px-4 py-3 text-muted-foreground font-medium">System Qty</th>
+                      <th className="text-right px-4 py-3 text-muted-foreground font-medium w-32">
+                        {isReadOnly || isSubmitted ? "Counted" : "Enter Count"}
+                      </th>
+                      <th className="text-right px-4 py-3 text-muted-foreground font-medium">Variance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {session.items.map((item: any, i: number) => {
+                      const variance = isDraft
+                        ? getVariance(item.id, item.systemQtySnapshot)
+                        : item.variance;
+                      return (
+                        <tr key={item.id} className={`border-b border-slate-800 ${i % 2 === 0 ? "" : "bg-slate-900/30"}`}>
+                          <td className="px-4 py-2.5">
+                            <div className="font-medium">{item.partName}</div>
+                            {item.partNumber && (
+                              <div className="text-xs text-muted-foreground">#{item.partNumber}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono">{item.systemQtySnapshot}</td>
+                          <td className="px-4 py-2.5">
+                            {isDraft ? (
+                              <Input
+                                type="number"
+                                min={0}
+                                className="w-24 ml-auto text-right h-8 text-sm"
+                                placeholder="—"
+                                value={localCounts[item.id] ?? ""}
+                                onChange={e => setLocalCounts(prev => ({ ...prev, [item.id]: e.target.value }))}
+                              />
+                            ) : (
+                              <div className="text-right font-mono">
+                                {item.countedQty !== null ? item.countedQty : <span className="text-muted-foreground">—</span>}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {variance !== null ? (
+                              <span className={`flex items-center justify-end gap-1 font-mono ${
+                                variance > 0 ? "text-green-400" : variance < 0 ? "text-red-400" : "text-muted-foreground"
+                              }`}>
+                                {varianceIcon(variance)}
+                                {variance > 0 ? `+${variance}` : variance}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Admin review section */}
+              {isAdmin && isSubmitted && (
+                <div className="space-y-3 pt-2">
+                  <Label>Admin Notes (optional)</Label>
+                  <Textarea
+                    placeholder="Add notes for the count submitter..."
+                    value={adminNotes}
+                    onChange={e => setAdminNotes(e.target.value)}
+                    rows={2}
+                    className="resize-none"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        {activeSessionId && session && (
+          <DialogFooter className="pt-4 border-t border-slate-700 gap-2">
+            {isDraft && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => saveItemsMutation.mutate()}
+                  disabled={saveItemsMutation.isPending || submitMutation.isPending}
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {saveItemsMutation.isPending ? "Saving..." : "Save Progress"}
+                </Button>
+                <Button
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={() => submitMutation.mutate()}
+                  disabled={submitMutation.isPending || saveItemsMutation.isPending}
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  {submitMutation.isPending ? "Submitting..." : "Submit for Review"}
+                </Button>
+              </>
+            )}
+
+            {isAdmin && isSubmitted && (
+              <>
+                <Button
+                  variant="outline"
+                  className="border-red-500/40 text-red-400 hover:bg-red-500/10"
+                  onClick={() => rejectMutation.mutate()}
+                  disabled={rejectMutation.isPending || approveMutation.isPending}
+                >
+                  <XCircle className="w-4 h-4 mr-2" />
+                  {rejectMutation.isPending ? "Rejecting..." : "Reject Count"}
+                </Button>
+                <Button
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  onClick={() => approveMutation.mutate()}
+                  disabled={approveMutation.isPending || rejectMutation.isPending}
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  {approveMutation.isPending ? "Approving..." : "Approve & Apply"}
+                </Button>
+              </>
+            )}
+
+            {isReadOnly && (
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            )}
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

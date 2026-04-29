@@ -19,11 +19,13 @@ import {
 import {
   Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
+  ClipboardList, Eye,
 } from "lucide-react";
 import { useState } from "react";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
 import ReceiveInventoryModal from "@/components/modals/receive-inventory-modal";
 import InventoryAdjustmentModal from "@/components/modals/inventory-adjustment-modal";
+import InventoryCountModal from "@/components/modals/inventory-count-modal";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -35,6 +37,8 @@ export default function Inventory() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
+  const [isCountModalOpen, setIsCountModalOpen] = useState(false);
+  const [selectedCountSessionId, setSelectedCountSessionId] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<any>(null);
 
   const handleEditPart = (part: any) => {
@@ -67,6 +71,32 @@ export default function Inventory() {
     queryKey: ["/api/inventory/adjustments"],
     enabled: isAdmin,
   });
+
+  const { data: countSessions = [], isLoading: countSessionsLoading } = useQuery<any[]>({
+    queryKey: ["/api/inventory/count-sessions"],
+    queryFn: async () => {
+      const res = await fetch("/api/inventory/count-sessions");
+      if (!res.ok) throw new Error("Failed to load count sessions");
+      return res.json();
+    },
+  });
+
+  const pendingCountSessions = countSessions.filter((s: any) => s.status === "submitted");
+  const openCountSession = countSessions.find((s: any) => s.status === "draft");
+
+  const handleOpenCountSession = (session: any) => {
+    setSelectedCountSessionId(session.id);
+    setIsCountModalOpen(true);
+  };
+
+  const handleStartCount = () => {
+    if (openCountSession) {
+      handleOpenCountSession(openCountSession);
+    } else {
+      setSelectedCountSessionId(null);
+      setIsCountModalOpen(true);
+    }
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -179,6 +209,14 @@ export default function Inventory() {
                   {intakes.length > 0 && (
                     <Badge className="ml-2 bg-amber-500 text-white text-xs px-1.5 py-0">
                       {intakes.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="counts">
+                  Inventory Counts
+                  {isAdmin && pendingCountSessions.length > 0 && (
+                    <Badge className="ml-2 bg-amber-500 text-white text-xs px-1.5 py-0">
+                      {pendingCountSessions.length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -424,6 +462,102 @@ export default function Inventory() {
               )}
             </TabsContent>
 
+            {/* Inventory Counts Tab */}
+            <TabsContent value="counts" className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {openCountSession
+                      ? "You have a draft count in progress."
+                      : isAdmin && pendingCountSessions.length > 0
+                      ? `${pendingCountSessions.length} count${pendingCountSessions.length > 1 ? "s" : ""} pending your review.`
+                      : "Start a physical count to verify stock levels against the system."}
+                  </p>
+                </div>
+                <Button
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={handleStartCount}
+                >
+                  <ClipboardList className="w-4 h-4 mr-2" />
+                  {openCountSession ? "Continue Count" : "Start Count"}
+                </Button>
+              </div>
+
+              {countSessionsLoading ? (
+                <p className="text-muted-foreground">Loading count sessions...</p>
+              ) : countSessions.length === 0 ? (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <ClipboardList className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium mb-2">No count sessions yet</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Physical inventory counts help you reconcile system quantities against what's actually on the shelf.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {countSessions.map((session: any) => {
+                    const statusColors: Record<string, string> = {
+                      draft: "border-slate-500/40 text-slate-400",
+                      submitted: "border-amber-500/40 text-amber-400",
+                      approved: "border-green-500/40 text-green-400",
+                      rejected: "border-red-500/40 text-red-400",
+                    };
+                    const canReview = isAdmin && session.status === "submitted";
+                    const canEdit = session.status === "draft";
+                    return (
+                      <Card key={session.id}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-1">
+                                <Badge variant="outline" className={statusColors[session.status] ?? ""}>
+                                  {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                                </Badge>
+                                {session.startedByName && (
+                                  <span className="text-sm text-muted-foreground">by {session.startedByName}</span>
+                                )}
+                                <span className="text-sm text-muted-foreground">
+                                  {new Date(session.createdAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <div className="flex gap-6 text-sm text-muted-foreground">
+                                <span>{session.itemsEntered} / {session.totalItems} parts counted</span>
+                                {session.itemsWithVariance > 0 && (
+                                  <span className="text-amber-400">
+                                    {session.itemsWithVariance} variance{session.itemsWithVariance > 1 ? "s" : ""} (±{session.totalVariance} units)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex gap-2 ml-4">
+                              {(canEdit || canReview || session.status === "approved" || session.status === "rejected") && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className={canReview ? "border-amber-500/40 text-amber-400 hover:bg-amber-500/10" : ""}
+                                  onClick={() => handleOpenCountSession(session)}
+                                >
+                                  <Eye className="w-3 h-3 mr-1" />
+                                  {canEdit ? "Continue" : canReview ? "Review" : "View"}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          {session.adminNotes && (
+                            <p className="text-xs text-muted-foreground mt-2 border-t border-slate-800 pt-2">
+                              Note: {session.adminNotes}
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </TabsContent>
+
             {/* Adjustment History Tab (admin only) */}
             {isAdmin && (
               <TabsContent value="adjustments" className="space-y-4">
@@ -558,6 +692,19 @@ export default function Inventory() {
           if (!open) setSelectedPart(null);
         }}
         part={selectedPart}
+      />
+
+      <InventoryCountModal
+        open={isCountModalOpen}
+        onOpenChange={(open) => {
+          setIsCountModalOpen(open);
+          if (!open) {
+            setSelectedCountSessionId(null);
+            queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
+          }
+        }}
+        sessionId={selectedCountSessionId}
+        isAdmin={isAdmin}
       />
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

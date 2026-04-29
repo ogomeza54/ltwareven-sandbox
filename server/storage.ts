@@ -1,6 +1,7 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
   inventoryIntakes, inventoryIntakeItems, invoices, inventoryAdjustments,
+  inventoryCountSessions, inventoryCountItems,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -13,6 +14,7 @@ import {
   type InventoryIntakeItem, type InsertInventoryIntakeItem,
   type Invoice, type InsertInvoice,
   type InventoryAdjustment, type InsertInventoryAdjustment,
+  type InventoryCountSession,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -105,6 +107,15 @@ export interface IStorage {
   }): Promise<InventoryAdjustment>;
   getInventoryAdjustmentsByCompany(companyId: string): Promise<any[]>;
   getAllInventoryAdjustments(): Promise<any[]>;
+
+  // Inventory Count Session operations
+  createCountSession(companyId: string, userId: string): Promise<InventoryCountSession>;
+  getCountSessionsByCompany(companyId: string): Promise<any[]>;
+  getCountSession(id: string, companyId: string): Promise<any | undefined>;
+  updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void>;
+  submitCountSession(id: string, companyId: string): Promise<InventoryCountSession>;
+  approveCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession>;
+  rejectCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession>;
 
   // Fleet vehicle search
   searchFleetVehicles(search: string, companyId: string): Promise<Vehicle[]>;
@@ -795,6 +806,155 @@ export class DatabaseStorage implements IStorage {
     .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
     .leftJoin(users, eq(inventoryAdjustments.userId, users.id))
     .orderBy(desc(inventoryAdjustments.createdAt));
+  }
+
+  // ── Inventory Count Sessions ──────────────────────────────────────────────────
+
+  async createCountSession(companyId: string, userId: string): Promise<InventoryCountSession> {
+    const [session] = await db.insert(inventoryCountSessions).values({
+      companyId,
+      status: "draft",
+      startedByUserId: userId,
+    }).returning();
+
+    const parts = await this.getInventoryPartsByCompany(companyId);
+    if (parts.length > 0) {
+      await db.insert(inventoryCountItems).values(
+        parts.map(p => ({
+          sessionId: session.id,
+          partId: p.id,
+          systemQtySnapshot: p.quantityInStock,
+          countedQty: null,
+          variance: null,
+          companyId,
+        }))
+      );
+    }
+    return session;
+  }
+
+  async getCountSessionsByCompany(companyId: string): Promise<any[]> {
+    const sessions = await db.select().from(inventoryCountSessions)
+      .where(eq(inventoryCountSessions.companyId, companyId))
+      .orderBy(desc(inventoryCountSessions.createdAt));
+
+    const result = [];
+    for (const s of sessions) {
+      const items = await db.select().from(inventoryCountItems)
+        .where(eq(inventoryCountItems.sessionId, s.id));
+      const totalVariance = items.reduce((sum, i) => sum + Math.abs(i.variance ?? 0), 0);
+      const itemsWithVariance = items.filter(i => (i.variance ?? 0) !== 0).length;
+      const itemsEntered = items.filter(i => i.countedQty !== null).length;
+
+      let startedByName: string | null = null;
+      if (s.startedByUserId) {
+        const [u] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email })
+          .from(users).where(eq(users.id, s.startedByUserId));
+        if (u) startedByName = u.firstName ? `${u.firstName} ${u.lastName ?? ""}`.trim() : u.email;
+      }
+
+      result.push({
+        ...s,
+        totalItems: items.length,
+        itemsEntered,
+        itemsWithVariance,
+        totalVariance,
+        startedByName,
+      });
+    }
+    return result;
+  }
+
+  async getCountSession(id: string, companyId: string): Promise<any | undefined> {
+    const [session] = await db.select().from(inventoryCountSessions)
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)));
+    if (!session) return undefined;
+
+    const items = await db.select({
+      id: inventoryCountItems.id,
+      sessionId: inventoryCountItems.sessionId,
+      partId: inventoryCountItems.partId,
+      systemQtySnapshot: inventoryCountItems.systemQtySnapshot,
+      countedQty: inventoryCountItems.countedQty,
+      variance: inventoryCountItems.variance,
+      partName: inventoryParts.name,
+      partNumber: inventoryParts.partNumber,
+      partDescription: inventoryParts.description,
+      currentQty: inventoryParts.quantityInStock,
+    })
+    .from(inventoryCountItems)
+    .leftJoin(inventoryParts, eq(inventoryCountItems.partId, inventoryParts.id))
+    .where(eq(inventoryCountItems.sessionId, id))
+    .orderBy(asc(inventoryParts.name));
+
+    let startedByName: string | null = null;
+    if (session.startedByUserId) {
+      const [u] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email })
+        .from(users).where(eq(users.id, session.startedByUserId));
+      if (u) startedByName = u.firstName ? `${u.firstName} ${u.lastName ?? ""}`.trim() : u.email;
+    }
+
+    let reviewedByName: string | null = null;
+    if (session.reviewedByUserId) {
+      const [u] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email })
+        .from(users).where(eq(users.id, session.reviewedByUserId));
+      if (u) reviewedByName = u.firstName ? `${u.firstName} ${u.lastName ?? ""}`.trim() : u.email;
+    }
+
+    return { ...session, items, startedByName, reviewedByName };
+  }
+
+  async updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void> {
+    for (const { itemId, countedQty } of items) {
+      const [existing] = await db.select().from(inventoryCountItems)
+        .where(and(eq(inventoryCountItems.id, itemId), eq(inventoryCountItems.sessionId, sessionId)));
+      if (!existing) continue;
+      const variance = countedQty !== null ? countedQty - existing.systemQtySnapshot : null;
+      await db.update(inventoryCountItems)
+        .set({ countedQty, variance })
+        .where(eq(inventoryCountItems.id, itemId));
+    }
+  }
+
+  async submitCountSession(id: string, companyId: string): Promise<InventoryCountSession> {
+    const [session] = await db.update(inventoryCountSessions)
+      .set({ status: "submitted", submittedAt: new Date() })
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
+      .returning();
+    return session;
+  }
+
+  async approveCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession> {
+    const sessionData = await this.getCountSession(id, companyId);
+    if (!sessionData) throw new Error("Count session not found");
+
+    const itemsWithVariance = (sessionData.items as any[]).filter(i => i.variance !== null && i.variance !== 0);
+
+    for (const item of itemsWithVariance) {
+      await this.createInventoryAdjustment({
+        partId: item.partId,
+        adjustmentType: item.variance > 0 ? "add" : "subtract",
+        quantity: Math.abs(item.variance),
+        reason: `Inventory count #${id.slice(0, 8)} — physical count variance`,
+        referenceNote: `Count session approved by admin`,
+        userId: reviewedByUserId,
+        companyId,
+      });
+    }
+
+    const [session] = await db.update(inventoryCountSessions)
+      .set({ status: "approved", reviewedByUserId, reviewedAt: new Date(), adminNotes: adminNotes ?? null })
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
+      .returning();
+    return session;
+  }
+
+  async rejectCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession> {
+    const [session] = await db.update(inventoryCountSessions)
+      .set({ status: "rejected", reviewedByUserId, reviewedAt: new Date(), adminNotes: adminNotes ?? null })
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
+      .returning();
+    return session;
   }
 
   // ── Fleet Vehicle Search ──────────────────────────────────────────────────────
