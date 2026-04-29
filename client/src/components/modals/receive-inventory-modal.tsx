@@ -297,9 +297,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                       <tr key={item.id} className="hover:bg-muted/20">
                         <td className="px-2 py-2">
                           {item.partId ? (
-                            <Link2 className="h-3.5 w-3.5 text-green-500" title="Linked — stock will update" />
+                            <span aria-label="Linked — stock will update">
+                              <Link2 className="h-3.5 w-3.5 text-green-500" />
+                            </span>
                           ) : (
-                            <Unlink className="h-3.5 w-3.5 text-muted-foreground/50" title="Unlinked — stock won't update" />
+                            <span aria-label="Not yet linked to catalog part">
+                              <Unlink className="h-3.5 w-3.5 text-muted-foreground/50" />
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">

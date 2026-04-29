@@ -118,10 +118,11 @@ export default function InventoryPartModal({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Part Name</FormLabel>
+                    <FormLabel className="text-foreground">Part Name</FormLabel>
                     <FormControl>
                       <Input 
                         placeholder="e.g., Brake Pad Set"
+                        className="text-foreground placeholder:text-muted-foreground"
                         {...field} 
                       />
                     </FormControl>
@@ -135,13 +136,14 @@ export default function InventoryPartModal({
                 name="partNumber"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-1">
+                    <FormLabel className="flex items-center gap-1 text-foreground">
                       <Hash className="h-3 w-3" />
                       Part Number
                     </FormLabel>
                     <FormControl>
                       <Input 
                         placeholder="e.g., BP-2024-001"
+                        className="text-foreground placeholder:text-muted-foreground"
                         {...field} 
                       />
                     </FormControl>
@@ -156,11 +158,11 @@ export default function InventoryPartModal({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <FormLabel className="text-foreground">Description</FormLabel>
                   <FormControl>
                     <Textarea 
                       placeholder="Optional description of the part..."
-                      className="min-h-[80px]"
+                      className="min-h-[80px] text-foreground placeholder:text-muted-foreground"
                       {...field} 
                     />
                   </FormControl>
@@ -175,7 +177,7 @@ export default function InventoryPartModal({
                 name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-1">
+                    <FormLabel className="flex items-center gap-1 text-foreground">
                       <DollarSign className="h-3 w-3" />
                       Price
                     </FormLabel>
@@ -185,6 +187,7 @@ export default function InventoryPartModal({
                         step="0.01"
                         min="0"
                         placeholder="0.00"
+                        className="text-foreground placeholder:text-muted-foreground"
                         {...field} 
                       />
                     </FormControl>
@@ -198,12 +201,13 @@ export default function InventoryPartModal({
                 name="quantityInStock"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Quantity in Stock</FormLabel>
+                    <FormLabel className="text-foreground">Quantity in Stock</FormLabel>
                     <FormControl>
                       <Input 
                         type="number"
                         min="0"
                         placeholder="0"
+                        className="text-foreground placeholder:text-muted-foreground"
                         {...field} 
                       />
                     </FormControl>
@@ -217,7 +221,7 @@ export default function InventoryPartModal({
                 name="lowStockThreshold"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-1">
+                    <FormLabel className="flex items-center gap-1 text-foreground">
                       <AlertTriangle className="h-3 w-3" />
                       Low Stock Alert
                     </FormLabel>
@@ -226,6 +230,7 @@ export default function InventoryPartModal({
                         type="number"
                         min="0"
                         placeholder="5"
+                        className="text-foreground placeholder:text-muted-foreground"
                         {...field} 
                       />
                     </FormControl>
