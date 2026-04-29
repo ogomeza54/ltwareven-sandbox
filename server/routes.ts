@@ -848,7 +848,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/inventory/count-sessions", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const session = await storage.createCountSession(req.userContext.companyId, req.userContext.userId);
+      const scope = req.body?.scope === "low_stock" ? "low_stock" : "all";
+      const session = await storage.createCountSession(req.userContext.companyId, req.userContext.userId, scope);
       res.status(201).json(session);
     } catch (error) {
       console.error("Failed to create count session:", error);

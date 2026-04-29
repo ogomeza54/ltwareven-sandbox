@@ -109,7 +109,7 @@ export interface IStorage {
   getAllInventoryAdjustments(): Promise<any[]>;
 
   // Inventory Count Session operations
-  createCountSession(companyId: string, userId: string): Promise<InventoryCountSession>;
+  createCountSession(companyId: string, userId: string, scope?: "all" | "low_stock"): Promise<InventoryCountSession>;
   getCountSessionsByCompany(companyId: string): Promise<any[]>;
   getCountSession(id: string, companyId: string): Promise<any | undefined>;
   updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void>;
@@ -810,14 +810,18 @@ export class DatabaseStorage implements IStorage {
 
   // ── Inventory Count Sessions ──────────────────────────────────────────────────
 
-  async createCountSession(companyId: string, userId: string): Promise<InventoryCountSession> {
+  async createCountSession(companyId: string, userId: string, scope: "all" | "low_stock" = "all"): Promise<InventoryCountSession> {
     const [session] = await db.insert(inventoryCountSessions).values({
       companyId,
       status: "draft",
       startedByUserId: userId,
     }).returning();
 
-    const parts = await this.getInventoryPartsByCompany(companyId);
+    const allParts = await this.getInventoryPartsByCompany(companyId);
+    const parts = scope === "low_stock"
+      ? allParts.filter(p => p.quantityInStock <= p.lowStockThreshold)
+      : allParts;
+
     if (parts.length > 0) {
       await db.insert(inventoryCountItems).values(
         parts.map(p => ({
@@ -905,18 +909,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void> {
+    const [session] = await db.select({ status: inventoryCountSessions.status })
+      .from(inventoryCountSessions)
+      .where(and(eq(inventoryCountSessions.id, sessionId), eq(inventoryCountSessions.companyId, companyId)));
+    if (!session) throw new Error("Count session not found or access denied");
+    if (session.status !== "draft") throw new Error("Only draft sessions can be edited");
+
     for (const { itemId, countedQty } of items) {
-      const [existing] = await db.select().from(inventoryCountItems)
-        .where(and(eq(inventoryCountItems.id, itemId), eq(inventoryCountItems.sessionId, sessionId)));
+      const [existing] = await db.select()
+        .from(inventoryCountItems)
+        .where(and(
+          eq(inventoryCountItems.id, itemId),
+          eq(inventoryCountItems.sessionId, sessionId),
+          eq(inventoryCountItems.companyId, companyId),
+        ));
       if (!existing) continue;
       const variance = countedQty !== null ? countedQty - existing.systemQtySnapshot : null;
       await db.update(inventoryCountItems)
         .set({ countedQty, variance })
-        .where(eq(inventoryCountItems.id, itemId));
+        .where(and(
+          eq(inventoryCountItems.id, itemId),
+          eq(inventoryCountItems.sessionId, sessionId),
+          eq(inventoryCountItems.companyId, companyId),
+        ));
     }
   }
 
   async submitCountSession(id: string, companyId: string): Promise<InventoryCountSession> {
+    const [current] = await db.select({ status: inventoryCountSessions.status })
+      .from(inventoryCountSessions)
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)));
+    if (!current) throw new Error("Count session not found");
+    if (current.status !== "draft") throw new Error("Only draft sessions can be submitted");
+
     const [session] = await db.update(inventoryCountSessions)
       .set({ status: "submitted", submittedAt: new Date() })
       .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
@@ -925,31 +950,71 @@ export class DatabaseStorage implements IStorage {
   }
 
   async approveCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession> {
-    const sessionData = await this.getCountSession(id, companyId);
-    if (!sessionData) throw new Error("Count session not found");
+    return await db.transaction(async (tx) => {
+      const [current] = await tx.select()
+        .from(inventoryCountSessions)
+        .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
+        .for("update");
+      if (!current) throw new Error("Count session not found");
+      if (current.status !== "submitted") throw new Error("Only submitted sessions can be approved");
 
-    const itemsWithVariance = (sessionData.items as any[]).filter(i => i.variance !== null && i.variance !== 0);
+      const items = await tx.select({
+        id: inventoryCountItems.id,
+        partId: inventoryCountItems.partId,
+        variance: inventoryCountItems.variance,
+        systemQtySnapshot: inventoryCountItems.systemQtySnapshot,
+      })
+      .from(inventoryCountItems)
+      .where(and(eq(inventoryCountItems.sessionId, id), eq(inventoryCountItems.companyId, companyId)));
 
-    for (const item of itemsWithVariance) {
-      await this.createInventoryAdjustment({
-        partId: item.partId,
-        adjustmentType: item.variance > 0 ? "add" : "subtract",
-        quantity: Math.abs(item.variance),
-        reason: `Inventory count #${id.slice(0, 8)} — physical count variance`,
-        referenceNote: `Count session approved by admin`,
-        userId: reviewedByUserId,
-        companyId,
-      });
-    }
+      const itemsWithVariance = items.filter(i => i.variance !== null && i.variance !== 0);
 
-    const [session] = await db.update(inventoryCountSessions)
-      .set({ status: "approved", reviewedByUserId, reviewedAt: new Date(), adminNotes: adminNotes ?? null })
-      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
-      .returning();
-    return session;
+      for (const item of itemsWithVariance) {
+        const [part] = await tx
+          .select({ qty: inventoryParts.quantityInStock })
+          .from(inventoryParts)
+          .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)))
+          .for("update");
+        if (!part) continue;
+
+        const previousQty = part.qty;
+        const variance = item.variance!;
+        const newQty = Math.max(0, previousQty + variance);
+        const delta = newQty - previousQty;
+        const adjustmentType = variance > 0 ? "add" : "subtract";
+
+        await tx.update(inventoryParts)
+          .set({ quantityInStock: newQty })
+          .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
+
+        await tx.insert(inventoryAdjustments).values({
+          partId: item.partId,
+          previousQty,
+          newQty,
+          delta,
+          adjustmentType,
+          reason: `Physical count #${id.slice(0, 8)} — variance correction`,
+          referenceNote: `Inventory count session approved`,
+          userId: reviewedByUserId,
+          companyId,
+        });
+      }
+
+      const [session] = await tx.update(inventoryCountSessions)
+        .set({ status: "approved", reviewedByUserId, reviewedAt: new Date(), adminNotes: adminNotes ?? null })
+        .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))
+        .returning();
+      return session;
+    });
   }
 
   async rejectCountSession(id: string, companyId: string, reviewedByUserId: string, adminNotes?: string): Promise<InventoryCountSession> {
+    const [current] = await db.select({ status: inventoryCountSessions.status })
+      .from(inventoryCountSessions)
+      .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)));
+    if (!current) throw new Error("Count session not found");
+    if (current.status !== "submitted") throw new Error("Only submitted sessions can be rejected");
+
     const [session] = await db.update(inventoryCountSessions)
       .set({ status: "rejected", reviewedByUserId, reviewedAt: new Date(), adminNotes: adminNotes ?? null })
       .where(and(eq(inventoryCountSessions.id, id), eq(inventoryCountSessions.companyId, companyId)))

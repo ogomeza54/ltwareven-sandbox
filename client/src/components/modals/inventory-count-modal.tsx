@@ -12,8 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   ClipboardList, CheckCircle2, XCircle, ArrowUp, ArrowDown, Minus, Save, Send,
+  AlertTriangle, Package,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -35,11 +37,13 @@ export default function InventoryCountModal({
   const [activeSessionId, setActiveSessionId] = useState<string | null>(sessionId ?? null);
   const [localCounts, setLocalCounts] = useState<Record<string, string>>({});
   const [adminNotes, setAdminNotes] = useState("");
+  const [scope, setScope] = useState<"all" | "low_stock">("all");
 
   useEffect(() => {
     setActiveSessionId(sessionId ?? null);
     setLocalCounts({});
     setAdminNotes("");
+    setScope("all");
   }, [sessionId, open]);
 
   const { data: session, isLoading: sessionLoading } = useQuery<any>({
@@ -72,7 +76,7 @@ export default function InventoryCountModal({
 
   const startCountMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/inventory/count-sessions");
+      const res = await apiRequest("POST", "/api/inventory/count-sessions", { scope });
       return res.json();
     },
     onSuccess: (data) => {
@@ -217,22 +221,55 @@ export default function InventoryCountModal({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto">
-          {/* No session yet — start prompt */}
+          {/* No session yet — scope selector + start prompt */}
           {!activeSessionId && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
-              <ClipboardList className="h-16 w-16 text-amber-500/30" />
-              <div className="text-center">
-                <p className="text-lg font-medium mb-1">Start a Physical Count</p>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  A snapshot of current stock levels will be captured. Enter your physical counts part-by-part, then submit for admin review.
-                </p>
+            <div className="flex flex-col gap-6 py-6 px-2 max-w-md mx-auto">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <ClipboardList className="h-12 w-12 text-amber-500/50" />
+                <div>
+                  <p className="text-lg font-medium mb-1">Start a Physical Count</p>
+                  <p className="text-sm text-muted-foreground">
+                    Choose which parts to include. A stock snapshot will be taken at the moment you start.
+                  </p>
+                </div>
               </div>
+
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Parts to count</Label>
+                <RadioGroup value={scope} onValueChange={(v) => setScope(v as "all" | "low_stock")} className="space-y-2">
+                  <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                    scope === "all" ? "border-amber-500/60 bg-amber-500/5" : "border-slate-700 hover:border-slate-600"
+                  }`}>
+                    <RadioGroupItem value="all" className="mt-0.5" />
+                    <div className="flex items-start gap-2">
+                      <Package className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">All Parts</p>
+                        <p className="text-xs text-muted-foreground">Count every item in the catalog</p>
+                      </div>
+                    </div>
+                  </label>
+                  <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                    scope === "low_stock" ? "border-amber-500/60 bg-amber-500/5" : "border-slate-700 hover:border-slate-600"
+                  }`}>
+                    <RadioGroupItem value="low_stock" className="mt-0.5" />
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-medium text-sm">Low Stock Only</p>
+                        <p className="text-xs text-muted-foreground">Only parts at or below their low-stock threshold</p>
+                      </div>
+                    </div>
+                  </label>
+                </RadioGroup>
+              </div>
+
               <Button
-                className="bg-amber-500 hover:bg-amber-600 text-white"
+                className="bg-amber-500 hover:bg-amber-600 text-white w-full"
                 onClick={() => startCountMutation.mutate()}
                 disabled={startCountMutation.isPending}
               >
-                {startCountMutation.isPending ? "Starting..." : "Start Count Now"}
+                {startCountMutation.isPending ? "Starting..." : "Begin Count"}
               </Button>
             </div>
           )}
