@@ -556,7 +556,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const { companyId, id, customerId, ...updates } = req.body;
+      const { companyId, id, ...updates } = req.body;
       const vehicle = await storage.updateVehicle(req.params.id, req.userContext.companyId, updates);
       res.json(vehicle);
     } catch (error) {
