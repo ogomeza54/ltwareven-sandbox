@@ -95,17 +95,37 @@ export default function InventoryCountModal({
     }
   }, [session]);
 
-  const startCountMutation = useMutation({
+  type StartCountResult = { id: string; conflict?: boolean };
+
+  const startCountMutation = useMutation<StartCountResult>({
     mutationFn: async () => {
-      const body: any = { scope };
+      const body: Record<string, string> = { scope };
       if (scope === "category" && categoryFilter.trim()) {
         body.categoryFilter = categoryFilter.trim();
       }
-      const res = await apiRequest("POST", "/api/inventory/count-sessions", body);
-      return res.json();
+      const res = await fetch("/api/inventory/count-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        if (!data.sessionId) {
+          throw new Error("A count session is already in progress. Please refresh and try again.");
+        }
+        return { id: data.sessionId as string, conflict: true };
+      }
+      if (!res.ok) {
+        throw new Error(data.message ?? "Failed to start count");
+      }
+      return { id: data.id as string };
     },
     onSuccess: (data) => {
       setActiveSessionId(data.id);
+      if (data.conflict) {
+        toast({ title: "Resuming existing draft count session" });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/count-sessions"] });
     },
     onError: () => {

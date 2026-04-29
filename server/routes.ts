@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, DuplicateDraftError } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { sendCountSubmittedNotification, sendCountReviewedNotification } from "./email";
 import { 
@@ -849,6 +849,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/inventory/count-sessions", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const existing = await storage.getOpenCountSession(req.userContext.companyId);
+      if (existing) {
+        return res.status(409).json({ message: "A draft count session already exists", sessionId: existing.id });
+      }
       const rawScope = req.body?.scope;
       const scope: "all" | "low_stock" | "category" =
         rawScope === "low_stock" ? "low_stock" :
@@ -860,6 +864,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const session = await storage.createCountSession(req.userContext.companyId, req.userContext.userId, scope, categoryFilter);
       res.status(201).json(session);
     } catch (error) {
+      if (error instanceof DuplicateDraftError) {
+        const body: Record<string, string> = { message: "A draft count session already exists" };
+        if (error.existingSessionId) body.sessionId = error.existingSessionId;
+        return res.status(409).json(body);
+      }
       console.error("Failed to create count session:", error);
       res.status(400).json({ message: "Failed to start inventory count" });
     }

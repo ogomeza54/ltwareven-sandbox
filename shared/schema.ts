@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, boolean, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, boolean, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -437,7 +437,9 @@ export const inventoryCountSessions = pgTable("inventory_count_sessions", {
   reviewedAt: timestamp("reviewed_at"),
   adminNotes: text("admin_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("unique_draft_per_company").on(table.companyId).where(sql`status = 'draft'`),
+]);
 
 export const inventoryCountItems = pgTable("inventory_count_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

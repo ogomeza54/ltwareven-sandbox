@@ -111,6 +111,7 @@ export interface IStorage {
 
   // Inventory Count Session operations
   createCountSession(companyId: string, userId: string, scope?: "all" | "low_stock" | "category", categoryFilter?: string | null): Promise<InventoryCountSession>;
+  getOpenCountSession(companyId: string): Promise<InventoryCountSession | undefined>;
   getCountSessionsByCompany(companyId: string): Promise<any[]>;
   getCountSession(id: string, companyId: string): Promise<any | undefined>;
   updateCountItems(sessionId: string, items: { itemId: string; countedQty: number | null }[], companyId: string): Promise<void>;
@@ -132,6 +133,13 @@ export interface IStorage {
     lowStockItems: number;
     monthlyRevenue: number;
   }>;
+}
+
+export class DuplicateDraftError extends Error {
+  constructor(public readonly existingSessionId: string | null) {
+    super("A draft count session already exists for this company");
+    this.name = "DuplicateDraftError";
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -835,12 +843,29 @@ export class DatabaseStorage implements IStorage {
 
   // ── Inventory Count Sessions ──────────────────────────────────────────────────
 
+  async getOpenCountSession(companyId: string): Promise<InventoryCountSession | undefined> {
+    const [session] = await db.select().from(inventoryCountSessions)
+      .where(and(eq(inventoryCountSessions.companyId, companyId), eq(inventoryCountSessions.status, "draft")))
+      .limit(1);
+    return session;
+  }
+
   async createCountSession(companyId: string, userId: string, scope: "all" | "low_stock" | "category" = "all", categoryFilter?: string | null): Promise<InventoryCountSession> {
-    const [session] = await db.insert(inventoryCountSessions).values({
-      companyId,
-      status: "draft",
-      startedByUserId: userId,
-    }).returning();
+    let session: InventoryCountSession;
+    try {
+      const [created] = await db.insert(inventoryCountSessions).values({
+        companyId,
+        status: "draft",
+        startedByUserId: userId,
+      }).returning();
+      session = created;
+    } catch (err: any) {
+      if (err?.code === "23505") {
+        const existing = await this.getOpenCountSession(companyId);
+        throw new DuplicateDraftError(existing?.id ?? null);
+      }
+      throw err;
+    }
 
     const allParts = await this.getInventoryPartsByCompany(companyId);
     let parts = allParts;
