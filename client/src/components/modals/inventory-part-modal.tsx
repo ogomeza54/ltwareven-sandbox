@@ -122,7 +122,7 @@ export default function InventoryPartModal({
                     <FormControl>
                       <Input 
                         placeholder="e.g., Brake Pad Set"
-                        className="text-foreground placeholder:text-muted-foreground"
+                        className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
                     </FormControl>
@@ -143,7 +143,7 @@ export default function InventoryPartModal({
                     <FormControl>
                       <Input 
                         placeholder="e.g., BP-2024-001"
-                        className="text-foreground placeholder:text-muted-foreground"
+                        className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
                     </FormControl>
@@ -162,7 +162,7 @@ export default function InventoryPartModal({
                   <FormControl>
                     <Textarea 
                       placeholder="Optional description of the part..."
-                      className="min-h-[80px] text-foreground placeholder:text-muted-foreground"
+                      className="min-h-[80px] text-foreground placeholder:text-foreground/50"
                       {...field} 
                     />
                   </FormControl>
@@ -187,7 +187,7 @@ export default function InventoryPartModal({
                         step="0.01"
                         min="0"
                         placeholder="0.00"
-                        className="text-foreground placeholder:text-muted-foreground"
+                        className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
                     </FormControl>
@@ -207,7 +207,7 @@ export default function InventoryPartModal({
                         type="number"
                         min="0"
                         placeholder="0"
-                        className="text-foreground placeholder:text-muted-foreground"
+                        className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
                     </FormControl>
@@ -230,7 +230,7 @@ export default function InventoryPartModal({
                         type="number"
                         min="0"
                         placeholder="5"
-                        className="text-foreground placeholder:text-muted-foreground"
+                        className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
                     </FormControl>

@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -141,6 +140,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      // Only send rows that have content (ignore blank trailing rows)
+      const filledItems = items.filter(i => i.partNameSnapshot.trim() && i.partId);
       const payload = {
         vendor,
         invoiceNumber: invoiceNumber || undefined,
@@ -150,9 +151,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         taxAmount: taxAmount || "0",
         deliveryFee: deliveryFee || "0",
         totalAmount: totalAmount || calculatedTotal.toFixed(2),
-        items: items.map(item => ({
+        items: filledItems.map(item => ({
           partId: item.partId,
-          partNameSnapshot: item.partNameSnapshot || "Unnamed Item",
+          partNameSnapshot: item.partNameSnapshot,
           partNumberSnapshot: item.partNumberSnapshot || "",
           qty: item.qty,
           unitCost: item.unitCost || "0",
@@ -289,7 +290,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {items.map((item, idx) => {
+                  {items.map((item) => {
                     const filteredParts = getFilteredParts(item.id);
                     const showDropdown = searchFocus === item.id && filteredParts.length > 0;
 
