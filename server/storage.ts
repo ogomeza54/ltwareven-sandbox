@@ -94,8 +94,17 @@ export interface IStorage {
   ): Promise<InventoryIntake>;
 
   // Inventory Adjustment operations
-  createInventoryAdjustment(data: InsertInventoryAdjustment): Promise<InventoryAdjustment>;
+  createInventoryAdjustment(request: {
+    partId: string;
+    adjustmentType: string;
+    quantity: number;
+    reason: string;
+    referenceNote?: string | null;
+    userId: string;
+    companyId: string;
+  }): Promise<InventoryAdjustment>;
   getInventoryAdjustmentsByCompany(companyId: string): Promise<any[]>;
+  getAllInventoryAdjustments(): Promise<any[]>;
 
   // Fleet vehicle search
   searchFleetVehicles(search: string, companyId: string): Promise<Vehicle[]>;
@@ -693,20 +702,50 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Inventory Adjustments ─────────────────────────────────────────────────────
-  async createInventoryAdjustment(data: InsertInventoryAdjustment): Promise<InventoryAdjustment> {
+  async createInventoryAdjustment(request: {
+    partId: string;
+    adjustmentType: string;
+    quantity: number;
+    reason: string;
+    referenceNote?: string | null;
+    userId: string;
+    companyId: string;
+  }): Promise<InventoryAdjustment> {
     return await db.transaction(async (tx) => {
-      const part = await tx.select({ qty: inventoryParts.quantityInStock })
+      // Read current qty inside transaction to prevent stale calculations
+      const [part] = await tx
+        .select({ qty: inventoryParts.quantityInStock })
         .from(inventoryParts)
-        .where(and(eq(inventoryParts.id, data.partId), eq(inventoryParts.companyId, data.companyId)))
-        .then(rows => rows[0]);
+        .where(and(eq(inventoryParts.id, request.partId), eq(inventoryParts.companyId, request.companyId)));
 
       if (!part) throw new Error("Part not found or access denied");
 
-      await tx.update(inventoryParts)
-        .set({ quantityInStock: data.newQty })
-        .where(and(eq(inventoryParts.id, data.partId), eq(inventoryParts.companyId, data.companyId)));
+      const previousQty = part.qty;
+      let newQty: number;
 
-      const [adjustment] = await tx.insert(inventoryAdjustments).values(data).returning();
+      if (request.adjustmentType === "add") newQty = previousQty + request.quantity;
+      else if (request.adjustmentType === "subtract") newQty = previousQty - request.quantity;
+      else newQty = request.quantity; // set
+
+      if (newQty < 0) throw new Error("Resulting quantity cannot be negative");
+      const delta = newQty - previousQty;
+
+      await tx.update(inventoryParts)
+        .set({ quantityInStock: newQty })
+        .where(and(eq(inventoryParts.id, request.partId), eq(inventoryParts.companyId, request.companyId)));
+
+      const [adjustment] = await tx.insert(inventoryAdjustments).values({
+        partId: request.partId,
+        previousQty,
+        newQty,
+        delta,
+        adjustmentType: request.adjustmentType,
+        reason: request.reason,
+        referenceNote: request.referenceNote ?? null,
+        userId: request.userId,
+        companyId: request.companyId,
+      }).returning();
+
       return adjustment;
     });
   }
@@ -731,6 +770,29 @@ export class DatabaseStorage implements IStorage {
     .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
     .leftJoin(users, eq(inventoryAdjustments.userId, users.id))
     .where(eq(inventoryAdjustments.companyId, companyId))
+    .orderBy(desc(inventoryAdjustments.createdAt));
+  }
+
+  async getAllInventoryAdjustments(): Promise<any[]> {
+    return await db.select({
+      id: inventoryAdjustments.id,
+      partId: inventoryAdjustments.partId,
+      previousQty: inventoryAdjustments.previousQty,
+      newQty: inventoryAdjustments.newQty,
+      delta: inventoryAdjustments.delta,
+      adjustmentType: inventoryAdjustments.adjustmentType,
+      reason: inventoryAdjustments.reason,
+      referenceNote: inventoryAdjustments.referenceNote,
+      userId: inventoryAdjustments.userId,
+      companyId: inventoryAdjustments.companyId,
+      createdAt: inventoryAdjustments.createdAt,
+      partName: inventoryParts.name,
+      partNumber: inventoryParts.partNumber,
+      performedBy: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email}, 'Unknown')`,
+    })
+    .from(inventoryAdjustments)
+    .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
+    .leftJoin(users, eq(inventoryAdjustments.userId, users.id))
     .orderBy(desc(inventoryAdjustments.createdAt));
   }
 

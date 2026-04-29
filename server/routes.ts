@@ -5,7 +5,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
-  insertPartsUsageSchema, insertInvoiceSchema, insertInventoryAdjustmentSchema,
+  insertPartsUsageSchema, insertInvoiceSchema,
   ACTIVE_STATUSES
 } from "@shared/schema";
 import { z } from "zod";
@@ -782,7 +782,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (role !== "admin" && role !== "super_admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      const adjustments = await storage.getInventoryAdjustmentsByCompany(req.userContext.companyId);
+      // Super admins see all adjustments across companies; company admins see only their own
+      const adjustments = role === "super_admin"
+        ? await storage.getAllInventoryAdjustments()
+        : await storage.getInventoryAdjustmentsByCompany(req.userContext.companyId);
       res.json(adjustments);
     } catch (error) {
       console.error("Failed to fetch adjustments:", error);
@@ -798,47 +801,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { partId, adjustmentType, quantity, reason, referenceNote } = req.body;
-      if (!partId || !adjustmentType || quantity === undefined || !reason) {
-        return res.status(400).json({ message: "partId, adjustmentType, quantity, and reason are required" });
-      }
 
       const VALID_TYPES = ["add", "subtract", "set"];
-      if (!VALID_TYPES.includes(adjustmentType)) {
+      if (!partId || typeof partId !== "string") {
+        return res.status(400).json({ message: "partId is required" });
+      }
+      if (!adjustmentType || !VALID_TYPES.includes(adjustmentType)) {
         return res.status(400).json({ message: "adjustmentType must be add, subtract, or set" });
       }
-
-      const part = await storage.getInventoryPart(partId, req.userContext.companyId);
-      if (!part) {
-        return res.status(404).json({ message: "Part not found" });
-      }
-
-      const previousQty = part.quantityInStock;
       const qty = parseInt(quantity, 10);
-
-      let newQty: number;
-      if (adjustmentType === "add") newQty = previousQty + qty;
-      else if (adjustmentType === "subtract") newQty = previousQty - qty;
-      else newQty = qty; // set
-
-      if (newQty < 0) {
-        return res.status(400).json({ message: "Resulting quantity cannot be negative" });
+      if (!Number.isInteger(qty) || qty < 0) {
+        return res.status(400).json({ message: "quantity must be a non-negative integer" });
+      }
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      if (trimmedReason.length === 0) {
+        return res.status(400).json({ message: "reason is required and cannot be blank" });
       }
 
-      const delta = newQty - previousQty;
-
-      const adjustmentData = insertInventoryAdjustmentSchema.parse({
+      const adjustment = await storage.createInventoryAdjustment({
         partId,
-        previousQty,
-        newQty,
-        delta,
         adjustmentType,
-        reason: reason.trim(),
-        referenceNote: referenceNote?.trim() || null,
+        quantity: qty,
+        reason: trimmedReason,
+        referenceNote: referenceNote ? String(referenceNote).trim() || null : null,
         userId: req.userContext.userId,
         companyId: req.userContext.companyId,
       });
-
-      const adjustment = await storage.createInventoryAdjustment(adjustmentData);
       res.status(201).json(adjustment);
     } catch (error) {
       console.error("Failed to create adjustment:", error);
