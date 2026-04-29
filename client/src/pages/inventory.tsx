@@ -272,7 +272,7 @@ export default function Inventory() {
                       In Progress
                     </Badge>
                   )}
-                  {!openCountSession && isAdmin && pendingCountSessions.length > 0 && (
+                  {isAdmin && pendingCountSessions.length > 0 && (
                     <Badge className="ml-2 bg-amber-500 text-white text-xs px-1.5 py-0">
                       {pendingCountSessions.length}
                     </Badge>
