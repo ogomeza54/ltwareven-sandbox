@@ -16,10 +16,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus, CheckCircle2, Clock, FileText } from "lucide-react";
+import {
+  Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus,
+  CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
+} from "lucide-react";
 import { useState } from "react";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
 import ReceiveInventoryModal from "@/components/modals/receive-inventory-modal";
+import InventoryAdjustmentModal from "@/components/modals/inventory-adjustment-modal";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -30,6 +34,7 @@ export default function Inventory() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [selectedPart, setSelectedPart] = useState<any>(null);
 
   const handleEditPart = (part: any) => {
@@ -42,12 +47,25 @@ export default function Inventory() {
     setIsDeleteDialogOpen(true);
   };
 
+  const handleAdjustPart = (part: any) => {
+    setSelectedPart(part);
+    setIsAdjustModalOpen(true);
+  };
+
+  const { data: currentUser } = useQuery<any>({ queryKey: ["/api/auth/user"] });
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+
   const { data: parts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
   });
 
   const { data: intakes = [], isLoading: intakesLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory/intakes"],
+  });
+
+  const { data: adjustments = [], isLoading: adjustmentsLoading } = useQuery<any[]>({
+    queryKey: ["/api/inventory/adjustments"],
+    enabled: isAdmin,
   });
 
   const deleteMutation = useMutation({
@@ -83,6 +101,12 @@ export default function Inventory() {
     if (status === "matched") return <CheckCircle2 className="h-4 w-4 text-green-500" />;
     if (status === "warning") return <AlertTriangle className="h-4 w-4 text-amber-500" />;
     return <Clock className="h-4 w-4 text-slate-400" />;
+  };
+
+  const deltaIcon = (delta: number) => {
+    if (delta > 0) return <ArrowUp className="h-3 w-3 text-green-400" />;
+    if (delta < 0) return <ArrowDown className="h-3 w-3 text-red-400" />;
+    return <Minus className="h-3 w-3 text-slate-400" />;
   };
 
   return (
@@ -158,6 +182,16 @@ export default function Inventory() {
                     </Badge>
                   )}
                 </TabsTrigger>
+                {isAdmin && (
+                  <TabsTrigger value="adjustments">
+                    Adjustment History
+                    {adjustments.length > 0 && (
+                      <Badge className="ml-2 bg-slate-600 text-white text-xs px-1.5 py-0">
+                        {adjustments.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                )}
               </TabsList>
 
               <div className="flex gap-2">
@@ -180,7 +214,6 @@ export default function Inventory() {
 
             {/* Parts Catalog Tab */}
             <TabsContent value="parts" className="space-y-4">
-              {/* Search */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                 <Input
@@ -191,7 +224,6 @@ export default function Inventory() {
                 />
               </div>
 
-              {/* Low Stock Alert */}
               {lowStockParts.length > 0 && (
                 <Card className="border-amber-500/30 bg-amber-500/5">
                   <CardHeader className="pb-2">
@@ -217,7 +249,6 @@ export default function Inventory() {
                 </Card>
               )}
 
-              {/* Parts Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {isLoading ? (
                   <Card>
@@ -289,10 +320,21 @@ export default function Inventory() {
                         </div>
 
                         <div className="mt-4 flex space-x-2">
+                          {isAdmin && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                              onClick={() => handleAdjustPart(part)}
+                            >
+                              <SlidersHorizontal className="w-3 h-3 mr-1" />
+                              Adjust
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
-                            className="flex-1"
+                            className={isAdmin ? "" : "flex-1"}
                             onClick={() => handleEditPart(part)}
                           >
                             <Edit className="w-3 h-3 mr-1" />
@@ -381,6 +423,110 @@ export default function Inventory() {
                 </div>
               )}
             </TabsContent>
+
+            {/* Adjustment History Tab (admin only) */}
+            {isAdmin && (
+              <TabsContent value="adjustments" className="space-y-4">
+                {adjustmentsLoading ? (
+                  <p className="text-muted-foreground">Loading adjustment history...</p>
+                ) : adjustments.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-8 text-center">
+                      <SlidersHorizontal className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium mb-2">No adjustments yet</h3>
+                      <p className="text-muted-foreground">
+                        Use the "Adjust" button on any part to make a stock correction. All adjustments are logged here for audit purposes.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="rounded-lg border border-slate-700 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-700 bg-slate-800/50">
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">Date</th>
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">Part</th>
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">Type</th>
+                          <th className="text-right px-4 py-3 text-muted-foreground font-medium">Before</th>
+                          <th className="text-right px-4 py-3 text-muted-foreground font-medium">After</th>
+                          <th className="text-right px-4 py-3 text-muted-foreground font-medium">Delta</th>
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">Reason</th>
+                          <th className="text-left px-4 py-3 text-muted-foreground font-medium">By</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adjustments.map((adj: any, i: number) => (
+                          <tr
+                            key={adj.id}
+                            className={`border-b border-slate-800 ${i % 2 === 0 ? "" : "bg-slate-900/30"}`}
+                          >
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                              {new Date(adj.createdAt).toLocaleDateString()}{" "}
+                              <span className="text-xs">
+                                {new Date(adj.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{adj.partName}</div>
+                              {adj.partNumber && (
+                                <div className="text-xs text-muted-foreground">#{adj.partNumber}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  adj.adjustmentType === "add"
+                                    ? "border-green-500/40 text-green-400"
+                                    : adj.adjustmentType === "subtract"
+                                    ? "border-red-500/40 text-red-400"
+                                    : "border-amber-500/40 text-amber-400"
+                                }
+                              >
+                                {adj.adjustmentType === "add"
+                                  ? "Add"
+                                  : adj.adjustmentType === "subtract"
+                                  ? "Subtract"
+                                  : "Set to"}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono">{adj.previousQty}</td>
+                            <td className="px-4 py-3 text-right font-mono font-semibold">{adj.newQty}</td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {deltaIcon(adj.delta)}
+                                <span
+                                  className={`font-mono font-medium ${
+                                    adj.delta > 0
+                                      ? "text-green-400"
+                                      : adj.delta < 0
+                                      ? "text-red-400"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {adj.delta > 0 ? `+${adj.delta}` : adj.delta}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 max-w-[180px]">
+                              <div className="truncate" title={adj.reason}>{adj.reason}</div>
+                              {adj.referenceNote && (
+                                <div className="text-xs text-muted-foreground truncate" title={adj.referenceNote}>
+                                  Ref: {adj.referenceNote}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
+                              {adj.performedBy}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
+            )}
           </Tabs>
         </div>
       </main>
@@ -403,6 +549,15 @@ export default function Inventory() {
       <ReceiveInventoryModal
         open={isReceiveModalOpen}
         onOpenChange={setIsReceiveModalOpen}
+      />
+
+      <InventoryAdjustmentModal
+        open={isAdjustModalOpen}
+        onOpenChange={(open) => {
+          setIsAdjustModalOpen(open);
+          if (!open) setSelectedPart(null);
+        }}
+        part={selectedPart}
       />
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

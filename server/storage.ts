@@ -1,6 +1,6 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
-  inventoryIntakes, inventoryIntakeItems, invoices,
+  inventoryIntakes, inventoryIntakeItems, invoices, inventoryAdjustments,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -12,6 +12,7 @@ import {
   type InventoryIntake, type InsertInventoryIntake,
   type InventoryIntakeItem, type InsertInventoryIntakeItem,
   type Invoice, type InsertInvoice,
+  type InventoryAdjustment, type InsertInventoryAdjustment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -91,6 +92,10 @@ export interface IStorage {
     companyId: string,
     userId: string
   ): Promise<InventoryIntake>;
+
+  // Inventory Adjustment operations
+  createInventoryAdjustment(data: InsertInventoryAdjustment): Promise<InventoryAdjustment>;
+  getInventoryAdjustmentsByCompany(companyId: string): Promise<any[]>;
 
   // Fleet vehicle search
   searchFleetVehicles(search: string, companyId: string): Promise<Vehicle[]>;
@@ -685,6 +690,48 @@ export class DatabaseStorage implements IStorage {
 
       return intake;
     });
+  }
+
+  // ── Inventory Adjustments ─────────────────────────────────────────────────────
+  async createInventoryAdjustment(data: InsertInventoryAdjustment): Promise<InventoryAdjustment> {
+    return await db.transaction(async (tx) => {
+      const part = await tx.select({ qty: inventoryParts.quantityInStock })
+        .from(inventoryParts)
+        .where(and(eq(inventoryParts.id, data.partId), eq(inventoryParts.companyId, data.companyId)))
+        .then(rows => rows[0]);
+
+      if (!part) throw new Error("Part not found or access denied");
+
+      await tx.update(inventoryParts)
+        .set({ quantityInStock: data.newQty })
+        .where(and(eq(inventoryParts.id, data.partId), eq(inventoryParts.companyId, data.companyId)));
+
+      const [adjustment] = await tx.insert(inventoryAdjustments).values(data).returning();
+      return adjustment;
+    });
+  }
+
+  async getInventoryAdjustmentsByCompany(companyId: string): Promise<any[]> {
+    return await db.select({
+      id: inventoryAdjustments.id,
+      partId: inventoryAdjustments.partId,
+      previousQty: inventoryAdjustments.previousQty,
+      newQty: inventoryAdjustments.newQty,
+      delta: inventoryAdjustments.delta,
+      adjustmentType: inventoryAdjustments.adjustmentType,
+      reason: inventoryAdjustments.reason,
+      referenceNote: inventoryAdjustments.referenceNote,
+      userId: inventoryAdjustments.userId,
+      createdAt: inventoryAdjustments.createdAt,
+      partName: inventoryParts.name,
+      partNumber: inventoryParts.partNumber,
+      performedBy: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email}, 'Unknown')`,
+    })
+    .from(inventoryAdjustments)
+    .leftJoin(inventoryParts, eq(inventoryAdjustments.partId, inventoryParts.id))
+    .leftJoin(users, eq(inventoryAdjustments.userId, users.id))
+    .where(eq(inventoryAdjustments.companyId, companyId))
+    .orderBy(desc(inventoryAdjustments.createdAt));
   }
 
   // ── Fleet Vehicle Search ──────────────────────────────────────────────────────

@@ -382,6 +382,44 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   createdAt: true,
 });
 
+// Inventory Adjustments table — admin-only stock corrections
+export const inventoryAdjustments = pgTable("inventory_adjustments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  partId: varchar("part_id").notNull().references(() => inventoryParts.id),
+  previousQty: integer("previous_qty").notNull(),
+  newQty: integer("new_qty").notNull(),
+  delta: integer("delta").notNull(),
+  adjustmentType: text("adjustment_type").notNull(), // add | subtract | set
+  reason: text("reason").notNull(),
+  referenceNote: text("reference_note"),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const inventoryAdjustmentsRelations = relations(inventoryAdjustments, ({ one }) => ({
+  part: one(inventoryParts, {
+    fields: [inventoryAdjustments.partId],
+    references: [inventoryParts.id],
+  }),
+  user: one(users, {
+    fields: [inventoryAdjustments.userId],
+    references: [users.id],
+  }),
+  company: one(companies, {
+    fields: [inventoryAdjustments.companyId],
+    references: [companies.id],
+  }),
+}));
+
+export const insertInventoryAdjustmentSchema = createInsertSchema(inventoryAdjustments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InventoryAdjustment = typeof inventoryAdjustments.$inferSelect;
+export type InsertInventoryAdjustment = z.infer<typeof insertInventoryAdjustmentSchema>;
+
 // Status lifecycle constants
 export const WORK_ORDER_STATUSES = [
   "open",

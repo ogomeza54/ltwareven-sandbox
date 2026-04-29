@@ -57,7 +57,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Business Logic
 - **Workflow Management**: Status tracking for repair orders
-- **Inventory Control**: Stock level monitoring and parts usage tracking
+- **Inventory Control**: Stock level monitoring, parts usage tracking, and admin-only stock adjustments with full audit trail
 - **Resource Management**: Mechanic availability and workload balancing
 - **Customer Relations**: Vehicle history and repair tracking
 
