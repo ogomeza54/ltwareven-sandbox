@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { 
-  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle, Search, X
+  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle, Search, X, Link2, Unlink
 } from "lucide-react";
 
 interface LineItem {
@@ -262,17 +262,21 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
           {/* Line Items */}
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-foreground">Line Items</h3>
               <Button type="button" size="sm" variant="outline" onClick={addItem}>
                 <Plus className="h-4 w-4 mr-1" /> Add Item
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Search to link a part from your catalog — linked items automatically update stock. Unlinked rows are recorded on the invoice but won't change stock counts.
+            </p>
 
             <div className="border rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
                   <tr>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-6" title="Linked to catalog part = stock will update" />
                     <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-28">Part #</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-20">Qty</th>
@@ -288,6 +292,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
                     return (
                       <tr key={item.id} className="hover:bg-muted/20">
+                        <td className="px-2 py-2">
+                          {item.partId ? (
+                            <Link2 className="h-3.5 w-3.5 text-green-500" title="Linked — stock will update" />
+                          ) : (
+                            <Unlink className="h-3.5 w-3.5 text-muted-foreground/50" title="Unlinked — stock won't update" />
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           <div className="relative">
                             <div className="flex items-center gap-1">

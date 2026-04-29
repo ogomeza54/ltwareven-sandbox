@@ -627,36 +627,55 @@ export class DatabaseStorage implements IStorage {
     companyId: string,
     userId: string
   ): Promise<InventoryIntake> {
-    const [intake] = await db.insert(inventoryIntakes)
-      .values({ ...intakeHeader, companyId, createdByUserId: userId })
-      .returning();
-
-    // Insert line items
-    if (items.length > 0) {
-      await db.insert(inventoryIntakeItems).values(
-        items.map(item => ({
-          inventoryIntakeId: intake.id,
-          partId: item.partId || null,
-          partNameSnapshot: item.partNameSnapshot,
-          partNumberSnapshot: item.partNumberSnapshot,
-          qty: item.qty,
-          unitCost: item.unitCost,
-          lineTotal: item.lineTotal,
-          companyId,
-        }))
-      );
-
-      // Increment part quantities for linked parts
-      for (const item of items) {
-        if (item.partId) {
-          await db.update(inventoryParts)
-            .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}` })
-            .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
+    // Validate that any provided partIds belong to this company before we write anything
+    const linkedPartIds = items.map(i => i.partId).filter(Boolean) as string[];
+    if (linkedPartIds.length > 0) {
+      const ownedParts = await db.select({ id: inventoryParts.id })
+        .from(inventoryParts)
+        .where(and(
+          inArray(inventoryParts.id, linkedPartIds),
+          eq(inventoryParts.companyId, companyId)
+        ));
+      const ownedIds = new Set(ownedParts.map(p => p.id));
+      for (const id of linkedPartIds) {
+        if (!ownedIds.has(id)) {
+          throw new Error(`Part ${id} not found in company inventory`);
         }
       }
     }
 
-    return intake;
+    // Wrap everything in a transaction for all-or-nothing consistency
+    return await db.transaction(async (tx) => {
+      const [intake] = await tx.insert(inventoryIntakes)
+        .values({ ...intakeHeader, companyId, createdByUserId: userId })
+        .returning();
+
+      if (items.length > 0) {
+        await tx.insert(inventoryIntakeItems).values(
+          items.map(item => ({
+            inventoryIntakeId: intake.id,
+            partId: item.partId || null,
+            partNameSnapshot: item.partNameSnapshot,
+            partNumberSnapshot: item.partNumberSnapshot,
+            qty: item.qty,
+            unitCost: item.unitCost,
+            lineTotal: item.lineTotal,
+            companyId,
+          }))
+        );
+
+        // Increment stock for all linked parts
+        for (const item of items) {
+          if (item.partId) {
+            await tx.update(inventoryParts)
+              .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}` })
+              .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
+          }
+        }
+      }
+
+      return intake;
+    });
   }
 
   // ── Dashboard Stats ────────────────────────────────────────────────────────────
