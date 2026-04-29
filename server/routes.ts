@@ -217,8 +217,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!fleetVehicle) {
           return res.status(400).json({ message: "Selected fleet vehicle not found" });
         }
-        // Enforce fleet eligibility: must be a company-owned vehicle (no external customer owner)
-        if (fleetVehicle.fleetType !== 'company-fleet' && fleetVehicle.customerId !== null) {
+        // Enforce fleet eligibility: vehicle must be explicitly tagged as company fleet
+        // (allow vehicles with no fleetType set but also no customer owner as a fallback)
+        const isCompanyFleet = fleetVehicle.fleetType === 'company-fleet';
+        const isUnassignedUnit = fleetVehicle.fleetType === null && fleetVehicle.customerId === null;
+        if (!isCompanyFleet && !isUnassignedUnit) {
           return res.status(400).json({ message: "Selected vehicle is not a company fleet unit" });
         }
         vehicleId = fleetVehicle.id;
@@ -595,7 +598,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/invoices", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const invoiceData = { ...req.body, companyId: req.userContext.companyId };
+      const companyId: string = req.userContext.companyId;
+
+      // Verify repairOrderId belongs to this company
+      if (req.body.repairOrderId) {
+        const order = await storage.getRepairOrder(req.body.repairOrderId, companyId);
+        if (!order) {
+          return res.status(403).json({ message: "Repair order not found or access denied" });
+        }
+      }
+
+      // Verify customerId belongs to this company
+      if (req.body.customerId) {
+        const customer = await storage.getCustomer(req.body.customerId, companyId);
+        if (!customer) {
+          return res.status(403).json({ message: "Customer not found or access denied" });
+        }
+      }
+
+      const invoiceData = { ...req.body, companyId };
       const validated = insertInvoiceSchema.parse(invoiceData);
       const invoice = await storage.createInvoice(validated);
       res.status(201).json(invoice);

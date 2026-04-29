@@ -382,6 +382,7 @@ export class DatabaseStorage implements IStorage {
       description: repairOrders.description,
       priority: repairOrders.priority,
       status: repairOrders.status,
+      customerType: repairOrders.customerType,
       serviceType: repairOrders.serviceType,
       truckType: repairOrders.truckType,
       trailerNumber: repairOrders.trailerNumber,
