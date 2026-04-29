@@ -195,7 +195,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/repair-orders", isAuthenticated, withCompanyContext, upload.array('damagePhotos', 10), async (req: any, res) => {
     try {
       const body = req.body;
-      const customerType: string = body.customerType || 'company-fleet';
+
+      // Enforce allowed customerType values server-side
+      const VALID_CUSTOMER_TYPES = ['company-fleet', 'owner-operator', 'third-party'] as const;
+      type CustomerType = typeof VALID_CUSTOMER_TYPES[number];
+      const rawCustomerType = body.customerType || 'company-fleet';
+      if (!VALID_CUSTOMER_TYPES.includes(rawCustomerType as CustomerType)) {
+        return res.status(400).json({ message: "Invalid customerType. Must be one of: company-fleet, owner-operator, third-party" });
+      }
+      const customerType: CustomerType = rawCustomerType as CustomerType;
 
       let customerId: string | null = null;
       let vehicleId: string;
@@ -208,6 +216,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const fleetVehicle = await storage.getVehicle(body.fleetVehicleId, req.userContext.companyId);
         if (!fleetVehicle) {
           return res.status(400).json({ message: "Selected fleet vehicle not found" });
+        }
+        // Enforce fleet eligibility: must be a company-owned vehicle (no external customer owner)
+        if (fleetVehicle.fleetType !== 'company-fleet' && fleetVehicle.customerId !== null) {
+          return res.status(400).json({ message: "Selected vehicle is not a company fleet unit" });
         }
         vehicleId = fleetVehicle.id;
         customerId = null;
@@ -293,25 +305,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create draft invoice if requested (Owner Operator / Third Party only)
+      let invoiceWarning: string | null = null;
       if (body.createInvoice === 'true' && customerType !== 'company-fleet') {
-        const laborTotal = estimatedHours > 0 && body.laborRate
-          ? estimatedHours * parseFloat(body.laborRate)
-          : 0;
-        const subtotal = String(laborTotal.toFixed(2));
-        await storage.createInvoice(insertInvoiceSchema.parse({
-          repairOrderId: repairOrder.id,
-          customerId,
-          companyId: req.userContext.companyId,
-          subtotal,
-          taxAmount: "0",
-          totalAmount: subtotal,
-          status: "draft",
-          notes: `Draft invoice for work order #${repairOrder.orderNumber}`,
-          quickbooksSyncStatus: "not_synced",
-        }));
+        try {
+          const laborTotal = estimatedHours > 0 && body.laborRate
+            ? estimatedHours * parseFloat(body.laborRate)
+            : 0;
+          const subtotal = String(laborTotal.toFixed(2));
+          await storage.createInvoice(insertInvoiceSchema.parse({
+            repairOrderId: repairOrder.id,
+            customerId,
+            companyId: req.userContext.companyId,
+            subtotal,
+            taxAmount: "0",
+            totalAmount: subtotal,
+            status: "draft",
+            notes: `Draft invoice for work order #${repairOrder.orderNumber}`,
+            quickbooksSyncStatus: "not_synced",
+          }));
+        } catch (invoiceErr) {
+          console.error("Failed to create draft invoice:", invoiceErr);
+          invoiceWarning = "Work order created successfully, but draft invoice could not be created.";
+        }
       }
 
-      res.status(201).json(repairOrder);
+      res.status(201).json({ ...repairOrder, ...(invoiceWarning ? { invoiceWarning } : {}) });
     } catch (error) {
       console.error("Failed to create work order:", error);
       res.status(400).json({ message: "Failed to create work order", error: (error as any).message });
