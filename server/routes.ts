@@ -878,6 +878,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { items } = req.body;
       if (!Array.isArray(items)) return res.status(400).json({ message: "items must be an array" });
+
+      // Validate countedQty >= 0
+      for (const item of items) {
+        if (item.countedQty !== null && item.countedQty !== undefined && Number(item.countedQty) < 0) {
+          return res.status(400).json({ message: "Counted quantity cannot be negative" });
+        }
+      }
+
+      // Enforce draft ownership: only the session starter or an admin may edit
+      const existing = await storage.getCountSession(req.params.id, req.userContext.companyId);
+      if (!existing) return res.status(404).json({ message: "Count session not found" });
+      const role = req.userContext.role;
+      const isAdmin = role === "admin" || role === "super_admin";
+      if (!isAdmin && existing.startedByUserId !== req.userContext.userId) {
+        return res.status(403).json({ message: "Only the count starter or an admin may edit this session" });
+      }
+
       await storage.updateCountItems(req.params.id, items, req.userContext.companyId);
       res.json({ success: true });
     } catch (error) {
@@ -888,6 +905,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/inventory/count-sessions/:id/submit", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      // Enforce draft ownership: only the session starter or an admin may submit
+      const existing = await storage.getCountSession(req.params.id, req.userContext.companyId);
+      if (!existing) return res.status(404).json({ message: "Count session not found" });
+      const role = req.userContext.role;
+      const isAdmin = role === "admin" || role === "super_admin";
+      if (!isAdmin && existing.startedByUserId !== req.userContext.userId) {
+        return res.status(403).json({ message: "Only the count starter or an admin may submit this session" });
+      }
+
       const session = await storage.submitCountSession(req.params.id, req.userContext.companyId);
       res.json(session);
     } catch (error) {

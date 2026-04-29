@@ -82,7 +82,10 @@ export default function Inventory() {
   });
 
   const pendingCountSessions = countSessions.filter((s: any) => s.status === "submitted");
-  const openCountSession = countSessions.find((s: any) => s.status === "draft");
+  // Admins see any open draft; regular users only see their own draft
+  const openCountSession = countSessions.find((s: any) =>
+    s.status === "draft" && (isAdmin || s.startedByUserId === currentUser?.id)
+  );
 
   const handleOpenCountSession = (session: any) => {
     setSelectedCountSessionId(session.id);
