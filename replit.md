@@ -58,6 +58,7 @@ Preferred communication style: Simple, everyday language.
 ## Business Logic
 - **Workflow Management**: Status tracking for repair orders
 - **Inventory Control**: Stock level monitoring, parts usage tracking, admin-only stock adjustments with full audit trail, and physical count workflow (draft→submitted→approved/rejected with automatic variance adjustments on approval)
+- **Super Admin Company Switcher**: Session-level company override for super admins — sidebar company picker + amber fixed banner + `/api/admin/switch-company` endpoint; exits on logout
 - **Resource Management**: Mechanic availability and workload balancing
 - **Customer Relations**: Vehicle history and repair tracking
 

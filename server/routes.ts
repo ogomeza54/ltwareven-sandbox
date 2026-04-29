@@ -38,10 +38,16 @@ const withCompanyContext = async (req: any, res: any, next: any) => {
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
-    
+
+    let effectiveCompanyId = user.companyId;
+    // Super admins can temporarily view as another company via session override
+    if (user.role === "super_admin" && (req.session as any)?.superAdminActiveCompanyId) {
+      effectiveCompanyId = (req.session as any).superAdminActiveCompanyId;
+    }
+
     req.userContext = {
       userId: user.id,
-      companyId: user.companyId,
+      companyId: effectiveCompanyId,
       role: user.role
     };
     
@@ -155,9 +161,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
-      res.json(user);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      let effectiveCompanyId = user.companyId;
+      let activeCompanyName: string | null = null;
+
+      if (user.role === "super_admin" && (req.session as any)?.superAdminActiveCompanyId) {
+        effectiveCompanyId = (req.session as any).superAdminActiveCompanyId;
+        const company = await storage.getCompany(effectiveCompanyId);
+        activeCompanyName = company?.name ?? null;
+      }
+
+      res.json({ ...user, effectiveCompanyId, activeCompanyName });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Super admin company switcher
+  app.post("/api/admin/switch-company", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+
+      if (!user || user.role !== "super_admin") {
+        return res.status(403).json({ message: "Only super admins can switch companies" });
+      }
+
+      const { companyId } = req.body;
+
+      if (companyId === null || companyId === undefined) {
+        delete (req.session as any).superAdminActiveCompanyId;
+      } else {
+        const company = await storage.getCompany(companyId);
+        if (!company) return res.status(404).json({ message: "Company not found" });
+        (req.session as any).superAdminActiveCompanyId = companyId;
+      }
+
+      req.session.save(() => {
+        res.json({ success: true });
+      });
+    } catch (error) {
+      console.error("Failed to switch company:", error);
+      res.status(500).json({ message: "Failed to switch company" });
     }
   });
 

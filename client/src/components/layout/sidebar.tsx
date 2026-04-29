@@ -1,6 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useCompany } from "@/hooks/use-company";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import { 
   Truck, 
@@ -14,7 +16,8 @@ import {
   Shield,
   ChevronDown,
   Fuel,
-  UserCircle
+  UserCircle,
+  Building2,
 } from "lucide-react";
 
 const navigation = [
@@ -32,7 +35,25 @@ export default function Sidebar() {
   const [location] = useLocation();
   const { companyId } = useCompany();
   const { user } = useAuth();
-  
+  const isSuperAdmin = user?.role === "super_admin";
+  const activeCompanyName = (user as any)?.activeCompanyName ?? null;
+
+  const { data: companies = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/companies"],
+    enabled: isSuperAdmin,
+  });
+
+  const switchMutation = useMutation({
+    mutationFn: async (targetCompanyId: string | null) => {
+      await apiRequest("POST", "/api/admin/switch-company", { companyId: targetCompanyId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+    },
+  });
+
+  const effectiveCompanyId = (user as any)?.effectiveCompanyId ?? companyId;
+
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
       {/* Navigation */}
@@ -58,7 +79,7 @@ export default function Sidebar() {
           })}
           
           {/* Super Admin Menu */}
-          {user?.role === 'super_admin' && (
+          {isSuperAdmin && (
             <li>
               <Link href="/super-admin" className={cn(
                 "flex items-center space-x-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors",
@@ -73,6 +94,38 @@ export default function Sidebar() {
           )}
         </ul>
       </nav>
+
+      {/* Super Admin Company Switcher */}
+      {isSuperAdmin && companies.length > 0 && (
+        <div className="px-3 pb-3 border-t border-slate-800 pt-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+            <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">View as Company</p>
+          </div>
+          <div className="relative">
+            <select
+              className="w-full rounded-md border border-slate-700 bg-slate-800 text-xs px-2.5 py-2 text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none pr-7"
+              value={effectiveCompanyId ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                switchMutation.mutate(val || null);
+              }}
+              disabled={switchMutation.isPending}
+            >
+              <option value="">— My Account —</option>
+              {companies.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          </div>
+          {activeCompanyName && (
+            <p className="text-xs text-amber-400/70 mt-1.5 truncate">
+              Active: {activeCompanyName}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* User Profile */}
       <div className="p-3 border-t border-slate-800">

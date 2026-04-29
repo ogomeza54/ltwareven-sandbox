@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { CompanyProvider } from "@/hooks/use-company";
+import SuperAdminBanner from "@/components/layout/super-admin-banner";
 import Dashboard from "@/pages/dashboard";
 import IntakeForm from "@/pages/intake-form";
 import RepairOrders from "@/pages/repair-orders";
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/" component={Landing} />
       ) : (
         <CompanyProvider>
+          <SuperAdminBanner />
           <Route path="/" component={Home} />
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/intake-form" component={IntakeForm} />
