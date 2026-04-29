@@ -614,6 +614,18 @@ export default function Inventory() {
                                   </span>
                                 )}
                               </div>
+                              {session.status === "approved" && session.adjustedPartsCount !== null && (
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <Badge variant="outline" className="border-green-500/40 text-green-400 text-xs font-normal">
+                                    {session.adjustedPartsCount} part{session.adjustedPartsCount !== 1 ? "s" : ""} adjusted
+                                    {session.netDelta !== null && (
+                                      <span className="ml-1">
+                                        &middot; net {session.netDelta >= 0 ? "+" : ""}{session.netDelta} units
+                                      </span>
+                                    )}
+                                  </Badge>
+                                </div>
+                              )}
                             </div>
                             <div className="flex gap-2 ml-4">
                               {(canEdit || canReview || session.status === "approved" || session.status === "rejected") && (

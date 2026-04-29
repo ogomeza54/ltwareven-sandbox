@@ -917,8 +917,36 @@ export class DatabaseStorage implements IStorage {
         itemsWithVariance,
         totalVariance,
         startedByName,
+        adjustedPartsCount: null as number | null,
+        netDelta: null as number | null,
       });
     }
+
+    const approvedSessionIds = result
+      .filter(s => s.status === "approved")
+      .map(s => s.id);
+
+    if (approvedSessionIds.length > 0) {
+      const adjAggRows = await db
+        .select({
+          countSessionId: inventoryAdjustments.countSessionId,
+          partsCount: sql<number>`cast(count(*) as int)`,
+          netDelta: sql<number>`cast(coalesce(sum(${inventoryAdjustments.delta}), 0) as int)`,
+        })
+        .from(inventoryAdjustments)
+        .where(inArray(inventoryAdjustments.countSessionId, approvedSessionIds))
+        .groupBy(inventoryAdjustments.countSessionId);
+
+      const adjBySession = new Map(adjAggRows.map(r => [r.countSessionId, r]));
+      for (const s of result) {
+        if (s.status === "approved") {
+          const agg = adjBySession.get(s.id);
+          s.adjustedPartsCount = agg ? agg.partsCount : 0;
+          s.netDelta = agg ? agg.netDelta : 0;
+        }
+      }
+    }
+
     return result;
   }
 
