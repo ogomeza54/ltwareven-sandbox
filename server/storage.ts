@@ -712,11 +712,12 @@ export class DatabaseStorage implements IStorage {
     companyId: string;
   }): Promise<InventoryAdjustment> {
     return await db.transaction(async (tx) => {
-      // Read current qty inside transaction to prevent stale calculations
+      // SELECT FOR UPDATE acquires an exclusive row lock, preventing concurrent adjustment races
       const [part] = await tx
         .select({ qty: inventoryParts.quantityInStock })
         .from(inventoryParts)
-        .where(and(eq(inventoryParts.id, request.partId), eq(inventoryParts.companyId, request.companyId)));
+        .where(and(eq(inventoryParts.id, request.partId), eq(inventoryParts.companyId, request.companyId)))
+        .for("update");
 
       if (!part) throw new Error("Part not found or access denied");
 

@@ -74,11 +74,13 @@ export default function InventoryAdjustmentModal({
       toast({ title: "Inventory adjusted successfully" });
       onOpenChange(false);
     },
-    onError: async (error: any) => {
+    onError: (error: any) => {
       let msg = "Failed to adjust inventory";
       try {
-        const data = await error.response?.json();
-        if (data?.message) msg = data.message;
+        const raw: string = error?.message ?? "";
+        const jsonPart = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim() : raw;
+        const parsed = JSON.parse(jsonPart);
+        if (parsed?.message) msg = parsed.message;
       } catch {}
       toast({ title: msg, variant: "destructive" });
     },
