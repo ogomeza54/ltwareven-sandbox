@@ -1,7 +1,7 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
   inventoryIntakes, inventoryIntakeItems, invoices, inventoryAdjustments,
-  inventoryCountSessions, inventoryCountItems,
+  inventoryCountSessions, inventoryCountItems, adminAuditLog,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -14,7 +14,7 @@ import {
   type InventoryIntakeItem, type InsertInventoryIntakeItem,
   type Invoice, type InsertInvoice,
   type InventoryAdjustment, type InsertInventoryAdjustment,
-  type InventoryCountSession,
+  type InventoryCountSession, type AdminAuditLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -125,7 +125,11 @@ export interface IStorage {
   // Invoice operations
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
   getInvoicesByRepairOrder(repairOrderId: string, companyId: string): Promise<Invoice[]>;
-  
+
+  // Admin audit log operations
+  createAdminAuditLog(entry: { adminUserId: string; targetCompanyId: string | null; action: string; note?: string }): Promise<AdminAuditLog>;
+  getAdminAuditLog(limit?: number): Promise<any[]>;
+
   // Dashboard stats
   getDashboardStats(companyId: string): Promise<{
     activeOrders: number;
@@ -1175,6 +1179,38 @@ export class DatabaseStorage implements IStorage {
       lowStockItems: Number(lowStockResult[0]?.count || 0),
       monthlyRevenue: Number(monthlyRevenueResult[0]?.total || 0),
     };
+  }
+
+  // ── Admin Audit Log ───────────────────────────────────────────────────────────
+  async createAdminAuditLog(entry: { adminUserId: string; targetCompanyId: string | null; action: string; note?: string }): Promise<AdminAuditLog> {
+    const [log] = await db.insert(adminAuditLog).values({
+      adminUserId: entry.adminUserId,
+      targetCompanyId: entry.targetCompanyId ?? null,
+      action: entry.action,
+      note: entry.note ?? null,
+    }).returning();
+    return log;
+  }
+
+  async getAdminAuditLog(limit = 100): Promise<any[]> {
+    return await db
+      .select({
+        id: adminAuditLog.id,
+        action: adminAuditLog.action,
+        note: adminAuditLog.note,
+        createdAt: adminAuditLog.createdAt,
+        adminUserId: adminAuditLog.adminUserId,
+        adminFirstName: users.firstName,
+        adminLastName: users.lastName,
+        adminEmail: users.email,
+        targetCompanyId: adminAuditLog.targetCompanyId,
+        targetCompanyName: companies.name,
+      })
+      .from(adminAuditLog)
+      .leftJoin(users, eq(adminAuditLog.adminUserId, users.id))
+      .leftJoin(companies, eq(adminAuditLog.targetCompanyId, companies.id))
+      .orderBy(desc(adminAuditLog.createdAt))
+      .limit(limit);
   }
 }
 

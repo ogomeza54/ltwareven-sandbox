@@ -473,6 +473,35 @@ export type InsertInventoryCountSession = z.infer<typeof insertInventoryCountSes
 export type InventoryCountItem = typeof inventoryCountItems.$inferSelect;
 export type InsertInventoryCountItem = z.infer<typeof insertInventoryCountItemSchema>;
 
+// Admin Audit Log — tracks super admin company switches for accountability
+export const adminAuditLog = pgTable("admin_audit_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adminUserId: varchar("admin_user_id").notNull().references(() => users.id),
+  targetCompanyId: varchar("target_company_id").references(() => companies.id),
+  action: text("action").notNull(), // switch_in | switch_out
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const adminAuditLogRelations = relations(adminAuditLog, ({ one }) => ({
+  adminUser: one(users, {
+    fields: [adminAuditLog.adminUserId],
+    references: [users.id],
+  }),
+  targetCompany: one(companies, {
+    fields: [adminAuditLog.targetCompanyId],
+    references: [companies.id],
+  }),
+}));
+
+export const insertAdminAuditLogSchema = createInsertSchema(adminAuditLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type AdminAuditLog = typeof adminAuditLog.$inferSelect;
+export type InsertAdminAuditLog = z.infer<typeof insertAdminAuditLogSchema>;
+
 // Status lifecycle constants
 export const WORK_ORDER_STATUSES = [
   "open",

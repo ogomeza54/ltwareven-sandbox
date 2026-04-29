@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Building2, Users, UserPlus, Shield, ArrowLeft, Home } from "lucide-react";
+import { Building2, Users, UserPlus, Shield, ArrowLeft, Home, ClipboardList, LogIn, LogOut } from "lucide-react";
 import { Link } from "wouter";
 
 interface Company {
@@ -27,6 +27,19 @@ interface User {
   companyName?: string;
 }
 
+interface AuditLogEntry {
+  id: string;
+  action: string;
+  note: string | null;
+  createdAt: string;
+  adminUserId: string;
+  adminFirstName: string | null;
+  adminLastName: string | null;
+  adminEmail: string | null;
+  targetCompanyId: string | null;
+  targetCompanyName: string | null;
+}
+
 export default function SuperAdmin() {
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyPlan, setNewCompanyPlan] = useState("basic");
@@ -43,6 +56,11 @@ export default function SuperAdmin() {
   // Fetch all users
   const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
+  });
+
+  // Fetch audit log
+  const { data: auditLog = [], isLoading: auditLogLoading } = useQuery<AuditLogEntry[]>({
+    queryKey: ["/api/admin/audit-log"],
   });
 
   // Create company mutation
@@ -289,6 +307,57 @@ export default function SuperAdmin() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Audit Log */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ClipboardList className="h-5 w-5" />
+            Company Switch Audit Log
+          </CardTitle>
+          <CardDescription>
+            A read-only record of every time a super admin switched into or out of a company context
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {auditLogLoading ? (
+            <div>Loading audit log...</div>
+          ) : auditLog.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No activity recorded yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {auditLog.map((entry) => {
+                const isSwitchIn = entry.action === "switch_in";
+                const adminName = [entry.adminFirstName, entry.adminLastName].filter(Boolean).join(" ") || entry.adminEmail || entry.adminUserId;
+                return (
+                  <div key={entry.id} className="flex items-start justify-between p-3 border rounded gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-0.5 rounded-full p-1 ${isSwitchIn ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`}>
+                        {isSwitchIn ? <LogIn className="h-3.5 w-3.5" /> : <LogOut className="h-3.5 w-3.5" />}
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">
+                          {adminName}{" "}
+                          <span className="font-normal text-muted-foreground">
+                            {isSwitchIn ? "switched into" : "exited"}
+                          </span>{" "}
+                          {entry.targetCompanyName ?? entry.targetCompanyId ?? "unknown company"}
+                        </div>
+                        {entry.note && (
+                          <div className="text-xs text-muted-foreground mt-0.5">{entry.note}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(entry.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

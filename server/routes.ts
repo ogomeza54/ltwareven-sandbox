@@ -202,11 +202,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Treat switching to own company or explicit null as "exit"
       if (companyId === null || companyId === undefined || companyId === user.companyId) {
+        const previousCompanyId = (req.session as any).superAdminActiveCompanyId as string | undefined;
         delete (req.session as any).superAdminActiveCompanyId;
+        if (previousCompanyId) {
+          await storage.createAdminAuditLog({
+            adminUserId: userId,
+            targetCompanyId: previousCompanyId,
+            action: "switch_out",
+          });
+        }
       } else {
         const company = await storage.getCompany(companyId);
         if (!company) return res.status(404).json({ message: "Company not found" });
+        // If already switched into another company, log a switch_out for it first
+        const previousCompanyId = (req.session as any).superAdminActiveCompanyId as string | undefined;
+        if (previousCompanyId && previousCompanyId !== companyId) {
+          await storage.createAdminAuditLog({
+            adminUserId: userId,
+            targetCompanyId: previousCompanyId,
+            action: "switch_out",
+          });
+        }
         (req.session as any).superAdminActiveCompanyId = companyId;
+        await storage.createAdminAuditLog({
+          adminUserId: userId,
+          targetCompanyId: companyId,
+          action: "switch_in",
+        });
       }
 
       req.session.save(() => {
@@ -215,6 +237,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Failed to switch company:", error);
       res.status(500).json({ message: "Failed to switch company" });
+    }
+  });
+
+  // Admin audit log
+  app.get("/api/admin/audit-log", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      if (!user || user.role !== "super_admin") {
+        return res.status(403).json({ message: "Only super admins can view the audit log" });
+      }
+      const log = await storage.getAdminAuditLog(200);
+      res.json(log);
+    } catch (error) {
+      console.error("Failed to fetch audit log:", error);
+      res.status(500).json({ message: "Failed to fetch audit log" });
     }
   });
 
