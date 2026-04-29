@@ -51,7 +51,10 @@ interface Vehicle {
   licensePlate: string | null;
   color: string | null;
   mileage: number | null;
-  customerId: string;
+  customerId: string | null;
+  tractorNumber: string | null;
+  unitStatus: string | null;
+  fleetType: string | null;
   companyId: string;
   createdAt: string;
 }
@@ -177,7 +180,7 @@ export default function Vehicles() {
       licensePlate: vehicle.licensePlate || "",
       color: vehicle.color || "",
       mileage: vehicle.mileage?.toString() || "",
-      customerId: vehicle.customerId,
+      customerId: vehicle.customerId || "",
     });
     setIsEditModalOpen(true);
   };
@@ -187,7 +190,8 @@ export default function Vehicles() {
     setIsDeleteDialogOpen(true);
   };
 
-  const getCustomerName = (customerId: string) => {
+  const getCustomerName = (customerId: string | null) => {
+    if (!customerId) return "— Fleet —";
     const customer = customers.find(c => c.id === customerId);
     return customer?.name || "Unknown";
   };

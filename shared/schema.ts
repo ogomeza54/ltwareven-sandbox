@@ -72,8 +72,12 @@ export const vehicles = pgTable("vehicles", {
   licensePlate: text("license_plate"),
   color: text("color"),
   mileage: integer("mileage"),
-  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  customerId: varchar("customer_id").references(() => customers.id), // nullable — fleet vehicles have no customer owner
   companyId: varchar("company_id").notNull().references(() => companies.id),
+  // Fleet-specific fields
+  tractorNumber: text("tractor_number"),   // unit number (e.g. "T-042")
+  unitStatus: text("unit_status"),         // active | inactive | maintenance
+  fleetType: text("fleet_type"),           // company-fleet | external
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -82,9 +86,12 @@ export const repairOrders = pgTable("repair_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull().unique(),
   vehicleId: varchar("vehicle_id").notNull().references(() => vehicles.id),
-  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  customerId: varchar("customer_id").references(() => customers.id), // nullable for company-fleet jobs
   mechanicId: varchar("mechanic_id").references(() => mechanics.id),
   inspectorId: varchar("inspector_id").notNull().references(() => users.id),
+
+  // Customer type — determines billing flow
+  customerType: text("customer_type").notNull().default("company-fleet"), // company-fleet | owner-operator | third-party
 
   // Trucking-specific fields
   serviceType: text("service_type"),         // engine, brakes, tires, DOT inspection, etc.
@@ -169,6 +176,24 @@ export const partsUsage = pgTable("parts_usage", {
   partId: varchar("part_id").notNull().references(() => inventoryParts.id),
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Invoices — customer-facing billing records created from repair orders
+export const invoices = pgTable("invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  repairOrderId: varchar("repair_order_id").notNull().references(() => repairOrders.id),
+  customerId: varchar("customer_id").references(() => customers.id),  // null for fleet jobs
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  status: text("status").notNull().default("draft"),  // draft | sent | paid | void
+  notes: text("notes"),
+  // QuickBooks placeholder fields
+  quickbooksSyncStatus: text("quickbooks_sync_status").default("not_synced"),
+  quickbooksId: text("quickbooks_id"),
+  quickbooksLastSyncedAt: timestamp("quickbooks_last_synced_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -351,6 +376,11 @@ export const insertInventoryIntakeItemSchema = createInsertSchema(inventoryIntak
   createdAt: true,
 });
 
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Status lifecycle constants
 export const WORK_ORDER_STATUSES = [
   "open",
@@ -427,3 +457,6 @@ export type InsertInventoryIntake = z.infer<typeof insertInventoryIntakeSchema>;
 
 export type InventoryIntakeItem = typeof inventoryIntakeItems.$inferSelect;
 export type InsertInventoryIntakeItem = z.infer<typeof insertInventoryIntakeItemSchema>;
+
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;

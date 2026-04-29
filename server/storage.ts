@@ -1,6 +1,6 @@
 import { 
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
-  inventoryIntakes, inventoryIntakeItems,
+  inventoryIntakes, inventoryIntakeItems, invoices,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -11,6 +11,7 @@ import {
   type PartsUsage, type InsertPartsUsage,
   type InventoryIntake, type InsertInventoryIntake,
   type InventoryIntakeItem, type InsertInventoryIntakeItem,
+  type Invoice, type InsertInvoice,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -90,6 +91,13 @@ export interface IStorage {
     companyId: string,
     userId: string
   ): Promise<InventoryIntake>;
+
+  // Fleet vehicle search
+  searchFleetVehicles(search: string, companyId: string): Promise<Vehicle[]>;
+
+  // Invoice operations
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  getInvoicesByRepairOrder(repairOrderId: string, companyId: string): Promise<Invoice[]>;
   
   // Dashboard stats
   getDashboardStats(companyId: string): Promise<{
@@ -676,6 +684,33 @@ export class DatabaseStorage implements IStorage {
 
       return intake;
     });
+  }
+
+  // ── Fleet Vehicle Search ──────────────────────────────────────────────────────
+  async searchFleetVehicles(search: string, companyId: string): Promise<Vehicle[]> {
+    return await db.select().from(vehicles)
+      .where(and(
+        eq(vehicles.companyId, companyId),
+        sql`(
+          ${vehicles.tractorNumber} ILIKE ${'%' + search + '%'} OR
+          ${vehicles.vin} ILIKE ${'%' + search + '%'} OR
+          ${vehicles.licensePlate} ILIKE ${'%' + search + '%'} OR
+          ${vehicles.make} ILIKE ${'%' + search + '%'} OR
+          ${vehicles.model} ILIKE ${'%' + search + '%'}
+        )`
+      ))
+      .limit(10);
+  }
+
+  // ── Invoices ──────────────────────────────────────────────────────────────────
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    const [created] = await db.insert(invoices).values(invoice).returning();
+    return created;
+  }
+
+  async getInvoicesByRepairOrder(repairOrderId: string, companyId: string): Promise<Invoice[]> {
+    return await db.select().from(invoices)
+      .where(and(eq(invoices.repairOrderId, repairOrderId), eq(invoices.companyId, companyId)));
   }
 
   // ── Dashboard Stats ────────────────────────────────────────────────────────────

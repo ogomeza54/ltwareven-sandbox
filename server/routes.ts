@@ -5,7 +5,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
-  insertPartsUsageSchema,
+  insertPartsUsageSchema, insertInvoiceSchema,
   ACTIVE_STATUSES
 } from "@shared/schema";
 import { z } from "zod";
@@ -195,35 +195,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/repair-orders", isAuthenticated, withCompanyContext, upload.array('damagePhotos', 10), async (req: any, res) => {
     try {
       const body = req.body;
-      
-      const customerData = {
-        name: body.customerName,
-        phone: body.phoneNumber,
-        email: body.email || null,
-        companyId: req.userContext.companyId
-      };
+      const customerType: string = body.customerType || 'company-fleet';
 
-      const vehicleData = {
-        year: parseInt(body.vehicleYear),
-        make: body.vehicleMake,
-        model: body.vehicleModel,
-        vin: body.vin || null,
-        licensePlate: body.licensePlate || null,
-        color: body.color || null,
-        mileage: body.mileage ? parseInt(body.mileage) : null,
-        companyId: req.userContext.companyId
-      };
+      let customerId: string | null = null;
+      let vehicleId: string;
 
-      // Find or create customer
-      let customer = await storage.getCustomerByPhone(customerData.phone, req.userContext.companyId);
-      if (!customer) {
-        customer = await storage.createCustomer(insertCustomerSchema.parse(customerData));
+      if (customerType === 'company-fleet') {
+        // Fleet job: use existing fleet vehicle, no customer required
+        if (!body.fleetVehicleId) {
+          return res.status(400).json({ message: "Fleet vehicle selection is required for Company Fleet jobs" });
+        }
+        const fleetVehicle = await storage.getVehicle(body.fleetVehicleId, req.userContext.companyId);
+        if (!fleetVehicle) {
+          return res.status(400).json({ message: "Selected fleet vehicle not found" });
+        }
+        vehicleId = fleetVehicle.id;
+        customerId = null;
+      } else {
+        // Owner Operator / Third Party: create/find customer then vehicle
+        if (!body.customerName || !body.phoneNumber) {
+          return res.status(400).json({ message: "Customer name and phone are required for this job type" });
+        }
+        const customerData = {
+          name: body.customerName,
+          phone: body.phoneNumber,
+          email: body.email || null,
+          companyId: req.userContext.companyId
+        };
+        let customer = await storage.getCustomerByPhone(customerData.phone, req.userContext.companyId);
+        if (!customer) {
+          customer = await storage.createCustomer(insertCustomerSchema.parse(customerData));
+        }
+        customerId = customer.id;
+
+        const vehicleData = {
+          year: parseInt(body.vehicleYear),
+          make: body.vehicleMake,
+          model: body.vehicleModel,
+          vin: body.vin || null,
+          licensePlate: body.licensePlate || null,
+          color: body.color || null,
+          mileage: body.mileage ? parseInt(body.mileage) : null,
+          customerId: customer.id,
+          companyId: req.userContext.companyId
+        };
+        const vehicle = await storage.createVehicle(insertVehicleSchema.parse(vehicleData));
+        vehicleId = vehicle.id;
       }
-
-      // Create vehicle
-      const vehicle = await storage.createVehicle(
-        insertVehicleSchema.parse({ ...vehicleData, customerId: customer.id })
-      );
 
       // Handle file uploads
       const damagePhotos: string[] = [];
@@ -240,8 +258,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const assignedMechanicId = await autoAssignMechanic(req.userContext.companyId, body.priority, estimatedHours);
 
       const repairOrderData = {
-        vehicleId: vehicle.id,
-        customerId: customer.id,
+        vehicleId,
+        customerId,
+        customerType,
         mechanicId: assignedMechanicId,
         inspectorId: req.userContext.userId,
         description: body.repairDescription,
@@ -271,6 +290,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currentWorkload: mechanic.currentWorkload + 1
           });
         }
+      }
+
+      // Create draft invoice if requested (Owner Operator / Third Party only)
+      if (body.createInvoice === 'true' && customerType !== 'company-fleet') {
+        const laborTotal = estimatedHours > 0 && body.laborRate
+          ? estimatedHours * parseFloat(body.laborRate)
+          : 0;
+        const subtotal = String(laborTotal.toFixed(2));
+        await storage.createInvoice(insertInvoiceSchema.parse({
+          repairOrderId: repairOrder.id,
+          customerId,
+          companyId: req.userContext.companyId,
+          subtotal,
+          taxAmount: "0",
+          totalAmount: subtotal,
+          status: "draft",
+          notes: `Draft invoice for work order #${repairOrder.orderNumber}`,
+          quickbooksSyncStatus: "not_synced",
+        }));
       }
 
       res.status(201).json(repairOrder);
@@ -474,6 +512,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Fleet vehicle lookup — must be before /:id to avoid routing conflict
+  app.get("/api/vehicles/fleet", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const search = (req.query.search as string) || "";
+      if (!search.trim()) return res.json([]);
+      const results = await storage.searchFleetVehicles(search.trim(), req.userContext.companyId);
+      res.json(results);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to search fleet vehicles" });
+    }
+  });
+
   app.get("/api/vehicles/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const vehicle = await storage.getVehicle(req.params.id, req.userContext.companyId);
@@ -520,6 +570,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       res.status(400).json({ message: "Failed to delete vehicle" });
+    }
+  });
+
+  // ── Invoices ──────────────────────────────────────────────────────────────────
+
+  app.post("/api/invoices", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const invoiceData = { ...req.body, companyId: req.userContext.companyId };
+      const validated = insertInvoiceSchema.parse(invoiceData);
+      const invoice = await storage.createInvoice(validated);
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Failed to create invoice:", error);
+      res.status(400).json({ message: "Failed to create invoice", error: (error as any).message });
+    }
+  });
+
+  app.get("/api/invoices/repair-order/:orderId", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const invoiceList = await storage.getInvoicesByRepairOrder(req.params.orderId, req.userContext.companyId);
+      res.json(invoiceList);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch invoices" });
     }
   });
 
