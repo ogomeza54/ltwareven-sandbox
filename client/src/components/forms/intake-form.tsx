@@ -149,7 +149,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
     enabled: fleetSearch.length >= 2,
   });
 
-  const showFleetDropdown = fleetSearch.length >= 2 && !selectedFleetVehicle && (isSearching || fleetResults.length > 0);
+  const showFleetDropdown = fleetSearch.length >= 2 && !selectedFleetVehicle;
 
   const selectFleetVehicle = (vehicle: FleetVehicle) => {
     setSelectedFleetVehicle(vehicle);
