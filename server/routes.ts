@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { sendCountSubmittedNotification, sendCountReviewedNotification } from "./email";
 import { 
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
@@ -916,6 +917,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await storage.submitCountSession(req.params.id, req.userContext.companyId);
       res.json(session);
+
+      // Post-response: notify company admins by email (response already sent above)
+      try {
+        const companyUsers = await storage.getUsersByCompany(req.userContext.companyId);
+        const adminEmails = [...new Set(
+          companyUsers.flatMap(u => (u.role === "admin" || u.role === "super_admin") && u.email ? [u.email] : [])
+        )];
+        const submitter = await storage.getUser(req.userContext.userId);
+        const submitterName = submitter?.firstName
+          ? `${submitter.firstName} ${submitter.lastName ?? ""}`.trim()
+          : (submitter?.email ?? "A team member");
+        const sessionDetail = await storage.getCountSession(session.id, req.userContext.companyId);
+        const items: Array<{ countedQty: number | null }> = sessionDetail?.items ?? [];
+        await sendCountSubmittedNotification({
+          sessionId: session.id,
+          submitterName,
+          totalItems: items.length,
+          itemsEntered: items.filter(i => i.countedQty !== null).length,
+          adminEmails,
+        });
+      } catch (emailErr) {
+        console.error("Failed to send count-submitted email:", emailErr);
+      }
     } catch (error) {
       console.error("Failed to submit count session:", error);
       res.status(400).json({ message: "Failed to submit count session" });
@@ -936,6 +960,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adminNotes
       );
       res.json(session);
+
+      // Post-response: notify the count submitter by email (response already sent above)
+      try {
+        if (session.startedByUserId) {
+          const submitter = await storage.getUser(session.startedByUserId);
+          const reviewer = await storage.getUser(req.userContext.userId);
+          if (submitter?.email) {
+            const submitterName = submitter.firstName
+              ? `${submitter.firstName} ${submitter.lastName ?? ""}`.trim()
+              : submitter.email;
+            const reviewerName = reviewer?.firstName
+              ? `${reviewer.firstName} ${reviewer.lastName ?? ""}`.trim()
+              : (reviewer?.email ?? "An admin");
+            await sendCountReviewedNotification({
+              sessionId: session.id,
+              status: "approved",
+              reviewerName,
+              adminNotes: session.adminNotes,
+              submitterEmail: submitter.email,
+              submitterName,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error("Failed to send count-approved email:", emailErr);
+      }
     } catch (error) {
       console.error("Failed to approve count session:", error);
       res.status(400).json({ message: "Failed to approve count session" });
@@ -956,6 +1006,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adminNotes
       );
       res.json(session);
+
+      // Post-response: notify the count submitter by email (response already sent above)
+      try {
+        if (session.startedByUserId) {
+          const submitter = await storage.getUser(session.startedByUserId);
+          const reviewer = await storage.getUser(req.userContext.userId);
+          if (submitter?.email) {
+            const submitterName = submitter.firstName
+              ? `${submitter.firstName} ${submitter.lastName ?? ""}`.trim()
+              : submitter.email;
+            const reviewerName = reviewer?.firstName
+              ? `${reviewer.firstName} ${reviewer.lastName ?? ""}`.trim()
+              : (reviewer?.email ?? "An admin");
+            await sendCountReviewedNotification({
+              sessionId: session.id,
+              status: "rejected",
+              reviewerName,
+              adminNotes: session.adminNotes,
+              submitterEmail: submitter.email,
+              submitterName,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error("Failed to send count-rejected email:", emailErr);
+      }
     } catch (error) {
       console.error("Failed to reject count session:", error);
       res.status(400).json({ message: "Failed to reject count session" });
