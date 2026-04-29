@@ -267,7 +267,12 @@ export default function Inventory() {
                 </TabsTrigger>
                 <TabsTrigger value="counts">
                   Inventory Counts
-                  {isAdmin && pendingCountSessions.length > 0 && (
+                  {openCountSession && (
+                    <Badge className="ml-2 bg-amber-500/20 border border-amber-500/50 text-amber-400 text-xs px-1.5 py-0">
+                      In Progress
+                    </Badge>
+                  )}
+                  {!openCountSession && isAdmin && pendingCountSessions.length > 0 && (
                     <Badge className="ml-2 bg-amber-500 text-white text-xs px-1.5 py-0">
                       {pendingCountSessions.length}
                     </Badge>
@@ -517,23 +522,49 @@ export default function Inventory() {
 
             {/* Inventory Counts Tab */}
             <TabsContent value="counts" className="space-y-4">
+              {/* In-progress draft banner */}
+              {openCountSession && (
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <ClipboardList className="h-5 w-5 text-amber-400 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-300">Count session in progress</p>
+                      <p className="text-xs text-amber-400/80">
+                        A draft physical count is already open
+                        {openCountSession.startedByName ? ` by ${openCountSession.startedByName}` : ""}.
+                        Resume it to continue counting.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold shrink-0"
+                    onClick={handleStartCount}
+                  >
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    Resume Count
+                  </Button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">
                     {openCountSession
-                      ? "You have a draft count in progress."
+                      ? "Continue where you left off or start a new count once the current one is submitted."
                       : isAdmin && pendingCountSessions.length > 0
                       ? `${pendingCountSessions.length} count${pendingCountSessions.length > 1 ? "s" : ""} pending your review.`
                       : "Start a physical count to verify stock levels against the system."}
                   </p>
                 </div>
-                <Button
-                  className="bg-amber-500 hover:bg-amber-600 text-white"
-                  onClick={handleStartCount}
-                >
-                  <ClipboardList className="w-4 h-4 mr-2" />
-                  {openCountSession ? "Continue Count" : "Start Count"}
-                </Button>
+                {!openCountSession && (
+                  <Button
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold"
+                    onClick={handleStartCount}
+                  >
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    Start Count
+                  </Button>
+                )}
               </div>
 
               {countSessionsLoading ? (
