@@ -19,8 +19,9 @@ import {
 import {
   Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
-  ClipboardList, Eye, Download,
+  ClipboardList, Eye, Download, Info,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
 import ReceiveInventoryModal from "@/components/modals/receive-inventory-modal";
@@ -82,10 +83,14 @@ export default function Inventory() {
   });
 
   const pendingCountSessions = countSessions.filter((s: any) => s.status === "submitted");
+  // Any active draft regardless of owner (used to notify all users)
+  const anyDraftCountSession = countSessions.find((s: any) => s.status === "draft");
   // Admins see any open draft; regular users only see their own draft
   const openCountSession = countSessions.find((s: any) =>
     s.status === "draft" && (isAdmin || s.startedByUserId === currentUser?.id)
   );
+  // True when there's a draft open but the current user can't edit it
+  const isOtherUsersDraft = !!anyDraftCountSession && !openCountSession;
 
   const handleOpenCountSession = (session: any) => {
     setSelectedCountSessionId(session.id);
@@ -522,7 +527,7 @@ export default function Inventory() {
 
             {/* Inventory Counts Tab */}
             <TabsContent value="counts" className="space-y-4">
-              {/* In-progress draft banner */}
+              {/* In-progress draft banner — shown to session owner or admin */}
               {openCountSession && (
                 <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -546,24 +551,63 @@ export default function Inventory() {
                 </div>
               )}
 
+              {/* Read-only notice for users who don't own the active draft */}
+              {isOtherUsersDraft && (
+                <div className="flex items-center gap-3 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3">
+                  <Info className="h-5 w-5 text-blue-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-300">A count is in progress</p>
+                    <p className="text-xs text-blue-400/80">
+                      {anyDraftCountSession?.startedByName
+                        ? `${anyDraftCountSession.startedByName} is currently running a physical count.`
+                        : "Someone is currently running a physical count."}{" "}
+                      Quantities may change until it is submitted.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">
                     {openCountSession
                       ? "Continue where you left off or start a new count once the current one is submitted."
+                      : isOtherUsersDraft
+                      ? "Another count session must be submitted before you can start a new one."
                       : isAdmin && pendingCountSessions.length > 0
                       ? `${pendingCountSessions.length} count${pendingCountSessions.length > 1 ? "s" : ""} pending your review.`
                       : "Start a physical count to verify stock levels against the system."}
                   </p>
                 </div>
                 {!openCountSession && (
-                  <Button
-                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold"
-                    onClick={handleStartCount}
-                  >
-                    <ClipboardList className="w-4 h-4 mr-2" />
-                    Start Count
-                  </Button>
+                  isOtherUsersDraft ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0}>
+                          <Button
+                            className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold"
+                            disabled
+                          >
+                            <ClipboardList className="w-4 h-4 mr-2" />
+                            Start Count
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {anyDraftCountSession?.startedByName
+                          ? `${anyDraftCountSession.startedByName} has a count session open. Wait for it to be submitted before starting a new one.`
+                          : "A count session is already open. Wait for it to be submitted before starting a new one."}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <Button
+                      className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold"
+                      onClick={handleStartCount}
+                    >
+                      <ClipboardList className="w-4 h-4 mr-2" />
+                      Start Count
+                    </Button>
+                  )
                 )}
               </div>
 
