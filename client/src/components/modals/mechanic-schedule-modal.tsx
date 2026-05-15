@@ -24,11 +24,15 @@ export default function MechanicScheduleModal({ open, onOpenChange, mechanic }: 
     enabled: !!mechanic?.id && open,
   });
 
-  const activeOrders = repairOrders.filter(order => 
+  const mechanicOrders = repairOrders.filter((order: any) =>
+    order.mechanicId === mechanic?.id || order.mechanic?.id === mechanic?.id
+  );
+
+  const activeOrders = mechanicOrders.filter((order: any) =>
     ['pending', 'in_progress', 'waiting_parts'].includes(order.status)
   );
 
-  const completedOrders = repairOrders.filter(order => 
+  const completedOrders = mechanicOrders.filter((order: any) =>
     ['completed', 'delivered'].includes(order.status)
   );
 
