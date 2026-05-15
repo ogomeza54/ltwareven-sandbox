@@ -393,15 +393,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedOrder = insertRepairOrderSchema.parse(repairOrderData);
       const repairOrder = await storage.createRepairOrder(validatedOrder);
 
-      // Increment mechanic workload counter
-      if (assignedMechanicId) {
-        const mechanic = await storage.getMechanic(assignedMechanicId, req.userContext.companyId);
-        if (mechanic) {
-          await storage.updateMechanic(assignedMechanicId, req.userContext.companyId, {
-            currentWorkload: mechanic.currentWorkload + 1
-          });
-        }
-      }
+      // Recalculate workload from source of truth (avoids counter drift)
+      await storage.recalculateMechanicWorkloads(req.userContext.companyId);
 
       // Create draft invoice if requested (Owner Operator / Third Party only)
       let invoiceWarning: string | null = null;
@@ -448,37 +441,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const now = new Date();
         if (updates.status === 'completed') updates.completedDate = now;
         if (updates.status === 'closed' || updates.status === 'delivered') updates.closedDate = now;
-
-        // When closing/completing/abandoning, decrement mechanic workload
-        const closingStatuses = ['completed', 'delivered', 'closed', 'abandoned'];
-        const wasActive = ACTIVE_STATUSES.includes(currentOrder.status as any);
-        const isNowInactive = closingStatuses.includes(updates.status);
-
-        if (wasActive && isNowInactive && currentOrder.mechanicId) {
-          const mechanic = await storage.getMechanic(currentOrder.mechanicId, req.userContext.companyId);
-          if (mechanic && mechanic.currentWorkload > 0) {
-            await storage.updateMechanic(currentOrder.mechanicId, req.userContext.companyId, {
-              currentWorkload: mechanic.currentWorkload - 1
-            });
-          }
-        }
-
-        // When reopening (e.g. abandoned → open), increment workload back
-        const reopeningStatuses = ['open', 'in-progress'];
-        const wasInactive = closingStatuses.includes(currentOrder.status);
-        const isNowActive = reopeningStatuses.includes(updates.status);
-
-        if (wasInactive && isNowActive && currentOrder.mechanicId) {
-          const mechanic = await storage.getMechanic(currentOrder.mechanicId, req.userContext.companyId);
-          if (mechanic) {
-            await storage.updateMechanic(currentOrder.mechanicId, req.userContext.companyId, {
-              currentWorkload: mechanic.currentWorkload + 1
-            });
-          }
-        }
       }
 
       const order = await storage.updateRepairOrder(req.params.id, req.userContext.companyId, updates);
+
+      // Recalculate workload from source of truth whenever status or mechanic assignment changes
+      if (updates.status || updates.mechanicId !== undefined) {
+        await storage.recalculateMechanicWorkloads(req.userContext.companyId);
+      }
+
       res.json(order);
     } catch (error) {
       console.error("Failed to update work order:", error);
@@ -488,17 +459,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/repair-orders/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      // Decrement mechanic workload if order is active
-      const order = await storage.getRepairOrder(req.params.id, req.userContext.companyId);
-      if (order && order.mechanicId && ACTIVE_STATUSES.includes(order.status as any)) {
-        const mechanic = await storage.getMechanic(order.mechanicId, req.userContext.companyId);
-        if (mechanic && mechanic.currentWorkload > 0) {
-          await storage.updateMechanic(order.mechanicId, req.userContext.companyId, {
-            currentWorkload: mechanic.currentWorkload - 1
-          });
-        }
-      }
       await storage.deleteRepairOrder(req.params.id, req.userContext.companyId);
+      // Recalculate workload from source of truth after deletion
+      await storage.recalculateMechanicWorkloads(req.userContext.companyId);
       res.status(204).send();
     } catch (error) {
       res.status(400).json({ message: "Failed to delete work order" });
