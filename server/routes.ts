@@ -804,7 +804,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const partData = { ...req.body, companyId: req.userContext.companyId };
+      const partData = {
+        ...req.body,
+        companyId: req.userContext.companyId,
+        quantityInStock: 0,
+      };
       const validatedPart = insertInventoryPartSchema.parse(partData);
       const part = await storage.createInventoryPart(validatedPart);
       res.status(201).json(part);
@@ -816,7 +820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/inventory/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
-      const { companyId, id, ...updates } = req.body;
+      const { companyId, id, quantityInStock, ...updates } = req.body;
       const part = await storage.updateInventoryPart(req.params.id, req.userContext.companyId, updates);
       res.json(part);
     } catch (error) {

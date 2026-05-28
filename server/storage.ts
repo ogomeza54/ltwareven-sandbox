@@ -698,8 +698,24 @@ export class DatabaseStorage implements IStorage {
         .returning();
 
       if (items.length > 0) {
+        // For unlinked items (no partId), auto-create the catalog entry at qty 0
+        const resolvedItems = await Promise.all(items.map(async (item) => {
+          if (item.partId) return item;
+
+          // Create a new catalog entry — unitCost becomes the catalog price
+          const [newPart] = await tx.insert(inventoryParts).values({
+            name: item.partNameSnapshot,
+            partNumber: item.partNumberSnapshot || "",
+            price: item.unitCost || "0",
+            quantityInStock: 0,
+            companyId,
+          }).returning();
+
+          return { ...item, partId: newPart.id };
+        }));
+
         await tx.insert(inventoryIntakeItems).values(
-          items.map(item => ({
+          resolvedItems.map(item => ({
             inventoryIntakeId: intake.id,
             partId: item.partId || null,
             partNameSnapshot: item.partNameSnapshot,
@@ -711,8 +727,8 @@ export class DatabaseStorage implements IStorage {
           }))
         );
 
-        // Increment stock for all linked parts
-        for (const item of items) {
+        // Increment stock for all parts (all items now have a partId)
+        for (const item of resolvedItems) {
           if (item.partId) {
             await tx.update(inventoryParts)
               .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}` })

@@ -141,7 +141,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const createMutation = useMutation({
     mutationFn: async () => {
       // Only send rows that have content (ignore blank trailing rows)
-      const filledItems = items.filter(i => i.partNameSnapshot.trim() && i.partId);
+      const filledItems = items.filter(i => i.partNameSnapshot.trim());
       const payload = {
         vendor,
         invoiceNumber: invoiceNumber || undefined,
@@ -182,15 +182,6 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     const filledItems = items.filter(i => i.partNameSnapshot.trim());
     if (filledItems.length === 0) {
       toast({ title: "Items required", description: "Add at least one line item.", variant: "destructive" });
-      return;
-    }
-    const unlinked = filledItems.filter(i => !i.partId);
-    if (unlinked.length > 0) {
-      toast({
-        title: "All items must be linked to a catalog part",
-        description: `${unlinked.length} item(s) are not linked. Search and select each part from your catalog, or add new parts first.`,
-        variant: "destructive",
-      });
       return;
     }
     createMutation.mutate();
@@ -273,7 +264,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Each line item must be linked to a part in your catalog — this ensures stock quantities are updated automatically when you receive. Use "Add Part" on the inventory page first if a part isn't in your catalog yet.
+              Search to link a line item to an existing catalog part. If the part doesn't exist yet, just type the name and part number — it will be created automatically when you save.
             </p>
 
             <div className="border rounded-lg overflow-hidden">
@@ -298,12 +289,16 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                       <tr key={item.id} className="hover:bg-muted/20">
                         <td className="px-2 py-2">
                           {item.partId ? (
-                            <span aria-label="Linked — stock will update">
+                            <span aria-label="Linked to existing catalog part">
                               <Link2 className="h-3.5 w-3.5 text-green-500" />
                             </span>
+                          ) : item.partNameSnapshot.trim() ? (
+                            <span aria-label="New part — will be created on save" title="New part — will be created on save">
+                              <Plus className="h-3.5 w-3.5 text-amber-500" />
+                            </span>
                           ) : (
-                            <span aria-label="Not yet linked to catalog part">
-                              <Unlink className="h-3.5 w-3.5 text-muted-foreground/50" />
+                            <span aria-label="Enter a part name">
+                              <Unlink className="h-3.5 w-3.5 text-muted-foreground/30" />
                             </span>
                           )}
                         </td>

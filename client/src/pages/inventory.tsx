@@ -17,7 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Search, Package, AlertTriangle, Plus, Edit, Trash2, PackagePlus,
+  Search, Package, AlertTriangle, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
   ClipboardList, Eye, Download, Info,
 } from "lucide-react";
@@ -33,7 +33,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 export default function Inventory() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
@@ -296,13 +295,6 @@ export default function Inventory() {
               </TabsList>
 
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAddModalOpen(true)}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Part
-                </Button>
                 <Button
                   className="bg-amber-500 hover:bg-amber-600 text-white font-semibold"
                   onClick={() => setIsReceiveModalOpen(true)}
@@ -833,11 +825,6 @@ export default function Inventory() {
       </main>
 
       {/* Modals */}
-      <InventoryPartModal
-        open={isAddModalOpen}
-        onOpenChange={setIsAddModalOpen}
-      />
-
       <InventoryPartModal
         open={isEditModalOpen}
         onOpenChange={(open) => {

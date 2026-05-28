@@ -18,7 +18,6 @@ const inventoryPartSchema = z.object({
   category: z.string().optional(),
   description: z.string().optional(),
   price: z.string().optional().or(z.literal("")),
-  quantityInStock: z.string().optional().or(z.literal("")),
   lowStockThreshold: z.string().optional().or(z.literal("")),
 });
 
@@ -47,7 +46,6 @@ export default function InventoryPartModal({
       category: part?.category || "",
       description: part?.description || "",
       price: part?.price?.toString() || "",
-      quantityInStock: part?.quantityInStock?.toString() || "0",
       lowStockThreshold: part?.lowStockThreshold?.toString() || "5",
     },
   });
@@ -60,7 +58,6 @@ export default function InventoryPartModal({
         category: data.category?.trim() || null,
         description: data.description || "",
         price: data.price || "0",
-        quantityInStock: Math.max(0, parseInt(data.quantityInStock || "0") || 0),
         lowStockThreshold: Math.max(0, parseInt(data.lowStockThreshold || "5") || 5),
       };
       
@@ -192,7 +189,7 @@ export default function InventoryPartModal({
               )}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="price"
@@ -208,26 +205,6 @@ export default function InventoryPartModal({
                         step="0.01"
                         min="0"
                         placeholder="0.00"
-                        className="text-foreground placeholder:text-foreground/50"
-                        {...field} 
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="quantityInStock"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-foreground">Quantity in Stock</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number"
-                        min="0"
-                        placeholder="0"
                         className="text-foreground placeholder:text-foreground/50"
                         {...field} 
                       />
