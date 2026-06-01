@@ -748,11 +748,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "At least one line item is required" });
       }
 
-      // Validate items — every line item must be linked to a catalog part
+      // Validate items — name and quantity required; partId optional (new parts are auto-created)
       for (const item of items) {
-        if (!item.partId) {
-          return res.status(400).json({ message: "Each line item must be linked to a catalog part (partId required)" });
-        }
         if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
           return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
         }
