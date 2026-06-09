@@ -1,0 +1,2 @@
+- [Dual Auth Architecture](dual-auth.md) — Replit OIDC + email/password local auth coexist; session key is `localUserId` for local users.
+- [User Roles Access Matrix](user-roles.md) — 5 roles (super_admin, admin, accounting, shop_user, technician) with specific sidebar/page access per role.

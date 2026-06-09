@@ -17,6 +17,9 @@ import {
   ChevronDown,
   UserCircle,
   Building2,
+  FileText,
+  UserCog,
+  LogOut,
 } from "lucide-react";
 
 interface CompanyOption {
@@ -24,7 +27,9 @@ interface CompanyOption {
   name: string;
 }
 
-const navigation = [
+type NavItem = { name: string; href: string; icon: React.ElementType };
+
+const allNavigation: NavItem[] = [
   { name: "Dashboard", href: "/", icon: Gauge },
   { name: "Job Intake", href: "/intake-form", icon: ClipboardList },
   { name: "Work Orders", href: "/repair-orders", icon: Wrench },
@@ -32,13 +37,28 @@ const navigation = [
   { name: "Technicians", href: "/mechanics", icon: Users },
   { name: "Clients", href: "/customers", icon: UserCircle },
   { name: "Fleet", href: "/vehicles", icon: Truck },
+  { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Reports", href: "/reports", icon: BarChart3 },
 ];
+
+function getNavForRole(role: string): NavItem[] {
+  switch (role) {
+    case "accounting":
+      return allNavigation.filter((n) => ["/", "/invoices", "/reports"].includes(n.href));
+    case "shop_user":
+    case "technician":
+      return allNavigation.filter((n) => n.href !== "/invoices");
+    default:
+      // admin, super_admin — everything
+      return allNavigation;
+  }
+}
 
 export default function Sidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
+  const isAdminOrSuper = user?.role === "admin" || isSuperAdmin;
 
   const { data: companies = [] } = useQuery<CompanyOption[]>({
     queryKey: ["/api/admin/companies"],
@@ -54,13 +74,25 @@ export default function Sidebar() {
     },
   });
 
-  // effectiveCompanyId comes directly from user.companyId (which is already set to the effective one)
   const effectiveCompanyId = user?.companyId ?? null;
+  const navigation = getNavForRole(user?.role ?? "shop_user");
+
+  const handleLogout = async () => {
+    if (user?.authSource === "local") {
+      try {
+        await apiRequest("POST", "/api/auth/local/logout", {});
+      } catch {}
+      queryClient.clear();
+      window.location.href = "/";
+    } else {
+      window.location.href = "/api/logout";
+    }
+  };
 
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
       {/* Navigation */}
-      <nav className="flex-1 p-3">
+      <nav className="flex-1 p-3 overflow-y-auto">
         <ul className="space-y-0.5">
           {navigation.map((item) => {
             const isActive = location === item.href;
@@ -80,6 +112,21 @@ export default function Sidebar() {
               </li>
             );
           })}
+          
+          {/* User Management — admin + super_admin only */}
+          {isAdminOrSuper && (
+            <li>
+              <Link href="/users" className={cn(
+                "flex items-center space-x-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors",
+                location === "/users"
+                  ? "sidebar-active" 
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
+              )}>
+                <UserCog className="w-4 h-4 flex-shrink-0" />
+                <span>Users</span>
+              </Link>
+            </li>
+          )}
           
           {/* Super Admin Menu */}
           {isSuperAdmin && (
@@ -133,15 +180,19 @@ export default function Sidebar() {
       {/* User Profile */}
       <div className="p-3 border-t border-slate-800">
         <div className="flex items-center space-x-3 px-2 py-2">
-          <div className="w-8 h-8 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center">
+          <div className="w-8 h-8 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center flex-shrink-0">
             <User className="text-amber-400 w-4 h-4" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-white truncate">{user?.firstName || user?.email}</p>
-            <p className="text-xs text-slate-500 capitalize">{user?.role || 'User'}</p>
+            <p className="text-xs text-slate-500 capitalize">{user?.role?.replace("_", " ") || 'User'}</p>
           </div>
-          <button>
-            <ChevronDown className="text-slate-600 w-4 h-4" />
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="text-slate-600 hover:text-slate-300 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>

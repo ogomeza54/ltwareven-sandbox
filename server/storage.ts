@@ -33,6 +33,9 @@ export interface IStorage {
   getAllUsersWithCompany(): Promise<(User & { companyName?: string })[]>;
   createUserPlaceholder(userData: { email: string; role: string; companyId: string }): Promise<User>;
   updateUserRole(id: string, role: string, companyId: string): Promise<User>;
+  createLocalUser(data: { email: string; firstName?: string; lastName?: string; passwordHash: string; role: string; companyId: string }): Promise<User>;
+  updateUserPassword(id: string, passwordHash: string, mustChangePassword: boolean): Promise<void>;
+  deleteUser(id: string, companyId: string): Promise<void>;
   
   // Mechanic operations
   getMechanicsByCompany(companyId: string): Promise<Mechanic[]>;
@@ -224,6 +227,35 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async createLocalUser(data: { email: string; firstName?: string; lastName?: string; passwordHash: string; role: string; companyId: string }): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values({
+        email: data.email,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        passwordHash: data.passwordHash,
+        mustChangePassword: true,
+        role: data.role,
+        companyId: data.companyId,
+      })
+      .returning();
+    return user;
+  }
+
+  async updateUserPassword(id: string, passwordHash: string, mustChangePassword: boolean): Promise<void> {
+    await db
+      .update(users)
+      .set({ passwordHash, mustChangePassword, updatedAt: new Date() })
+      .where(eq(users.id, id));
+  }
+
+  async deleteUser(id: string, companyId: string): Promise<void> {
+    await db
+      .delete(users)
+      .where(and(eq(users.id, id), eq(users.companyId, companyId)));
   }
 
   // ── Mechanics ────────────────────────────────────────────────────────────────

@@ -29,10 +29,14 @@ const upload = multer({
   }
 });
 
+// Resolve userId from either local session or Replit OIDC
+const resolveUserId = (req: any): string | undefined =>
+  req.session?.localUserId || req.user?.claims?.sub;
+
 // Middleware to get user's company context
 const withCompanyContext = async (req: any, res: any, next: any) => {
   try {
-    const userId = req.user.claims.sub;
+    const userId = resolveUserId(req);
     const user = await storage.getUser(userId);
     
     if (!user) {
@@ -156,10 +160,198 @@ async function rebalanceWorkOrders(companyId: string): Promise<{ reassigned: num
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
 
+  // Local auth routes
+  app.post('/api/auth/local/login', async (req: any, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email and password are required" });
+      }
+      const bcrypt = await import('bcryptjs');
+      const user = await storage.getUserByEmail(email.toLowerCase().trim());
+      if (!user || !user.passwordHash) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      const valid = await bcrypt.compare(password, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      req.session.localUserId = user.id;
+      req.session.save(() => {
+        res.json({ success: true, mustChangePassword: user.mustChangePassword });
+      });
+    } catch (error) {
+      console.error("Local login error:", error);
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  app.post('/api/auth/local/logout', (req: any, res) => {
+    delete req.session.localUserId;
+    req.session.save(() => res.json({ success: true }));
+  });
+
+  app.post('/api/auth/change-password', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const { currentPassword, newPassword } = req.body;
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: "New password must be at least 6 characters" });
+      }
+      const bcrypt = await import('bcryptjs');
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      // Verify current password if they already have one and it's not a forced change
+      if (user.passwordHash && !user.mustChangePassword) {
+        if (!currentPassword) return res.status(400).json({ message: "Current password is required" });
+        const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+        if (!valid) return res.status(400).json({ message: "Current password is incorrect" });
+      }
+      const hash = await bcrypt.hash(newPassword, 12);
+      await storage.updateUserPassword(userId, hash, false);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // User management routes
+  app.get('/api/users', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (!['admin', 'super_admin'].includes(user.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      if (user.role === 'super_admin') {
+        const allUsers = await storage.getAllUsersWithCompany();
+        return res.json(allUsers);
+      }
+      const sessionOverride = (req.session as any)?.superAdminActiveCompanyId as string | undefined;
+      const companyId = (user.role === 'super_admin' && sessionOverride) ? sessionOverride : user.companyId;
+      const users = await storage.getUsersByCompany(companyId);
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.post('/api/users', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const requestingUser = await storage.getUser(userId);
+      if (!requestingUser || !['admin', 'super_admin'].includes(requestingUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const { email, firstName, lastName, password, role, companyId } = req.body;
+      if (!email || !password || !role) {
+        return res.status(400).json({ message: "Email, password, and role are required" });
+      }
+      const existing = await storage.getUserByEmail(email.toLowerCase().trim());
+      if (existing) return res.status(409).json({ message: "A user with this email already exists" });
+      const bcrypt = await import('bcryptjs');
+      const hash = await bcrypt.hash(password, 12);
+      const targetCompanyId = (requestingUser.role === 'super_admin' && companyId) ? companyId : requestingUser.companyId;
+      const newUser = await storage.createLocalUser({
+        email: email.toLowerCase().trim(),
+        firstName,
+        lastName,
+        passwordHash: hash,
+        role,
+        companyId: targetCompanyId,
+      });
+      const { passwordHash: _h, ...safeUser } = newUser as any;
+      res.status(201).json(safeUser);
+    } catch (error) {
+      console.error("Create user error:", error);
+      res.status(500).json({ message: "Failed to create user" });
+    }
+  });
+
+  app.patch('/api/users/:id/role', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const requestingUser = await storage.getUser(userId);
+      if (!requestingUser || !['admin', 'super_admin'].includes(requestingUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const { role } = req.body;
+      const validRoles = ['admin', 'accounting', 'shop_user', 'technician'];
+      if (!role || !validRoles.includes(role)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      if (target.role === 'super_admin') return res.status(403).json({ message: "Cannot change super_admin role" });
+      if (requestingUser.role === 'admin' && target.companyId !== requestingUser.companyId) {
+        return res.status(403).json({ message: "Cannot manage users from another company" });
+      }
+      const updated = await storage.updateUserRole(req.params.id, role, target.companyId);
+      const { passwordHash: _h, ...safeUser } = updated as any;
+      res.json(safeUser);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update role" });
+    }
+  });
+
+  app.post('/api/users/:id/reset-password', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const requestingUser = await storage.getUser(userId);
+      if (!requestingUser || !['admin', 'super_admin'].includes(requestingUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const { newPassword } = req.body;
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters" });
+      }
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      if (requestingUser.role === 'admin' && target.companyId !== requestingUser.companyId) {
+        return res.status(403).json({ message: "Cannot manage users from another company" });
+      }
+      const bcrypt = await import('bcryptjs');
+      const hash = await bcrypt.hash(newPassword, 12);
+      await storage.updateUserPassword(req.params.id, hash, true);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to reset password" });
+    }
+  });
+
+  app.delete('/api/users/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if (req.params.id === userId) return res.status(400).json({ message: "Cannot delete your own account" });
+      const requestingUser = await storage.getUser(userId);
+      if (!requestingUser || !['admin', 'super_admin'].includes(requestingUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      if (target.role === 'super_admin') return res.status(403).json({ message: "Cannot delete a super admin" });
+      if (requestingUser.role === 'admin' && target.companyId !== requestingUser.companyId) {
+        return res.status(403).json({ message: "Cannot delete users from another company" });
+      }
+      await storage.deleteUser(req.params.id, target.companyId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = resolveUserId(req);
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -182,7 +374,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // companyId in the response is the effective (possibly switched) company so
       // all existing API filtering keeps working without modification.
-      res.json({ ...user, companyId: effectiveCompanyId, ownCompanyId, activeCompanyName });
+      const authSource = (req.session as any)?.localUserId ? 'local' : 'replit';
+      const { passwordHash: _h, ...safeUser } = user as any;
+      res.json({ ...safeUser, companyId: effectiveCompanyId, ownCompanyId, activeCompanyName, authSource });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -191,7 +385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Super admin company switcher
   app.post("/api/admin/switch-company", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = resolveUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "super_admin") {
@@ -243,7 +437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin audit log
   app.get("/api/admin/audit-log", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = resolveUserId(req);
       const user = await storage.getUser(userId);
       if (!user || user.role !== "super_admin") {
         return res.status(403).json({ message: "Only super admins can view the audit log" });

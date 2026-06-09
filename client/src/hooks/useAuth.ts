@@ -5,6 +5,7 @@ export type AuthUser = User & {
   companyId: string;
   ownCompanyId: string;
   activeCompanyName: string | null;
+  authSource: 'local' | 'replit';
 };
 
 export function useAuth() {

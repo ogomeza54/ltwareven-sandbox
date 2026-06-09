@@ -24,14 +24,17 @@ export const companies = pgTable("companies", {
 });
 
 // Users table with Replit Auth integration and company association
+// Roles: super_admin | admin | accounting | shop_user | technician
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: text("role").notNull().default("technician"),
+  role: text("role").notNull().default("shop_user"),
   companyId: varchar("company_id").notNull().references(() => companies.id),
+  passwordHash: text("password_hash"),
+  mustChangePassword: boolean("must_change_password").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
