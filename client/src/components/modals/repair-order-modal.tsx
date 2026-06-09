@@ -16,6 +16,7 @@ import {
   CircleDot, CircleCheck, Ban, Save, Trash2, Plus, X
 } from "lucide-react";
 import { SERVICE_TYPES, TRUCK_TYPES, WORK_ORDER_STATUSES } from "@shared/schema";
+import DateInput, { nowLocalValue } from "@/components/ui/date-input";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
   "open":        { label: "Open",        color: "bg-blue-500/10 text-blue-400 border-blue-500/20",    icon: CircleDot },
@@ -339,7 +340,11 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
                   </div>
                   <div className="space-y-1.5">
                     <Label>Scheduled Date</Label>
-                    <Input type="datetime-local" value={editFields.scheduledDate} onChange={e => setEditFields(f => ({ ...f, scheduledDate: e.target.value }))} />
+                    <DateInput
+                      type="datetime-local"
+                      value={editFields.scheduledDate}
+                      onChange={v => setEditFields(f => ({ ...f, scheduledDate: v }))}
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label>Est. Hours</Label>

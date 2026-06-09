@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { validateFiles } from "@/lib/file-upload";
 import { CloudUpload, Plus, X, Truck, User, Wrench, AlertTriangle, Search, Building2, FileText } from "lucide-react";
 import { SERVICE_TYPES, TRUCK_TYPES } from "@shared/schema";
+import DateInput, { nowLocalValue } from "@/components/ui/date-input";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
       odometerIn: "",
       serviceType: "",
       dotInspectionRequired: false,
-      scheduledDate: "",
+      scheduledDate: nowLocalValue(),
       estimatedHours: "",
       laborRate: "",
       repairDescription: "",
@@ -635,7 +636,13 @@ export default function IntakeForm({ onSuccess }: IntakeFormProps) {
               <FormField control={form.control} name="scheduledDate" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Scheduled Date</FormLabel>
-                  <FormControl><Input type="datetime-local" {...field} /></FormControl>
+                  <FormControl>
+                    <DateInput
+                      type="datetime-local"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
                 </FormItem>
               )} />
               <FormField control={form.control} name="dotInspectionRequired" render={({ field }) => (

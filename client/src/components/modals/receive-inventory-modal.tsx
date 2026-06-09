@@ -10,6 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { 
   PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink
 } from "lucide-react";
+import DateInput, { todayValue } from "@/components/ui/date-input";
 
 interface LineItem {
   id: string;
@@ -72,7 +73,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   const [vendor, setVendor] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(todayValue());
   const [notes, setNotes] = useState("");
   const [taxAmount, setTaxAmount] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
@@ -245,11 +246,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             </div>
             <div className="space-y-1.5">
               <Label className="text-foreground font-medium">Invoice Date</Label>
-              <Input
+              <DateInput
                 type="date"
                 value={invoiceDate}
-                onChange={e => setInvoiceDate(e.target.value)}
-                className="text-foreground"
+                onChange={setInvoiceDate}
               />
             </div>
             <div className="space-y-1.5">
