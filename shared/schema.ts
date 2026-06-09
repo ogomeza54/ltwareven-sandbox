@@ -79,6 +79,7 @@ export const vehicles = pgTable("vehicles", {
   unitStatus: text("unit_status"),         // active | inactive | maintenance
   fleetType: text("fleet_type"),           // company-fleet | external
   truckType: text("truck_type"),           // semi-truck, box truck, flatbed, tanker, etc.
+  photoUrl: text("photo_url"),             // optional unit photo
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

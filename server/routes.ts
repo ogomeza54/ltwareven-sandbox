@@ -1226,6 +1226,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Vehicle photo upload
+  app.post("/api/vehicles/:id/photo", isAuthenticated, withCompanyContext, upload.single("photo"), async (req: any, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const newFilename = `vehicle-${req.params.id}-${Date.now()}${ext}`;
+      const newPath = path.join(uploadsDir, newFilename);
+      fs.renameSync(req.file.path, newPath);
+      const photoUrl = `/api/uploads/${newFilename}`;
+      const vehicle = await storage.updateVehicle(req.params.id, req.userContext.companyId, { photoUrl });
+      res.json({ photoUrl, vehicle });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to upload photo" });
+    }
+  });
+
   // File serving
   app.get("/api/uploads/:filename", (req, res) => {
     const filename = req.params.filename;

@@ -38,7 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Car, Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Car, Plus, Pencil, Trash2, Search, Camera, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TRUCK_TYPES } from "@shared/schema";
@@ -57,6 +57,7 @@ interface Vehicle {
   unitStatus: string | null;
   fleetType: string | null;
   truckType: string | null;
+  photoUrl: string | null;
   companyId: string;
   createdAt: string;
 }
@@ -74,6 +75,8 @@ export default function Vehicles() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     year: new Date().getFullYear(),
     make: "",
@@ -88,6 +91,26 @@ export default function Vehicles() {
     fleetType: "",
     truckType: "",
   });
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setPhotoFile(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setPhotoPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPhotoPreview(null);
+    }
+  };
+
+  const uploadPhoto = async (vehicleId: string) => {
+    if (!photoFile) return;
+    const fd = new FormData();
+    fd.append("photo", photoFile);
+    await fetch(`/api/vehicles/${vehicleId}/photo`, { method: "POST", body: fd });
+    queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+  };
 
   const { data: vehicles = [], isLoading } = useQuery<Vehicle[]>({
     queryKey: ["/api/vehicles"],
@@ -106,7 +129,7 @@ export default function Vehicles() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      return apiRequest("POST", "/api/vehicles", {
+      const res = await apiRequest("POST", "/api/vehicles", {
         ...data,
         year: Number(data.year),
         mileage: data.mileage ? Number(data.mileage) : null,
@@ -119,8 +142,10 @@ export default function Vehicles() {
         fleetType: data.fleetType || null,
         truckType: data.truckType || null,
       });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: async (vehicle: Vehicle) => {
+      await uploadPhoto(vehicle.id);
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
       setIsAddModalOpen(false);
       resetForm();
@@ -133,7 +158,7 @@ export default function Vehicles() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      return apiRequest("PATCH", `/api/vehicles/${selectedVehicle?.id}`, {
+      const res = await apiRequest("PATCH", `/api/vehicles/${selectedVehicle?.id}`, {
         ...data,
         year: Number(data.year),
         mileage: data.mileage ? Number(data.mileage) : null,
@@ -146,8 +171,10 @@ export default function Vehicles() {
         fleetType: data.fleetType || null,
         truckType: data.truckType || null,
       });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: async (vehicle: Vehicle) => {
+      await uploadPhoto(vehicle.id);
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
       setIsEditModalOpen(false);
       setSelectedVehicle(null);
@@ -188,6 +215,8 @@ export default function Vehicles() {
       fleetType: "",
       truckType: "",
     });
+    setPhotoFile(null);
+    setPhotoPreview(null);
   };
 
   const handleEdit = (vehicle: Vehicle) => {
@@ -206,6 +235,8 @@ export default function Vehicles() {
       fleetType: vehicle.fleetType || "",
       truckType: vehicle.truckType || "",
     });
+    setPhotoFile(null);
+    setPhotoPreview(vehicle.photoUrl || null);
     setIsEditModalOpen(true);
   };
 
@@ -272,6 +303,7 @@ export default function Vehicles() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-12"></TableHead>
                     <TableHead>Vehicle</TableHead>
                     <TableHead>Tractor #</TableHead>
                     <TableHead>Owner / Type</TableHead>
@@ -284,13 +316,13 @@ export default function Vehicles() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
+                      <TableCell colSpan={8} className="text-center py-8">
                         Loading vehicles...
                       </TableCell>
                     </TableRow>
                   ) : filteredVehicles.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
+                      <TableCell colSpan={8} className="text-center py-8">
                         <Car className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                         <p className="text-gray-500">No vehicles found</p>
                       </TableCell>
@@ -298,6 +330,15 @@ export default function Vehicles() {
                   ) : (
                     filteredVehicles.map((vehicle) => (
                       <TableRow key={vehicle.id}>
+                        <TableCell className="w-12 pr-0">
+                          {vehicle.photoUrl ? (
+                            <img src={vehicle.photoUrl} alt="unit" className="w-10 h-10 rounded object-cover border border-slate-700" />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-slate-800 border border-slate-700 flex items-center justify-center">
+                              <Car className="w-4 h-4 text-slate-500" />
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="font-medium">
                           <div>
                             <p>{vehicle.year} {vehicle.make} {vehicle.model}</p>
@@ -495,6 +536,35 @@ export default function Vehicles() {
                 />
               </div>
             </div>
+
+            {/* Photo upload */}
+            <div>
+              <Label>Unit Photo (optional)</Label>
+              <div className="mt-1.5 flex items-center gap-3">
+                {photoPreview ? (
+                  <div className="relative">
+                    <img src={photoPreview} alt="preview" className="w-20 h-20 rounded object-cover border border-slate-700" />
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                      className="absolute -top-1.5 -right-1.5 bg-slate-800 rounded-full p-0.5 border border-slate-600 hover:bg-red-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 rounded border-2 border-dashed border-slate-600 flex items-center justify-center bg-slate-900">
+                    <Camera className="w-6 h-6 text-slate-500" />
+                  </div>
+                )}
+                <label className="cursor-pointer">
+                  <span className="text-sm text-amber-400 hover:text-amber-300 underline">
+                    {photoPreview ? "Change photo" : "Upload photo"}
+                  </span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                </label>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
@@ -502,7 +572,7 @@ export default function Vehicles() {
               onClick={() => createMutation.mutate(formData)}
               disabled={createMutation.isPending || !formData.make || !formData.model}
             >
-              {createMutation.isPending ? "Adding..." : "Add Vehicle"}
+              {createMutation.isPending ? "Saving..." : "Add Vehicle"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -653,6 +723,35 @@ export default function Vehicles() {
                   value={formData.mileage}
                   onChange={(e) => setFormData({ ...formData, mileage: e.target.value })}
                 />
+              </div>
+            </div>
+
+            {/* Photo upload */}
+            <div>
+              <Label>Unit Photo (optional)</Label>
+              <div className="mt-1.5 flex items-center gap-3">
+                {photoPreview ? (
+                  <div className="relative">
+                    <img src={photoPreview} alt="preview" className="w-20 h-20 rounded object-cover border border-slate-700" />
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                      className="absolute -top-1.5 -right-1.5 bg-slate-800 rounded-full p-0.5 border border-slate-600 hover:bg-red-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 rounded border-2 border-dashed border-slate-600 flex items-center justify-center bg-slate-900">
+                    <Camera className="w-6 h-6 text-slate-500" />
+                  </div>
+                )}
+                <label className="cursor-pointer">
+                  <span className="text-sm text-amber-400 hover:text-amber-300 underline">
+                    {photoPreview ? "Change photo" : "Upload photo"}
+                  </span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                </label>
               </div>
             </div>
           </div>
