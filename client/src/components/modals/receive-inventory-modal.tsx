@@ -47,6 +47,14 @@ function sumLines(items: LineItem[]): number {
   return items.reduce((sum, item) => sum + parseFloat(item.lineTotal || "0"), 0);
 }
 
+function calcLandedCost(lineTotal: string, qty: number, invoiceSubtotal: number, totalAncillary: number): string {
+  const lt = parseFloat(lineTotal || "0");
+  const q = qty || 1;
+  const weight = invoiceSubtotal > 0 ? lt / invoiceSubtotal : 0;
+  const ancillaryShare = weight * totalAncillary;
+  return ((lt + ancillaryShare) / q).toFixed(4);
+}
+
 type ReconciliationStatus = "matched" | "warning" | "empty";
 
 function getReconciliation(subtotal: number, tax: number, delivery: number, total: string): ReconciliationStatus {
@@ -277,6 +285,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     <th className="text-left px-3 py-2 text-foreground font-medium w-20">Qty</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-28">Unit Cost</th>
                     <th className="text-right px-3 py-2 text-foreground font-medium w-28">Line Total</th>
+                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-32" title="Unit cost after proportional tax & delivery allocation">Landed Cost</th>
                     <th className="w-10" />
                   </tr>
                 </thead>
@@ -372,6 +381,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
                         <td className="px-3 py-2 text-right font-medium text-foreground">
                           ${parseFloat(item.lineTotal || "0").toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {item.partNameSnapshot.trim() ? (
+                            <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
+                              ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {items.length > 1 && (

@@ -90,7 +90,7 @@ export interface IStorage {
   getInventoryIntake(id: string, companyId: string): Promise<any | undefined>;
   createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
-    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string }>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
     companyId: string,
     userId: string
   ): Promise<InventoryIntake>;
@@ -670,7 +670,7 @@ export class DatabaseStorage implements IStorage {
 
   async createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
-    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string }>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
     companyId: string,
     userId: string
   ): Promise<InventoryIntake> {
@@ -691,22 +691,35 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Compute weighted ancillary allocation per item
+    const totalAncillary = parseFloat(intakeHeader.taxAmount as string || "0") + parseFloat(intakeHeader.deliveryFee as string || "0");
+    const invoiceSubtotal = items.reduce((sum, i) => sum + parseFloat(i.lineTotal || "0"), 0);
+
+    const itemsWithLanded = items.map(item => {
+      const lineTotal = parseFloat(item.lineTotal || "0");
+      const qty = item.qty || 1;
+      const weight = invoiceSubtotal > 0 ? lineTotal / invoiceSubtotal : 0;
+      const ancillaryShare = weight * totalAncillary;
+      const landedCost = ((lineTotal + ancillaryShare) / qty).toFixed(4);
+      return { ...item, landedCost };
+    });
+
     // Wrap everything in a transaction for all-or-nothing consistency
     return await db.transaction(async (tx) => {
       const [intake] = await tx.insert(inventoryIntakes)
         .values({ ...intakeHeader, companyId, createdByUserId: userId })
         .returning();
 
-      if (items.length > 0) {
+      if (itemsWithLanded.length > 0) {
         // For unlinked items (no partId), auto-create the catalog entry at qty 0
-        const resolvedItems = await Promise.all(items.map(async (item) => {
+        const resolvedItems = await Promise.all(itemsWithLanded.map(async (item) => {
           if (item.partId) return item;
 
-          // Create a new catalog entry — unitCost becomes the catalog price
+          // Create a new catalog entry — landedCost becomes the catalog price
           const [newPart] = await tx.insert(inventoryParts).values({
             name: item.partNameSnapshot,
             partNumber: item.partNumberSnapshot || "",
-            price: item.unitCost || "0",
+            price: item.landedCost || item.unitCost || "0",
             quantityInStock: 0,
             companyId,
           }).returning();
@@ -723,15 +736,19 @@ export class DatabaseStorage implements IStorage {
             qty: item.qty,
             unitCost: item.unitCost,
             lineTotal: item.lineTotal,
+            landedCost: item.landedCost,
             companyId,
           }))
         );
 
-        // Increment stock for all parts (all items now have a partId)
+        // Increment stock and update catalog price to landed cost for all parts
         for (const item of resolvedItems) {
           if (item.partId) {
             await tx.update(inventoryParts)
-              .set({ quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}` })
+              .set({
+                quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}`,
+                price: item.landedCost,
+              })
               .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
           }
         }

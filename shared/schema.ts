@@ -168,6 +168,7 @@ export const inventoryIntakeItems = pgTable("inventory_intake_items", {
   qty: integer("qty").notNull(),
   unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(),
   lineTotal: decimal("line_total", { precision: 12, scale: 2 }).notNull(),
+  landedCost: decimal("landed_cost", { precision: 12, scale: 4 }),
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

@@ -19,7 +19,7 @@ import {
 import {
   Search, Package, AlertTriangle, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
-  ClipboardList, Eye, Download, Info,
+  ClipboardList, Eye, Download, Info, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
@@ -40,6 +40,7 @@ export default function Inventory() {
   const [isCountModalOpen, setIsCountModalOpen] = useState(false);
   const [selectedCountSessionId, setSelectedCountSessionId] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<any>(null);
+  const [expandedIntakeId, setExpandedIntakeId] = useState<string | null>(null);
 
   const handleEditPart = (part: any) => {
     setSelectedPart(part);
@@ -65,6 +66,11 @@ export default function Inventory() {
 
   const { data: intakes = [], isLoading: intakesLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory/intakes"],
+  });
+
+  const { data: expandedIntake } = useQuery<any>({
+    queryKey: ["/api/inventory/intakes", expandedIntakeId],
+    enabled: !!expandedIntakeId,
   });
 
   const { data: adjustments = [], isLoading: adjustmentsLoading } = useQuery<any[]>({
@@ -471,13 +477,25 @@ export default function Inventory() {
                 </Card>
               ) : (
                 <div className="space-y-3">
-                  {intakes.map((intake: any) => (
+                  {intakes.map((intake: any) => {
+                    const isExpanded = expandedIntakeId === intake.id;
+                    const detail = isExpanded ? expandedIntake : null;
+                    const hasAncillary = Number(intake.taxAmount) > 0 || Number(intake.deliveryFee) > 0;
+                    return (
                     <Card key={intake.id}>
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-1">
-                              <span className="font-semibold">{intake.vendor}</span>
+                              <button
+                                className="flex items-center gap-1.5 font-semibold hover:text-amber-400 transition-colors"
+                                onClick={() => setExpandedIntakeId(isExpanded ? null : intake.id)}
+                              >
+                                {isExpanded
+                                  ? <ChevronDown className="h-4 w-4 text-amber-400" />
+                                  : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                                {intake.vendor}
+                              </button>
                               {intake.invoiceNumber && (
                                 <Badge variant="outline" className="text-xs">
                                   #{intake.invoiceNumber}
@@ -510,9 +528,50 @@ export default function Inventory() {
                         {intake.notes && (
                           <p className="text-sm text-muted-foreground mt-2 border-t pt-2">{intake.notes}</p>
                         )}
+
+                        {/* Expandable line items with landed cost */}
+                        {isExpanded && (
+                          <div className="mt-3 border-t pt-3">
+                            {!detail ? (
+                              <p className="text-xs text-muted-foreground">Loading…</p>
+                            ) : (
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-xs text-muted-foreground border-b">
+                                    <th className="text-left pb-1.5 font-medium">Part</th>
+                                    <th className="text-left pb-1.5 font-medium w-24">Part #</th>
+                                    <th className="text-right pb-1.5 font-medium w-14">Qty</th>
+                                    <th className="text-right pb-1.5 font-medium w-24">Unit Cost</th>
+                                    <th className="text-right pb-1.5 font-medium w-24">Line Total</th>
+                                    <th className={`text-right pb-1.5 font-medium w-28 ${hasAncillary ? "text-amber-400" : ""}`}>
+                                      Landed Cost
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/40">
+                                  {detail.items?.map((item: any) => (
+                                    <tr key={item.id} className="text-foreground/80">
+                                      <td className="py-1.5">{item.partNameSnapshot}</td>
+                                      <td className="py-1.5 font-mono text-xs text-muted-foreground">{item.partNumberSnapshot || "—"}</td>
+                                      <td className="py-1.5 text-right">{item.qty}</td>
+                                      <td className="py-1.5 text-right">${Number(item.unitCost).toFixed(2)}</td>
+                                      <td className="py-1.5 text-right">${Number(item.lineTotal).toFixed(2)}</td>
+                                      <td className={`py-1.5 text-right font-semibold tabular-nums ${hasAncillary ? "text-amber-400" : ""}`}>
+                                        {item.landedCost != null
+                                          ? `$${Number(item.landedCost).toFixed(4)}`
+                                          : `$${Number(item.unitCost).toFixed(4)}`}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </TabsContent>
