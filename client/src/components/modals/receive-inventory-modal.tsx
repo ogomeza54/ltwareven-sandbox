@@ -20,6 +20,8 @@ interface LineItem {
   partNameSnapshot: string;
   partNumberSnapshot: string;
   itemType: ItemType;
+  groupId?: string;
+  subgroupId?: string;
   qty: number;
   unitCost: string;
   lineTotal: string;
@@ -37,6 +39,8 @@ function newLineItem(): LineItem {
     partNameSnapshot: "",
     partNumberSnapshot: "",
     itemType: "inventory",
+    groupId: undefined,
+    subgroupId: undefined,
     qty: 1,
     unitCost: "",
     lineTotal: "0.00",
@@ -88,6 +92,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
 
   const { data: allParts = [] } = useQuery<any[]>({ queryKey: ["/api/inventory"] });
+  const { data: catalogTree = [] } = useQuery<any[]>({ queryKey: ["/api/catalog/tree"] });
 
   const subtotal = sumLines(items);
   const taxNum = parseFloat(taxAmount) || 0;
@@ -95,12 +100,43 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const calculatedTotal = subtotal + taxNum + deliveryNum;
   const reconciliation = getReconciliation(subtotal, taxNum, deliveryNum, totalAmount);
 
-  const getFilteredParts = (itemId: string) => {
-    const q = (partSearch[itemId] || "").toLowerCase();
+  // Get subgroups for a given groupId
+  const getSubgroups = (groupId: string) => {
+    const group = (catalogTree as any[]).find((g: any) => g.id === groupId);
+    return group?.subgroups ?? [];
+  };
+
+  // Get catalog items (maintenanceItems) for a given subgroupId, for name suggestions
+  const getCatalogItemsForSubgroup = (groupId: string | undefined, subgroupId: string | undefined) => {
+    if (!groupId || !subgroupId) return [];
+    const group = (catalogTree as any[]).find((g: any) => g.id === groupId);
+    if (!group) return [];
+    const subgroup = group.subgroups.find((sg: any) => sg.id === subgroupId);
+    return subgroup?.items ?? [];
+  };
+
+  const getFilteredParts = (item: LineItem) => {
+    const q = (partSearch[item.id] || "").toLowerCase();
     if (!q) return [];
-    return allParts.filter((p: any) =>
+
+    let pool = allParts as any[];
+    // When a subgroup is selected, show only parts in that subgroup
+    if (item.subgroupId) {
+      pool = pool.filter((p: any) => p.subgroupId === item.subgroupId);
+    }
+    return pool.filter((p: any) =>
       p.name?.toLowerCase().includes(q) || p.partNumber?.toLowerCase().includes(q)
     ).slice(0, 8);
+  };
+
+  // Catalog item name suggestions (not yet linked to a part) for the selected subgroup
+  const getCatalogSuggestions = (item: LineItem) => {
+    const q = (partSearch[item.id] || "").toLowerCase();
+    if (!q || !item.subgroupId) return [];
+    const catalogItems = getCatalogItemsForSubgroup(item.groupId, item.subgroupId);
+    return catalogItems.filter((ci: any) =>
+      ci.name?.toLowerCase().includes(q)
+    ).slice(0, 5);
   };
 
   const updateItem = useCallback((id: string, changes: Partial<LineItem>) => {
@@ -109,6 +145,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       const merged = { ...item, ...changes };
       if (changes.qty !== undefined || changes.unitCost !== undefined) {
         merged.lineTotal = calcLineTotal(merged.qty, merged.unitCost);
+      }
+      // When group changes, clear subgroup
+      if (changes.groupId !== undefined && changes.groupId !== item.groupId) {
+        merged.subgroupId = undefined;
       }
       return merged;
     }));
@@ -123,8 +163,26 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       partNameSnapshot: part.name,
       partNumberSnapshot: part.partNumber || "",
       unitCost: part.price?.toString() || "",
+      itemType: (part.itemType as ItemType) || "inventory",
+      groupId: part.groupId || undefined,
+      subgroupId: part.subgroupId || undefined,
     });
     setPartSearch(prev => ({ ...prev, [itemId]: part.name }));
+    setSearchFocus(null);
+  };
+
+  // Select a catalog item (maintenanceItem) that has a linked part → fill from that part
+  const selectCatalogItem = (itemId: string, ci: any) => {
+    if (ci.partId) {
+      const linkedPart = (allParts as any[]).find((p: any) => p.id === ci.partId);
+      if (linkedPart) {
+        selectPart(itemId, linkedPart);
+        return;
+      }
+    }
+    // No linked part — just fill the name; user can add cost/qty manually
+    updateItem(itemId, { partNameSnapshot: ci.name });
+    setPartSearch(prev => ({ ...prev, [itemId]: ci.name }));
     setSearchFocus(null);
   };
 
@@ -153,7 +211,6 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      // Only send rows that have content (ignore blank trailing rows)
       const filledItems = items.filter(i => i.partNameSnapshot.trim());
       const payload = {
         vendor,
@@ -169,6 +226,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           partNameSnapshot: item.partNameSnapshot,
           partNumberSnapshot: item.partNumberSnapshot || "",
           itemType: item.itemType,
+          groupId: item.groupId || undefined,
+          subgroupId: item.subgroupId || undefined,
           qty: item.qty,
           unitCost: item.unitCost || "0",
           lineTotal: item.lineTotal || "0",
@@ -180,6 +239,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
       toast({ title: "Inventory received", description: "Parts stock updated successfully." });
       handleClose();
     },
@@ -217,7 +277,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground">
             <PackagePlus className="h-5 w-5 text-amber-500" />
@@ -277,52 +337,58 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Search to link a line item to an existing catalog part. If the part doesn't exist yet, just type the name and part number — it will be created automatically when you save.
+              Select a category and subgroup to scope the item search. Search to link to an existing part, or type a new name to auto-create it on save.
             </p>
 
             <div className="border rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
                   <tr>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-6" title="Linked to catalog part = stock will update" />
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-36">Type</th>
+                    <th className="text-left px-2 py-2 text-foreground font-medium w-6" title="Linked to catalog part" />
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-52">Type & Category</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-28">Part #</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-20">Qty</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-28">Unit Cost</th>
-                    <th className="text-right px-3 py-2 text-foreground font-medium w-28">Line Total</th>
-                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-32" title="Unit cost after proportional tax & delivery allocation">Landed Cost</th>
-                    <th className="w-10" />
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-24">Part #</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-16">Qty</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-24">Unit Cost</th>
+                    <th className="text-right px-3 py-2 text-foreground font-medium w-24">Line Total</th>
+                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Unit cost after proportional tax & delivery allocation">Landed</th>
+                    <th className="w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {items.map((item) => {
-                    const filteredParts = getFilteredParts(item.id);
-                    const showDropdown = searchFocus === item.id && filteredParts.length > 0;
+                    const filteredParts = getFilteredParts(item);
+                    const catalogSuggestions = getCatalogSuggestions(item);
+                    const subgroups = item.groupId ? getSubgroups(item.groupId) : [];
+                    const showDropdown = searchFocus === item.id && (filteredParts.length > 0 || catalogSuggestions.length > 0);
 
                     return (
-                      <tr key={item.id} className="hover:bg-muted/20">
-                        <td className="px-2 py-2">
+                      <tr key={item.id} className="hover:bg-muted/20 align-top">
+                        {/* Link status icon */}
+                        <td className="px-2 pt-3">
                           {item.partId ? (
-                            <span aria-label="Linked to existing catalog part">
+                            <span title="Linked to existing catalog part">
                               <Link2 className="h-3.5 w-3.5 text-green-500" />
                             </span>
                           ) : item.partNameSnapshot.trim() ? (
-                            <span aria-label="New part — will be created on save" title="New part — will be created on save">
+                            <span title="New part — will be created on save">
                               <Plus className="h-3.5 w-3.5 text-amber-500" />
                             </span>
                           ) : (
-                            <span aria-label="Enter a part name">
+                            <span>
                               <Unlink className="h-3.5 w-3.5 text-muted-foreground/30" />
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Type toggle + Group + Subgroup stacked */}
+                        <td className="px-3 py-2 space-y-1.5">
+                          {/* Type toggle */}
                           <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "inventory" })}
-                              className={`px-2 py-1 transition-colors ${
+                              className={`flex-1 px-1.5 py-1 transition-colors ${
                                 item.itemType === "inventory"
                                   ? "bg-blue-600 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -333,7 +399,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "consumable" })}
-                              className={`px-2 py-1 transition-colors border-l border-border ${
+                              className={`flex-1 px-1.5 py-1 transition-colors border-l border-border ${
                                 item.itemType === "consumable"
                                   ? "bg-amber-500 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -342,14 +408,42 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               Consumable
                             </button>
                           </div>
+
+                          {/* Group dropdown */}
+                          <select
+                            value={item.groupId || ""}
+                            onChange={e => updateItem(item.id, { groupId: e.target.value || undefined })}
+                            className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                          >
+                            <option value="">— Category —</option>
+                            {(catalogTree as any[]).map((g: any) => (
+                              <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                          </select>
+
+                          {/* Subgroup dropdown — only shown when a group is selected */}
+                          {item.groupId && (
+                            <select
+                              value={item.subgroupId || ""}
+                              onChange={e => updateItem(item.id, { subgroupId: e.target.value || undefined })}
+                              className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                            >
+                              <option value="">— Subgroup —</option>
+                              {subgroups.map((sg: any) => (
+                                <option key={sg.id} value={sg.id}>{sg.name}</option>
+                              ))}
+                            </select>
+                          )}
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Part name search */}
+                        <td className="px-3 py-2 pt-3">
                           <div className="relative">
                             <div className="flex items-center gap-1">
                               <Search className="h-3 w-3 text-foreground/50 flex-shrink-0" />
                               <input
                                 className="flex-1 bg-transparent outline-none text-foreground placeholder:text-foreground/50 min-w-0"
-                                placeholder="Search or type part name..."
+                                placeholder={item.subgroupId ? "Search within subgroup..." : "Search or type part name..."}
                                 value={partSearch[item.id] ?? item.partNameSnapshot}
                                 onChange={e => {
                                   setPartSearch(prev => ({ ...prev, [item.id]: e.target.value }));
@@ -366,21 +460,54 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             </div>
                             {showDropdown && (
                               <div className="absolute left-0 top-full z-50 w-80 bg-popover border border-border rounded-md shadow-lg mt-1">
-                                {filteredParts.map((part: any) => (
-                                  <button
-                                    key={part.id}
-                                    className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
-                                    onMouseDown={() => selectPart(item.id, part)}
-                                  >
-                                    <span className="font-medium">{part.name}</span>
-                                    <span className="text-foreground/60 text-xs ml-2">{part.partNumber}</span>
-                                  </button>
-                                ))}
+                                {/* Existing parts */}
+                                {filteredParts.length > 0 && (
+                                  <>
+                                    {item.subgroupId && (
+                                      <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border">
+                                        Parts in this subgroup
+                                      </div>
+                                    )}
+                                    {filteredParts.map((part: any) => (
+                                      <button
+                                        key={part.id}
+                                        className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
+                                        onMouseDown={() => selectPart(item.id, part)}
+                                      >
+                                        <span className="font-medium">{part.name}</span>
+                                        <span className="text-foreground/60 text-xs ml-2">{part.partNumber}</span>
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
+                                {/* Catalog item name suggestions (not linked to a part) */}
+                                {catalogSuggestions.filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId)).length > 0 && (
+                                  <>
+                                    <div className="px-3 py-1 text-xs text-muted-foreground border-t border-border">
+                                      Catalog suggestions
+                                    </div>
+                                    {catalogSuggestions
+                                      .filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId))
+                                      .map((ci: any) => (
+                                        <button
+                                          key={ci.id}
+                                          className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
+                                          onMouseDown={() => selectCatalogItem(item.id, ci)}
+                                        >
+                                          <span>{ci.name}</span>
+                                          <span className="text-amber-500 text-xs ml-2">catalog</span>
+                                        </button>
+                                      ))
+                                    }
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Part number */}
+                        <td className="px-3 py-2 pt-3">
                           <input
                             className="w-full bg-transparent outline-none text-foreground placeholder:text-foreground/50"
                             placeholder="Part #"
@@ -388,7 +515,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             onChange={e => updateItem(item.id, { partNumberSnapshot: e.target.value })}
                           />
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Qty */}
+                        <td className="px-3 py-2 pt-3">
                           <input
                             type="number"
                             min="1"
@@ -397,7 +526,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             onChange={e => updateItem(item.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
                           />
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Unit Cost */}
+                        <td className="px-3 py-2 pt-3">
                           <div className="flex items-center gap-1">
                             <span className="text-foreground/60">$</span>
                             <input
@@ -411,10 +542,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             />
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-right font-medium text-foreground">
+
+                        {/* Line Total */}
+                        <td className="px-3 py-2 pt-3 text-right font-medium text-foreground">
                           ${parseFloat(item.lineTotal || "0").toFixed(2)}
                         </td>
-                        <td className="px-3 py-2 text-right">
+
+                        {/* Landed Cost */}
+                        <td className="px-3 py-2 pt-3 text-right">
                           {item.partNameSnapshot.trim() ? (
                             <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
                               ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
@@ -423,7 +558,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             <span className="text-muted-foreground/40">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2">
+
+                        {/* Delete */}
+                        <td className="px-2 py-2 pt-3">
                           {items.length > 1 && (
                             <button onClick={() => removeItem(item.id)} className="text-foreground/40 hover:text-red-500">
                               <Trash2 className="h-4 w-4" />

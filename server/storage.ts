@@ -708,7 +708,7 @@ export class DatabaseStorage implements IStorage {
 
   async createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
-    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; itemType?: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; itemType?: string; groupId?: string; subgroupId?: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
     companyId: string,
     userId: string
   ): Promise<InventoryIntake> {
@@ -758,10 +758,40 @@ export class DatabaseStorage implements IStorage {
             name: item.partNameSnapshot,
             partNumber: item.partNumberSnapshot || "",
             itemType: item.itemType || "inventory",
+            groupId: item.groupId || null,
+            subgroupId: item.subgroupId || null,
             price: item.landedCost || item.unitCost || "0",
             quantityInStock: 0,
             companyId,
           }).returning();
+
+          // If a subgroup was selected, ensure a maintenanceItem entry exists for this part
+          if (item.subgroupId) {
+            const existingItems = await tx.select({ id: maintenanceItems.id })
+              .from(maintenanceItems)
+              .where(and(
+                eq(maintenanceItems.subgroupId, item.subgroupId),
+                eq(maintenanceItems.companyId, companyId),
+                sql`lower(${maintenanceItems.name}) = lower(${item.partNameSnapshot})`
+              ));
+
+            if (existingItems.length === 0) {
+              await tx.insert(maintenanceItems).values({
+                name: item.partNameSnapshot,
+                subgroupId: item.subgroupId,
+                partId: newPart.id,
+                sortOrder: 0,
+                companyId,
+              });
+            } else if (!existingItems[0]) {
+              // no-op — item exists
+            } else {
+              // Link the existing catalog item to the new part
+              await tx.update(maintenanceItems)
+                .set({ partId: newPart.id })
+                .where(eq(maintenanceItems.id, existingItems[0].id));
+            }
+          }
 
           return { ...item, partId: newPart.id };
         }));
@@ -773,6 +803,8 @@ export class DatabaseStorage implements IStorage {
             partNameSnapshot: item.partNameSnapshot,
             partNumberSnapshot: item.partNumberSnapshot,
             itemType: item.itemType || "inventory",
+            groupId: item.groupId || null,
+            subgroupId: item.subgroupId || null,
             qty: item.qty,
             unitCost: item.unitCost,
             lineTotal: item.lineTotal,
@@ -781,15 +813,19 @@ export class DatabaseStorage implements IStorage {
           }))
         );
 
-        // Increment stock, update catalog price, and sync itemType for all parts
+        // Increment stock, update catalog price, sync itemType and catalog placement for all parts
         for (const item of resolvedItems) {
           if (item.partId) {
+            const updates: Record<string, any> = {
+              quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}`,
+              price: item.landedCost,
+              itemType: item.itemType || "inventory",
+            };
+            // Only update catalog placement if the intake row specified one
+            if (item.groupId) updates.groupId = item.groupId;
+            if (item.subgroupId) updates.subgroupId = item.subgroupId;
             await tx.update(inventoryParts)
-              .set({
-                quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}`,
-                price: item.landedCost,
-                itemType: item.itemType || "inventory",
-              })
+              .set(updates)
               .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
           }
         }
