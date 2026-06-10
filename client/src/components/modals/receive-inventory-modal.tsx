@@ -146,8 +146,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       if (changes.qty !== undefined || changes.unitCost !== undefined) {
         merged.lineTotal = calcLineTotal(merged.qty, merged.unitCost);
       }
-      // When group changes, clear subgroup
-      if (changes.groupId !== undefined && changes.groupId !== item.groupId) {
+      // When groupId changes (including when cleared to undefined), reset subgroupId
+      if ("groupId" in changes && changes.groupId !== item.groupId) {
         merged.subgroupId = undefined;
       }
       return merged;

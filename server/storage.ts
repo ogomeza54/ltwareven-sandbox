@@ -706,6 +706,38 @@ export class DatabaseStorage implements IStorage {
     return { ...intake, items };
   }
 
+  async validateCatalogPlacements(
+    placements: Array<{ groupId?: string; subgroupId?: string }>,
+    companyId: string
+  ): Promise<void> {
+    const groupIds = [...new Set(placements.map(p => p.groupId).filter(Boolean))] as string[];
+    const subgroupIds = [...new Set(placements.map(p => p.subgroupId).filter(Boolean))] as string[];
+
+    if (groupIds.length > 0) {
+      const ownedGroups = await db.select({ id: maintenanceGroups.id })
+        .from(maintenanceGroups)
+        .where(and(inArray(maintenanceGroups.id, groupIds), eq(maintenanceGroups.companyId, companyId)));
+      const ownedGroupIds = new Set(ownedGroups.map(g => g.id));
+      for (const id of groupIds) {
+        if (!ownedGroupIds.has(id)) throw new Error(`Group ${id} not found`);
+      }
+    }
+
+    if (subgroupIds.length > 0) {
+      const ownedSubgroups = await db.select({ id: maintenanceSubgroups.id, groupId: maintenanceSubgroups.groupId })
+        .from(maintenanceSubgroups)
+        .where(and(inArray(maintenanceSubgroups.id, subgroupIds), eq(maintenanceSubgroups.companyId, companyId)));
+      const subgroupMap = new Map(ownedSubgroups.map(sg => [sg.id, sg.groupId]));
+      for (const p of placements) {
+        if (!p.subgroupId) continue;
+        if (!subgroupMap.has(p.subgroupId)) throw new Error(`Subgroup ${p.subgroupId} not found`);
+        if (p.groupId && subgroupMap.get(p.subgroupId) !== p.groupId) {
+          throw new Error(`Subgroup ${p.subgroupId} does not belong to group ${p.groupId}`);
+        }
+      }
+    }
+  }
+
   async createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
     items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; itemType?: string; groupId?: string; subgroupId?: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
@@ -767,7 +799,7 @@ export class DatabaseStorage implements IStorage {
 
           // If a subgroup was selected, ensure a maintenanceItem entry exists for this part
           if (item.subgroupId) {
-            const existingItems = await tx.select({ id: maintenanceItems.id })
+            const existingItems = await tx.select({ id: maintenanceItems.id, partId: maintenanceItems.partId })
               .from(maintenanceItems)
               .where(and(
                 eq(maintenanceItems.subgroupId, item.subgroupId),
@@ -776,6 +808,7 @@ export class DatabaseStorage implements IStorage {
               ));
 
             if (existingItems.length === 0) {
+              // No catalog entry yet — create one linked to the new part
               await tx.insert(maintenanceItems).values({
                 name: item.partNameSnapshot,
                 subgroupId: item.subgroupId,
@@ -783,14 +816,13 @@ export class DatabaseStorage implements IStorage {
                 sortOrder: 0,
                 companyId,
               });
-            } else if (!existingItems[0]) {
-              // no-op — item exists
-            } else {
-              // Link the existing catalog item to the new part
+            } else if (existingItems[0] && existingItems[0].partId === null) {
+              // Catalog entry exists but has no linked part yet — link it now
               await tx.update(maintenanceItems)
                 .set({ partId: newPart.id })
                 .where(eq(maintenanceItems.id, existingItems[0].id));
             }
+            // If the catalog entry already has a linked part, leave it untouched
           }
 
           return { ...item, partId: newPart.id };

@@ -953,6 +953,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Validate that any supplied groupId/subgroupId values belong to this company
+      // and that each subgroup belongs to its stated group
+      const placements = items
+        .filter((i: any) => i.groupId || i.subgroupId)
+        .map((i: any) => ({ groupId: i.groupId || undefined, subgroupId: i.subgroupId || undefined }));
+      if (placements.length > 0) {
+        try {
+          await storage.validateCatalogPlacements(placements, req.userContext.companyId);
+        } catch (err: any) {
+          return res.status(400).json({ message: err.message ?? "Invalid catalog placement" });
+        }
+      }
+
       // Calculate reconciliation status
       const calculatedTotal =
         Number(headerRaw.subtotal || 0) +
