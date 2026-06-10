@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { 
-  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink
+  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink, Camera, FileText as FilePdf, Upload
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
 
@@ -91,6 +91,28 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
+  const [invoicePhotoUrl, setInvoicePhotoUrl] = useState<string | null>(null);
+  const [photoFileName, setPhotoFileName] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true);
+    try {
+      const form = new FormData();
+      form.append("photo", file);
+      const res = await fetch("/api/inventory/intakes/upload-photo", { method: "POST", body: form });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      setInvoicePhotoUrl(data.photoUrl);
+      setPhotoFileName(file.name);
+    } catch {
+      toast({ title: "Photo upload failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const { data: allParts = [] } = useQuery<any[]>({ queryKey: ["/api/inventory"] });
   const { data: catalogTree = [] } = useQuery<any[]>({ queryKey: ["/api/catalog/tree"] });
@@ -211,6 +233,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setItems([newLineItem()]);
     setPartSearch({});
     setSearchFocus(null);
+    setInvoicePhotoUrl(null);
+    setPhotoFileName(null);
   };
 
   const handleClose = () => {
@@ -230,6 +254,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         taxAmount: taxAmount || "0",
         deliveryFee: deliveryFee || "0",
         totalAmount: totalAmount || calculatedTotal.toFixed(2),
+        invoicePhotoUrl: invoicePhotoUrl || undefined,
         items: filledItems.map(item => {
           const lp = parseFloat(item.lotPrice) || 0;
           const qty = item.qty || 1;
@@ -595,6 +620,37 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                   className="text-foreground placeholder:text-foreground/50"
                 />
               </div>
+            </div>
+
+            {/* Invoice photo upload */}
+            <div className="space-y-1.5">
+              <Label className="text-foreground font-medium flex items-center gap-1.5">
+                <Camera className="h-4 w-4 text-muted-foreground" />
+                Invoice Photo <span className="text-muted-foreground font-normal text-xs">(optional — JPG, PNG, PDF, max 10 MB)</span>
+              </Label>
+              {invoicePhotoUrl ? (
+                <div className="flex items-center gap-2 text-sm">
+                  {invoicePhotoUrl.endsWith(".pdf") ? (
+                    <FilePdf className="h-4 w-4 text-red-400" />
+                  ) : (
+                    <img src={invoicePhotoUrl} alt="invoice" className="h-10 w-10 object-cover rounded border border-border" />
+                  )}
+                  <span className="text-foreground/80 truncate max-w-xs">{photoFileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setInvoicePhotoUrl(null); setPhotoFileName(null); }}
+                    className="text-muted-foreground hover:text-red-500 ml-auto"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <label className={`flex items-center gap-2 w-fit cursor-pointer px-3 py-2 rounded border border-dashed border-border text-sm text-muted-foreground hover:border-amber-500/60 hover:text-foreground transition-colors ${photoUploading ? "opacity-50 pointer-events-none" : ""}`}>
+                  <Upload className="h-4 w-4" />
+                  {photoUploading ? "Uploading…" : "Attach invoice photo or PDF"}
+                  <input type="file" accept="image/jpeg,image/png,image/gif,application/pdf" className="hidden" onChange={handlePhotoSelect} />
+                </label>
+              )}
             </div>
 
             <div className="border-t border-border/50 pt-3">

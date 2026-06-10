@@ -30,6 +30,15 @@ const upload = multer({
   }
 });
 
+const uploadInvoice = multer({
+  dest: uploadsDir,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+    cb(null, allowedTypes.includes(file.mimetype));
+  }
+});
+
 // Resolve userId from either local session or Replit OIDC
 const resolveUserId = (req: any): string | undefined =>
   req.session?.localUserId || req.user?.claims?.sub;
@@ -932,6 +941,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Invoice photo upload — returns a URL path for the uploaded file
+  app.post("/api/inventory/intakes/upload-photo", isAuthenticated, withCompanyContext, uploadInvoice.single("photo"), async (req: any, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const newFilename = `invoice-${Date.now()}${ext}`;
+      const newPath = path.join(uploadsDir, newFilename);
+      fs.renameSync(req.file.path, newPath);
+      res.json({ photoUrl: `/api/uploads/${newFilename}` });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to upload invoice photo" });
+    }
+  });
+
   app.post("/api/inventory/intakes", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
       const { items, ...headerRaw } = req.body;
@@ -994,6 +1017,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         quickbooksId: null,
         quickbooksLastSyncedAt: null,
         externalReferenceNumber: headerRaw.externalReferenceNumber || null,
+        invoicePhotoUrl: headerRaw.invoicePhotoUrl || null,
       };
 
       const intake = await storage.createInventoryIntake(

@@ -20,7 +20,7 @@ import {
   Search, Package, AlertTriangle, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
   ClipboardList, Eye, Download, Info, ChevronDown, ChevronRight,
-  BookOpen, Plus, X, Layers, Tag,
+  BookOpen, Plus, X, Layers, Tag, Camera,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
@@ -578,6 +578,21 @@ export default function Inventory() {
                                 <Badge variant="outline" className="text-xs">
                                   #{intake.invoiceNumber}
                                 </Badge>
+                              )}
+                              {intake.invoicePhotoUrl && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <a
+                                      href={intake.invoicePhotoUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-muted-foreground hover:text-amber-400 transition-colors"
+                                    >
+                                      <Camera className="h-4 w-4" />
+                                    </a>
+                                  </TooltipTrigger>
+                                  <TooltipContent>View invoice photo</TooltipContent>
+                                </Tooltip>
                               )}
                               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 {reconciliationIcon(intake.reconciliationStatus)}

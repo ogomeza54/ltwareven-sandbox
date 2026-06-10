@@ -195,6 +195,7 @@ export const inventoryIntakes = pgTable("inventory_intakes", {
   quickbooksId: text("quickbooks_id"),
   quickbooksLastSyncedAt: timestamp("quickbooks_last_synced_at"),
   externalReferenceNumber: text("external_reference_number"),
+  invoicePhotoUrl: text("invoice_photo_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
