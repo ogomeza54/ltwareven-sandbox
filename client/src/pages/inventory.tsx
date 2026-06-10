@@ -598,6 +598,21 @@ export default function Inventory() {
                                 {reconciliationIcon(intake.reconciliationStatus)}
                                 <span className="capitalize">{intake.reconciliationStatus}</span>
                               </div>
+                              {intake.quickbooksSyncStatus === "pending_usage" && (
+                                <Badge className="bg-amber-500/15 border border-amber-500/40 text-amber-400 text-xs px-1.5 py-0 font-normal">
+                                  Pending Use
+                                </Badge>
+                              )}
+                              {intake.quickbooksSyncStatus === "not_synced" && (
+                                <Badge className="bg-blue-500/15 border border-blue-500/40 text-blue-400 text-xs px-1.5 py-0 font-normal">
+                                  QB Ready
+                                </Badge>
+                              )}
+                              {intake.quickbooksSyncStatus === "synced" && (
+                                <Badge className="bg-green-500/15 border border-green-500/40 text-green-400 text-xs px-1.5 py-0 font-normal">
+                                  Synced
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex gap-6 text-sm text-muted-foreground">
                               <span>{intake.itemCount} line item{intake.itemCount !== 1 ? "s" : ""}</span>

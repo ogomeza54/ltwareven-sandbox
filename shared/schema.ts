@@ -196,6 +196,13 @@ export const inventoryIntakes = pgTable("inventory_intakes", {
   quickbooksLastSyncedAt: timestamp("quickbooks_last_synced_at"),
   externalReferenceNumber: text("external_reference_number"),
   invoicePhotoUrl: text("invoice_photo_url"),
+  // QuickBooks structured transaction fields
+  qbTransactionType: text("qb_transaction_type"),
+  qbDebitAccount: text("qb_debit_account"),
+  qbCreditAccount: text("qb_credit_account"),
+  qbVendorName: text("qb_vendor_name"),
+  qbInvoiceNumber: text("qb_invoice_number"),
+  qbAmount: decimal("qb_amount", { precision: 12, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

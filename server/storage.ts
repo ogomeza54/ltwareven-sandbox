@@ -774,10 +774,28 @@ export class DatabaseStorage implements IStorage {
       return { ...item, landedCost };
     });
 
+    // Determine QB sync status: intakes with any inventory-type item are
+    // held as "pending_usage" (synced only when parts are consumed on a work order);
+    // consumable-only intakes flip to "not_synced" immediately so the nightly
+    // export can pick them up right away.
+    const hasInventoryItem = items.some(i => (i.itemType || "inventory") === "inventory");
+    const qbSyncStatus = hasInventoryItem ? "pending_usage" : "not_synced";
+
     // Wrap everything in a transaction for all-or-nothing consistency
     return await db.transaction(async (tx) => {
       const [intake] = await tx.insert(inventoryIntakes)
-        .values({ ...intakeHeader, companyId, createdByUserId: userId })
+        .values({
+          ...intakeHeader,
+          companyId,
+          createdByUserId: userId,
+          qbTransactionType: "bill",
+          qbDebitAccount: "Inventory Asset",
+          qbCreditAccount: "Accounts Payable",
+          qbVendorName: intakeHeader.vendor,
+          qbInvoiceNumber: intakeHeader.invoiceNumber || null,
+          qbAmount: intakeHeader.totalAmount || "0",
+          quickbooksSyncStatus: qbSyncStatus,
+        })
         .returning();
 
       if (itemsWithLanded.length > 0) {
