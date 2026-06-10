@@ -1394,7 +1394,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { role } = req.userContext;
       if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
-      const group = await storage.updateMaintenanceGroup(req.params.id, req.userContext.companyId, req.body);
+      const allowed = z.object({ name: z.string().min(1).optional(), sortOrder: z.number().int().optional() }).strict();
+      const parsed = allowed.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid fields", errors: parsed.error.flatten() });
+      const group = await storage.updateMaintenanceGroup(req.params.id, req.userContext.companyId, parsed.data);
       res.json(group);
     } catch (error) { res.status(400).json({ message: "Failed to update group" }); }
   });
@@ -1423,7 +1426,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { role } = req.userContext;
       if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
-      const sg = await storage.updateMaintenanceSubgroup(req.params.id, req.userContext.companyId, req.body);
+      const allowed = z.object({ name: z.string().min(1).optional(), sortOrder: z.number().int().optional() }).strict();
+      const parsed = allowed.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid fields", errors: parsed.error.flatten() });
+      const sg = await storage.updateMaintenanceSubgroup(req.params.id, req.userContext.companyId, parsed.data);
       res.json(sg);
     } catch (error) { res.status(400).json({ message: "Failed to update subgroup" }); }
   });
@@ -1452,9 +1458,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { role } = req.userContext;
       if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
-      const item = await storage.updateMaintenanceItem(req.params.id, req.userContext.companyId, req.body);
+      const allowed = z.object({
+        name: z.string().min(1).optional(),
+        sortOrder: z.number().int().optional(),
+        partId: z.string().nullable().optional(),
+      }).strict();
+      const parsed = allowed.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid fields", errors: parsed.error.flatten() });
+      const item = await storage.updateMaintenanceItem(req.params.id, req.userContext.companyId, parsed.data);
       res.json(item);
-    } catch (error) { res.status(400).json({ message: "Failed to update item" }); }
+    } catch (error: any) {
+      const status = error.message?.includes("not found") ? 404 : 400;
+      res.status(status).json({ message: error.message ?? "Failed to update item" });
+    }
   });
 
   app.delete("/api/catalog/items/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {

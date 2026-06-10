@@ -21,7 +21,7 @@ import {
   type MaintenanceItem, type InsertMaintenanceItem,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, desc, asc, inArray, or, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Company operations
@@ -1275,7 +1275,10 @@ export class DatabaseStorage implements IStorage {
       partQty: inventoryParts.quantityInStock,
     })
     .from(maintenanceItems)
-    .leftJoin(inventoryParts, eq(maintenanceItems.partId, inventoryParts.id))
+    .leftJoin(
+      inventoryParts,
+      and(eq(maintenanceItems.partId, inventoryParts.id), eq(inventoryParts.companyId, companyId))
+    )
     .where(eq(maintenanceItems.companyId, companyId))
     .orderBy(asc(maintenanceItems.sortOrder), asc(maintenanceItems.name));
 
@@ -1305,7 +1308,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMaintenanceGroup(id: string, companyId: string, updates: Partial<MaintenanceGroup>): Promise<MaintenanceGroup> {
-    const [g] = await db.update(maintenanceGroups).set(updates)
+    const { companyId: _c, id: _i, createdAt: _t, ...safeUpdates } = updates as any;
+    const [g] = await db.update(maintenanceGroups).set(safeUpdates)
       .where(and(eq(maintenanceGroups.id, id), eq(maintenanceGroups.companyId, companyId)))
       .returning();
     return g;
@@ -1337,7 +1341,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMaintenanceSubgroup(id: string, companyId: string, updates: Partial<MaintenanceSubgroup>): Promise<MaintenanceSubgroup> {
-    const [sg] = await db.update(maintenanceSubgroups).set(updates)
+    const { companyId: _c, id: _i, createdAt: _t, groupId: _g, ...safeUpdates } = updates as any;
+    const [sg] = await db.update(maintenanceSubgroups).set(safeUpdates)
       .where(and(eq(maintenanceSubgroups.id, id), eq(maintenanceSubgroups.companyId, companyId)))
       .returning();
     return sg;
@@ -1361,8 +1366,17 @@ export class DatabaseStorage implements IStorage {
     return item;
   }
 
-  async updateMaintenanceItem(id: string, companyId: string, updates: Partial<MaintenanceItem>): Promise<MaintenanceItem> {
-    const [item] = await db.update(maintenanceItems).set(updates)
+  async updateMaintenanceItem(id: string, companyId: string, updates: Partial<MaintenanceItem> & { partId?: string | null }): Promise<MaintenanceItem> {
+    // Validate partId belongs to this company (prevents cross-tenant data leakage)
+    if (updates.partId != null) {
+      const part = await db.select({ id: inventoryParts.id })
+        .from(inventoryParts)
+        .where(and(eq(inventoryParts.id, updates.partId), eq(inventoryParts.companyId, companyId)))
+        .limit(1);
+      if (part.length === 0) throw new Error("Part not found in company inventory");
+    }
+    const { companyId: _c, id: _i, createdAt: _t, subgroupId: _s, ...safeUpdates } = updates as any;
+    const [item] = await db.update(maintenanceItems).set(safeUpdates)
       .where(and(eq(maintenanceItems.id, id), eq(maintenanceItems.companyId, companyId)))
       .returning();
     return item;
