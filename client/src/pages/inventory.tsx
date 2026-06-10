@@ -599,9 +599,16 @@ export default function Inventory() {
                                 <span className="capitalize">{intake.reconciliationStatus}</span>
                               </div>
                               {intake.quickbooksSyncStatus === "pending_usage" && (
-                                <Badge className="bg-amber-500/15 border border-amber-500/40 text-amber-400 text-xs px-1.5 py-0 font-normal">
-                                  Pending Use
-                                </Badge>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge className="bg-amber-500/15 border border-amber-500/40 text-amber-400 text-xs px-1.5 py-0 font-normal cursor-help">
+                                      Pending Use
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs text-center">
+                                    Parts from this invoice haven't been used on a work order yet. Once all inventory parts are consumed, this will automatically become QB Ready.
+                                  </TooltipContent>
+                                </Tooltip>
                               )}
                               {intake.quickbooksSyncStatus === "not_synced" && (
                                 <Badge className="bg-blue-500/15 border border-blue-500/40 text-blue-400 text-xs px-1.5 py-0 font-normal">
