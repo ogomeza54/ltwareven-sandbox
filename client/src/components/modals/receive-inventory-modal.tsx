@@ -302,43 +302,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         </DialogHeader>
 
         <div className="space-y-6 pt-2">
-          {/* Invoice Header */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-foreground font-medium">Vendor / Supplier *</Label>
-              <Input
-                placeholder="e.g., FleetParts Wholesale"
-                value={vendor}
-                onChange={e => setVendor(e.target.value)}
-                className="text-foreground placeholder:text-foreground/50"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-foreground font-medium">Invoice Number</Label>
-              <Input
-                placeholder="e.g., INV-2024-00821"
-                value={invoiceNumber}
-                onChange={e => setInvoiceNumber(e.target.value)}
-                className="text-foreground placeholder:text-foreground/50"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-foreground font-medium">Invoice Date</Label>
-              <DateInput
-                type="date"
-                value={invoiceDate}
-                onChange={setInvoiceDate}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-foreground font-medium">Notes</Label>
-              <Input
-                placeholder="Optional notes..."
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                className="text-foreground placeholder:text-foreground/50"
-              />
-            </div>
+          {/* Vendor — only field needed before entering items */}
+          <div className="max-w-sm space-y-1.5">
+            <Label className="text-foreground font-medium">Vendor / Supplier *</Label>
+            <Input
+              placeholder="e.g., FleetParts Wholesale"
+              value={vendor}
+              onChange={e => setVendor(e.target.value)}
+              className="text-foreground placeholder:text-foreground/50"
+            />
           </div>
 
           {/* Line Items */}
@@ -593,8 +565,39 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             </div>
           </div>
 
-          {/* Footer Totals */}
-          <div className="border rounded-lg p-4 bg-muted/20 space-y-3">
+          {/* Footer — Invoice reference fields + ancillary costs */}
+          <div className="border rounded-lg p-4 bg-muted/20 space-y-4">
+            {/* Invoice details row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-foreground font-medium">Invoice Number</Label>
+                <Input
+                  placeholder="e.g., INV-2024-00821"
+                  value={invoiceNumber}
+                  onChange={e => setInvoiceNumber(e.target.value)}
+                  className="text-foreground placeholder:text-foreground/50"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-foreground font-medium">Invoice Date</Label>
+                <DateInput
+                  type="date"
+                  value={invoiceDate}
+                  onChange={setInvoiceDate}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-foreground font-medium">Notes</Label>
+                <Input
+                  placeholder="Optional notes..."
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  className="text-foreground placeholder:text-foreground/50"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-border/50 pt-3">
             <div className="grid grid-cols-2 gap-x-8 gap-y-3 max-w-sm ml-auto">
               <div className="text-foreground font-medium text-right">Parts Subtotal</div>
               <div className="text-foreground text-right font-semibold">${subtotal.toFixed(2)}</div>
@@ -656,6 +659,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 Difference: ${Math.abs(calculatedTotal - parseFloat(totalAmount || "0")).toFixed(2)}
               </p>
             )}
+            </div>
           </div>
         </div>
 
