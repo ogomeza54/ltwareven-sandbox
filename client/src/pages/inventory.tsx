@@ -20,6 +20,7 @@ import {
   Search, Package, AlertTriangle, Edit, Trash2, PackagePlus,
   CheckCircle2, Clock, FileText, SlidersHorizontal, ArrowUp, ArrowDown, Minus,
   ClipboardList, Eye, Download, Info, ChevronDown, ChevronRight,
+  BookOpen, Plus, X, Layers, Tag,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
@@ -59,6 +60,60 @@ export default function Inventory() {
 
   const { data: currentUser } = useQuery<any>({ queryKey: ["/api/auth/user"] });
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+
+  // Catalog state
+  const [expandedCatalogGroup, setExpandedCatalogGroup] = useState<string | null>(null);
+  const [expandedCatalogSubgroup, setExpandedCatalogSubgroup] = useState<string | null>(null);
+  const [addingGroupName, setAddingGroupName] = useState("");
+  const [addingSubgroupName, setAddingSubgroupName] = useState<Record<string, string>>({});
+  const [addingItemName, setAddingItemName] = useState<Record<string, string>>({});
+  const [editingCatalogItem, setEditingCatalogItem] = useState<{ type: string; id: string; name: string } | null>(null);
+
+  const { data: catalogTree = [], isLoading: catalogLoading } = useQuery<any[]>({
+    queryKey: ["/api/catalog/tree"],
+  });
+
+  const catalogGroupMutation = useMutation({
+    mutationFn: async ({ action, id, name }: { action: string; id?: string; name?: string }) => {
+      if (action === "create") return apiRequest("POST", "/api/catalog/groups", { name, sortOrder: 0 });
+      if (action === "rename") return apiRequest("PATCH", `/api/catalog/groups/${id}`, { name });
+      if (action === "delete") return apiRequest("DELETE", `/api/catalog/groups/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      setAddingGroupName("");
+      setEditingCatalogItem(null);
+    },
+    onError: () => toast({ title: "Failed to update group", variant: "destructive" }),
+  });
+
+  const catalogSubgroupMutation = useMutation({
+    mutationFn: async ({ action, id, name, groupId }: { action: string; id?: string; name?: string; groupId?: string }) => {
+      if (action === "create") return apiRequest("POST", "/api/catalog/subgroups", { name, groupId, sortOrder: 0 });
+      if (action === "rename") return apiRequest("PATCH", `/api/catalog/subgroups/${id}`, { name });
+      if (action === "delete") return apiRequest("DELETE", `/api/catalog/subgroups/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      setAddingSubgroupName({});
+      setEditingCatalogItem(null);
+    },
+    onError: () => toast({ title: "Failed to update subgroup", variant: "destructive" }),
+  });
+
+  const catalogItemMutation = useMutation({
+    mutationFn: async ({ action, id, name, subgroupId }: { action: string; id?: string; name?: string; subgroupId?: string }) => {
+      if (action === "create") return apiRequest("POST", "/api/catalog/items", { name, subgroupId, sortOrder: 0 });
+      if (action === "rename") return apiRequest("PATCH", `/api/catalog/items/${id}`, { name });
+      if (action === "delete") return apiRequest("DELETE", `/api/catalog/items/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      setAddingItemName({});
+      setEditingCatalogItem(null);
+    },
+    onError: () => toast({ title: "Failed to update item", variant: "destructive" }),
+  });
 
   const { data: parts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory"],
@@ -298,6 +353,10 @@ export default function Inventory() {
                     )}
                   </TabsTrigger>
                 )}
+                <TabsTrigger value="catalog">
+                  <BookOpen className="w-3.5 h-3.5 mr-1.5" />
+                  Maintenance Catalog
+                </TabsTrigger>
               </TabsList>
 
               <div className="flex gap-2">
@@ -879,6 +938,239 @@ export default function Inventory() {
                 )}
               </TabsContent>
             )}
+
+            {/* ── Maintenance Catalog Tab ── */}
+            <TabsContent value="catalog" className="space-y-4 mt-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-amber-400" />
+                    Maintenance Catalog
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    3-level hierarchy used to classify work order parts. Seeded with trucking defaults.
+                  </p>
+                </div>
+              </div>
+
+              {catalogLoading ? (
+                <div className="text-center py-12 text-muted-foreground text-sm">Loading catalog...</div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Add Group (admin only) */}
+                  {isAdmin && (
+                    <div className="flex gap-2">
+                      <input
+                        className="flex-1 px-3 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded text-white placeholder:text-muted-foreground focus:outline-none focus:border-amber-500"
+                        placeholder="New group name..."
+                        value={addingGroupName}
+                        onChange={e => setAddingGroupName(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter" && addingGroupName.trim()) {
+                            catalogGroupMutation.mutate({ action: "create", name: addingGroupName.trim() });
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={!addingGroupName.trim() || catalogGroupMutation.isPending}
+                        onClick={() => catalogGroupMutation.mutate({ action: "create", name: addingGroupName.trim() })}
+                        className="bg-amber-500 hover:bg-amber-600 text-white"
+                      >
+                        <Plus className="w-4 h-4 mr-1" /> Add Group
+                      </Button>
+                    </div>
+                  )}
+
+                  {catalogTree.map((group: any) => (
+                    <Card key={group.id} className="bg-slate-900 border-slate-800">
+                      {/* Group header */}
+                      <div
+                        className="flex items-center gap-2 px-4 py-3 cursor-pointer hover:bg-slate-800/50 rounded-t-lg"
+                        onClick={() => setExpandedCatalogGroup(expandedCatalogGroup === group.id ? null : group.id)}
+                      >
+                        <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+                        {editingCatalogItem && editingCatalogItem.id === group.id && editingCatalogItem.type === "group" ? (
+                          <input
+                            autoFocus
+                            className="flex-1 px-2 py-0.5 text-sm bg-slate-800 border border-amber-500 rounded text-white focus:outline-none"
+                            value={editingCatalogItem.name}
+                            onChange={e => setEditingCatalogItem(v => v ? { ...v, name: e.target.value } : null)}
+                            onClick={e => e.stopPropagation()}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") catalogGroupMutation.mutate({ action: "rename", id: group.id, name: editingCatalogItem.name });
+                              if (e.key === "Escape") setEditingCatalogItem(null);
+                            }}
+                            onBlur={() => catalogGroupMutation.mutate({ action: "rename", id: group.id, name: editingCatalogItem.name })}
+                          />
+                        ) : (
+                          <span className="flex-1 font-semibold text-sm text-white">{group.name}</span>
+                        )}
+                        <span className="text-xs text-muted-foreground mr-2">{group.subgroups?.length ?? 0} subgroups</span>
+                        {isAdmin && (
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <button
+                              className="p-1 text-muted-foreground hover:text-amber-400 rounded"
+                              onClick={() => setEditingCatalogItem({ type: "group", id: group.id, name: group.name })}
+                            ><Edit className="w-3.5 h-3.5" /></button>
+                            <button
+                              className="p-1 text-muted-foreground hover:text-red-400 rounded"
+                              onClick={() => { if (confirm(`Delete group "${group.name}" and all its contents?`)) catalogGroupMutation.mutate({ action: "delete", id: group.id }); }}
+                            ><Trash2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        )}
+                        {expandedCatalogGroup === group.id ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                      </div>
+
+                      {expandedCatalogGroup === group.id && (
+                        <div className="border-t border-slate-800 px-4 py-3 space-y-3">
+                          {/* Add Subgroup */}
+                          {isAdmin && (
+                            <div className="flex gap-2 pl-6">
+                              <input
+                                className="flex-1 px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white placeholder:text-muted-foreground focus:outline-none focus:border-amber-500"
+                                placeholder="New subgroup name..."
+                                value={addingSubgroupName[group.id] ?? ""}
+                                onChange={e => setAddingSubgroupName(v => ({ ...v, [group.id]: e.target.value }))}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter" && (addingSubgroupName[group.id] ?? "").trim()) {
+                                    catalogSubgroupMutation.mutate({ action: "create", name: addingSubgroupName[group.id].trim(), groupId: group.id });
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={!(addingSubgroupName[group.id] ?? "").trim()}
+                                onClick={() => catalogSubgroupMutation.mutate({ action: "create", name: addingSubgroupName[group.id].trim(), groupId: group.id })}
+                                className="text-xs border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                              >
+                                <Plus className="w-3 h-3 mr-1" /> Add
+                              </Button>
+                            </div>
+                          )}
+
+                          {group.subgroups?.map((sg: any) => (
+                            <div key={sg.id} className="pl-6 space-y-2">
+                              {/* Subgroup header */}
+                              <div
+                                className="flex items-center gap-2 cursor-pointer group"
+                                onClick={() => setExpandedCatalogSubgroup(expandedCatalogSubgroup === sg.id ? null : sg.id)}
+                              >
+                                <Tag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                {editingCatalogItem && editingCatalogItem.id === sg.id && editingCatalogItem.type === "subgroup" ? (
+                                  <input
+                                    autoFocus
+                                    className="flex-1 px-2 py-0.5 text-xs bg-slate-800 border border-amber-500 rounded text-white focus:outline-none"
+                                    value={editingCatalogItem.name}
+                                    onChange={e => setEditingCatalogItem(v => v ? { ...v, name: e.target.value } : null)}
+                                    onClick={e => e.stopPropagation()}
+                                    onKeyDown={e => {
+                                      if (e.key === "Enter") catalogSubgroupMutation.mutate({ action: "rename", id: sg.id, name: editingCatalogItem.name });
+                                      if (e.key === "Escape") setEditingCatalogItem(null);
+                                    }}
+                                    onBlur={() => catalogSubgroupMutation.mutate({ action: "rename", id: sg.id, name: editingCatalogItem.name })}
+                                  />
+                                ) : (
+                                  <span className="flex-1 text-xs font-medium text-slate-200">{sg.name}</span>
+                                )}
+                                <span className="text-xs text-muted-foreground/60 mr-1">{sg.items?.length ?? 0} items</span>
+                                {isAdmin && (
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                                    <button className="p-0.5 text-muted-foreground hover:text-amber-400" onClick={() => setEditingCatalogItem({ type: "subgroup", id: sg.id, name: sg.name })}>
+                                      <Edit className="w-3 h-3" />
+                                    </button>
+                                    <button className="p-0.5 text-muted-foreground hover:text-red-400" onClick={() => { if (confirm(`Delete subgroup "${sg.name}"?`)) catalogSubgroupMutation.mutate({ action: "delete", id: sg.id }); }}>
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                                {expandedCatalogSubgroup === sg.id ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+                              </div>
+
+                              {expandedCatalogSubgroup === sg.id && (
+                                <div className="pl-5 space-y-1">
+                                  {sg.items?.map((item: any) => (
+                                    <div key={item.id} className="flex items-center gap-2 group py-1">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0" />
+                                      {editingCatalogItem && editingCatalogItem.id === item.id && editingCatalogItem.type === "item" ? (
+                                        <input
+                                          autoFocus
+                                          className="flex-1 px-2 py-0.5 text-xs bg-slate-800 border border-amber-500 rounded text-white focus:outline-none"
+                                          value={editingCatalogItem.name}
+                                          onChange={e => setEditingCatalogItem(v => v ? { ...v, name: e.target.value } : null)}
+                                          onKeyDown={e => {
+                                            if (e.key === "Enter") catalogItemMutation.mutate({ action: "rename", id: item.id, name: editingCatalogItem.name });
+                                            if (e.key === "Escape") setEditingCatalogItem(null);
+                                          }}
+                                          onBlur={() => catalogItemMutation.mutate({ action: "rename", id: item.id, name: editingCatalogItem.name })}
+                                        />
+                                      ) : (
+                                        <span className="flex-1 text-xs text-slate-300">{item.name}</span>
+                                      )}
+                                      {item.partId ? (
+                                        <Badge className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-400 border-green-500/20 border shrink-0">
+                                          {item.partName ?? "Linked"} · ${Number(item.partPrice ?? 0).toFixed(2)}
+                                        </Badge>
+                                      ) : (
+                                        <Badge className="text-[10px] px-1.5 py-0 bg-slate-700/50 text-slate-500 border-0 shrink-0">
+                                          no part
+                                        </Badge>
+                                      )}
+                                      {isAdmin && (
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button className="p-0.5 text-muted-foreground hover:text-amber-400" onClick={() => setEditingCatalogItem({ type: "item", id: item.id, name: item.name })}>
+                                            <Edit className="w-3 h-3" />
+                                          </button>
+                                          <button className="p-0.5 text-muted-foreground hover:text-red-400" onClick={() => { if (confirm(`Delete item "${item.name}"?`)) catalogItemMutation.mutate({ action: "delete", id: item.id }); }}>
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+
+                                  {/* Add Item */}
+                                  {isAdmin && (
+                                    <div className="flex gap-2 pt-1">
+                                      <input
+                                        className="flex-1 px-2 py-0.5 text-xs bg-slate-800 border border-dashed border-slate-600 rounded text-white placeholder:text-muted-foreground/60 focus:outline-none focus:border-amber-500"
+                                        placeholder="Add item..."
+                                        value={addingItemName[sg.id] ?? ""}
+                                        onChange={e => setAddingItemName(v => ({ ...v, [sg.id]: e.target.value }))}
+                                        onKeyDown={e => {
+                                          if (e.key === "Enter" && (addingItemName[sg.id] ?? "").trim()) {
+                                            catalogItemMutation.mutate({ action: "create", name: addingItemName[sg.id].trim(), subgroupId: sg.id });
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        disabled={!(addingItemName[sg.id] ?? "").trim()}
+                                        onClick={() => catalogItemMutation.mutate({ action: "create", name: addingItemName[sg.id].trim(), subgroupId: sg.id })}
+                                        className="px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 rounded hover:bg-amber-500/30 disabled:opacity-40"
+                                      >
+                                        <Plus className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+
+                  {catalogTree.length === 0 && !catalogLoading && (
+                    <div className="text-center py-12 text-muted-foreground text-sm">
+                      <BookOpen className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                      <p>No catalog groups yet. Defaults will be seeded automatically.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </TabsContent>
           </Tabs>
         </div>
       </main>

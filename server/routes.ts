@@ -7,6 +7,7 @@ import {
   insertUserSchema, insertMechanicSchema, insertCustomerSchema, 
   insertVehicleSchema, insertRepairOrderSchema, insertInventoryPartSchema,
   insertPartsUsageSchema, insertInvoiceSchema,
+  insertMaintenanceGroupSchema, insertMaintenanceSubgroupSchema, insertMaintenanceItemSchema,
   ACTIVE_STATUSES
 } from "@shared/schema";
 import { z } from "zod";
@@ -1362,6 +1363,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(400).json({ message: "Failed to remove parts usage" });
     }
+  });
+
+  // ── Maintenance Catalog ───────────────────────────────────────────────────────
+
+  // Seed defaults + get full tree
+  app.get("/api/catalog/tree", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.seedCatalogDefaults(req.userContext.companyId);
+      const tree = await storage.getCatalogTree(req.userContext.companyId);
+      res.json(tree);
+    } catch (error) {
+      console.error("Failed to get catalog tree:", error);
+      res.status(500).json({ message: "Failed to get catalog tree" });
+    }
+  });
+
+  // Groups CRUD
+  app.post("/api/catalog/groups", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const data = insertMaintenanceGroupSchema.parse({ ...req.body, companyId: req.userContext.companyId });
+      const group = await storage.createMaintenanceGroup(data);
+      res.status(201).json(group);
+    } catch (error) { res.status(400).json({ message: "Failed to create group" }); }
+  });
+
+  app.patch("/api/catalog/groups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const group = await storage.updateMaintenanceGroup(req.params.id, req.userContext.companyId, req.body);
+      res.json(group);
+    } catch (error) { res.status(400).json({ message: "Failed to update group" }); }
+  });
+
+  app.delete("/api/catalog/groups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteMaintenanceGroup(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) { res.status(400).json({ message: "Failed to delete group" }); }
+  });
+
+  // Subgroups CRUD
+  app.post("/api/catalog/subgroups", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const data = insertMaintenanceSubgroupSchema.parse({ ...req.body, companyId: req.userContext.companyId });
+      const sg = await storage.createMaintenanceSubgroup(data);
+      res.status(201).json(sg);
+    } catch (error) { res.status(400).json({ message: "Failed to create subgroup" }); }
+  });
+
+  app.patch("/api/catalog/subgroups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const sg = await storage.updateMaintenanceSubgroup(req.params.id, req.userContext.companyId, req.body);
+      res.json(sg);
+    } catch (error) { res.status(400).json({ message: "Failed to update subgroup" }); }
+  });
+
+  app.delete("/api/catalog/subgroups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteMaintenanceSubgroup(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) { res.status(400).json({ message: "Failed to delete subgroup" }); }
+  });
+
+  // Items CRUD
+  app.post("/api/catalog/items", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const data = insertMaintenanceItemSchema.parse({ ...req.body, companyId: req.userContext.companyId });
+      const item = await storage.createMaintenanceItem(data);
+      res.status(201).json(item);
+    } catch (error) { res.status(400).json({ message: "Failed to create item" }); }
+  });
+
+  app.patch("/api/catalog/items/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const item = await storage.updateMaintenanceItem(req.params.id, req.userContext.companyId, req.body);
+      res.json(item);
+    } catch (error) { res.status(400).json({ message: "Failed to update item" }); }
+  });
+
+  app.delete("/api/catalog/items/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      await storage.deleteMaintenanceItem(req.params.id, req.userContext.companyId);
+      res.status(204).send();
+    } catch (error) { res.status(400).json({ message: "Failed to delete item" }); }
   });
 
   // ── Super Admin ──────────────────────────────────────────────────────────────

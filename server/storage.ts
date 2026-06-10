@@ -2,6 +2,7 @@ import {
   companies, users, mechanics, customers, vehicles, repairOrders, inventoryParts, partsUsage,
   inventoryIntakes, inventoryIntakeItems, invoices, inventoryAdjustments,
   inventoryCountSessions, inventoryCountItems, adminAuditLog,
+  maintenanceGroups, maintenanceSubgroups, maintenanceItems,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -15,6 +16,9 @@ import {
   type Invoice, type InsertInvoice,
   type InventoryAdjustment, type InsertInventoryAdjustment,
   type InventoryCountSession, type AdminAuditLog,
+  type MaintenanceGroup, type InsertMaintenanceGroup,
+  type MaintenanceSubgroup, type InsertMaintenanceSubgroup,
+  type MaintenanceItem, type InsertMaintenanceItem,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray } from "drizzle-orm";
@@ -621,6 +625,8 @@ export class DatabaseStorage implements IStorage {
       partId: partsUsage.partId,
       quantity: partsUsage.quantity,
       unitPrice: partsUsage.unitPrice,
+      groupSnapshot: partsUsage.groupSnapshot,
+      subgroupSnapshot: partsUsage.subgroupSnapshot,
       createdAt: partsUsage.createdAt,
       part: {
         id: inventoryParts.id,
@@ -1244,6 +1250,203 @@ export class DatabaseStorage implements IStorage {
       lowStockItems: Number(lowStockResult[0]?.count || 0),
       monthlyRevenue: Number(monthlyRevenueResult[0]?.total || 0),
     };
+  }
+
+  // ── Maintenance Catalog ───────────────────────────────────────────────────────
+
+  async getCatalogTree(companyId: string): Promise<any[]> {
+    const groups = await db.select().from(maintenanceGroups)
+      .where(eq(maintenanceGroups.companyId, companyId))
+      .orderBy(asc(maintenanceGroups.sortOrder), asc(maintenanceGroups.name));
+
+    const subgroups = await db.select().from(maintenanceSubgroups)
+      .where(eq(maintenanceSubgroups.companyId, companyId))
+      .orderBy(asc(maintenanceSubgroups.sortOrder), asc(maintenanceSubgroups.name));
+
+    const items = await db.select({
+      id: maintenanceItems.id,
+      name: maintenanceItems.name,
+      subgroupId: maintenanceItems.subgroupId,
+      partId: maintenanceItems.partId,
+      sortOrder: maintenanceItems.sortOrder,
+      partName: inventoryParts.name,
+      partNumber: inventoryParts.partNumber,
+      partPrice: inventoryParts.price,
+      partQty: inventoryParts.quantityInStock,
+    })
+    .from(maintenanceItems)
+    .leftJoin(inventoryParts, eq(maintenanceItems.partId, inventoryParts.id))
+    .where(eq(maintenanceItems.companyId, companyId))
+    .orderBy(asc(maintenanceItems.sortOrder), asc(maintenanceItems.name));
+
+    const subgroupMap = new Map<string, any[]>();
+    for (const sg of subgroups) {
+      subgroupMap.set(sg.groupId, [...(subgroupMap.get(sg.groupId) ?? []), {
+        ...sg,
+        items: items.filter(i => i.subgroupId === sg.id),
+      }]);
+    }
+
+    return groups.map(g => ({
+      ...g,
+      subgroups: subgroupMap.get(g.id) ?? [],
+    }));
+  }
+
+  async getMaintenanceGroups(companyId: string): Promise<MaintenanceGroup[]> {
+    return await db.select().from(maintenanceGroups)
+      .where(eq(maintenanceGroups.companyId, companyId))
+      .orderBy(asc(maintenanceGroups.sortOrder), asc(maintenanceGroups.name));
+  }
+
+  async createMaintenanceGroup(data: InsertMaintenanceGroup): Promise<MaintenanceGroup> {
+    const [g] = await db.insert(maintenanceGroups).values(data).returning();
+    return g;
+  }
+
+  async updateMaintenanceGroup(id: string, companyId: string, updates: Partial<MaintenanceGroup>): Promise<MaintenanceGroup> {
+    const [g] = await db.update(maintenanceGroups).set(updates)
+      .where(and(eq(maintenanceGroups.id, id), eq(maintenanceGroups.companyId, companyId)))
+      .returning();
+    return g;
+  }
+
+  async deleteMaintenanceGroup(id: string, companyId: string): Promise<void> {
+    // cascade: delete items, then subgroups, then group
+    const subs = await db.select({ id: maintenanceSubgroups.id }).from(maintenanceSubgroups)
+      .where(and(eq(maintenanceSubgroups.groupId, id), eq(maintenanceSubgroups.companyId, companyId)));
+    if (subs.length > 0) {
+      await db.delete(maintenanceItems)
+        .where(inArray(maintenanceItems.subgroupId, subs.map(s => s.id)));
+    }
+    await db.delete(maintenanceSubgroups)
+      .where(and(eq(maintenanceSubgroups.groupId, id), eq(maintenanceSubgroups.companyId, companyId)));
+    await db.delete(maintenanceGroups)
+      .where(and(eq(maintenanceGroups.id, id), eq(maintenanceGroups.companyId, companyId)));
+  }
+
+  async getMaintenanceSubgroups(groupId: string, companyId: string): Promise<MaintenanceSubgroup[]> {
+    return await db.select().from(maintenanceSubgroups)
+      .where(and(eq(maintenanceSubgroups.groupId, groupId), eq(maintenanceSubgroups.companyId, companyId)))
+      .orderBy(asc(maintenanceSubgroups.sortOrder), asc(maintenanceSubgroups.name));
+  }
+
+  async createMaintenanceSubgroup(data: InsertMaintenanceSubgroup): Promise<MaintenanceSubgroup> {
+    const [sg] = await db.insert(maintenanceSubgroups).values(data).returning();
+    return sg;
+  }
+
+  async updateMaintenanceSubgroup(id: string, companyId: string, updates: Partial<MaintenanceSubgroup>): Promise<MaintenanceSubgroup> {
+    const [sg] = await db.update(maintenanceSubgroups).set(updates)
+      .where(and(eq(maintenanceSubgroups.id, id), eq(maintenanceSubgroups.companyId, companyId)))
+      .returning();
+    return sg;
+  }
+
+  async deleteMaintenanceSubgroup(id: string, companyId: string): Promise<void> {
+    await db.delete(maintenanceItems)
+      .where(and(eq(maintenanceItems.subgroupId, id), eq(maintenanceItems.companyId, companyId)));
+    await db.delete(maintenanceSubgroups)
+      .where(and(eq(maintenanceSubgroups.id, id), eq(maintenanceSubgroups.companyId, companyId)));
+  }
+
+  async getMaintenanceItems(subgroupId: string, companyId: string): Promise<MaintenanceItem[]> {
+    return await db.select().from(maintenanceItems)
+      .where(and(eq(maintenanceItems.subgroupId, subgroupId), eq(maintenanceItems.companyId, companyId)))
+      .orderBy(asc(maintenanceItems.sortOrder), asc(maintenanceItems.name));
+  }
+
+  async createMaintenanceItem(data: InsertMaintenanceItem): Promise<MaintenanceItem> {
+    const [item] = await db.insert(maintenanceItems).values(data).returning();
+    return item;
+  }
+
+  async updateMaintenanceItem(id: string, companyId: string, updates: Partial<MaintenanceItem>): Promise<MaintenanceItem> {
+    const [item] = await db.update(maintenanceItems).set(updates)
+      .where(and(eq(maintenanceItems.id, id), eq(maintenanceItems.companyId, companyId)))
+      .returning();
+    return item;
+  }
+
+  async deleteMaintenanceItem(id: string, companyId: string): Promise<void> {
+    await db.delete(maintenanceItems)
+      .where(and(eq(maintenanceItems.id, id), eq(maintenanceItems.companyId, companyId)));
+  }
+
+  async seedCatalogDefaults(companyId: string): Promise<void> {
+    const existing = await db.select({ id: maintenanceGroups.id })
+      .from(maintenanceGroups).where(eq(maintenanceGroups.companyId, companyId)).limit(1);
+    if (existing.length > 0) return; // already seeded
+
+    const defaults: { group: string; subgroups: { name: string; items: string[] }[] }[] = [
+      {
+        group: "Tires",
+        subgroups: [
+          { name: "Steer Tires", items: ["Steer Tire Replacement", "Steer Tire Rotation", "Steer Tire Repair"] },
+          { name: "Drive Tires", items: ["Drive Tire Replacement", "Drive Tire Rotation", "Drive Tire Repair"] },
+          { name: "Trailer Tires", items: ["Trailer Tire Replacement", "Trailer Tire Rotation", "Trailer Tire Repair"] },
+        ],
+      },
+      {
+        group: "Brakes",
+        subgroups: [
+          { name: "Front Brakes", items: ["Front Brake Pad Replacement", "Front Rotor Replacement", "Front Brake Inspection"] },
+          { name: "Rear Brakes", items: ["Rear Brake Shoe Replacement", "Rear Drum Replacement", "Rear Brake Adjustment"] },
+          { name: "Trailer Brakes", items: ["Trailer Brake Adjustment", "Trailer Brake Chamber Replacement", "Trailer ABS Sensor"] },
+        ],
+      },
+      {
+        group: "Engine",
+        subgroups: [
+          { name: "Oil & Filters", items: ["Oil Change", "Oil Filter Replacement", "Air Filter Replacement", "Fuel Filter Replacement"] },
+          { name: "Belts & Hoses", items: ["Serpentine Belt Replacement", "Radiator Hose Replacement", "Heater Hose Replacement"] },
+          { name: "Fluids", items: ["Coolant Flush", "Power Steering Fluid", "DEF Fluid Fill"] },
+        ],
+      },
+      {
+        group: "Electrical & Lighting",
+        subgroups: [
+          { name: "Exterior Lights", items: ["Headlight Replacement", "Tail Light Replacement", "Marker Light Replacement", "Turn Signal Replacement"] },
+          { name: "Battery & Starting", items: ["Battery Replacement", "Alternator Replacement", "Starter Replacement"] },
+        ],
+      },
+      {
+        group: "Suspension",
+        subgroups: [
+          { name: "Steering", items: ["Tie Rod Replacement", "Drag Link Replacement", "Steering Gear Adjustment"] },
+          { name: "Shocks & Springs", items: ["Shock Absorber Replacement", "Leaf Spring Replacement", "Air Bag Replacement"] },
+        ],
+      },
+    ];
+
+    let groupOrder = 0;
+    for (const gDef of defaults) {
+      const [grp] = await db.insert(maintenanceGroups).values({
+        name: gDef.group,
+        sortOrder: groupOrder++,
+        companyId,
+      }).returning();
+
+      let sgOrder = 0;
+      for (const sgDef of gDef.subgroups) {
+        const [sg] = await db.insert(maintenanceSubgroups).values({
+          name: sgDef.name,
+          groupId: grp.id,
+          sortOrder: sgOrder++,
+          companyId,
+        }).returning();
+
+        let itemOrder = 0;
+        for (const itemName of sgDef.items) {
+          await db.insert(maintenanceItems).values({
+            name: itemName,
+            subgroupId: sg.id,
+            sortOrder: itemOrder++,
+            companyId,
+          });
+        }
+      }
+    }
   }
 
   // ── Admin Audit Log ───────────────────────────────────────────────────────────

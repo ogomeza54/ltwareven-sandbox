@@ -124,6 +124,38 @@ export const repairOrders = pgTable("repair_orders", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ── Maintenance Catalog ────────────────────────────────────────────────────────
+// Three-level hierarchy: Group → Subgroup → Item
+// Items link to inventory parts for price lookup.
+
+export const maintenanceGroups = pgTable("maintenance_groups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const maintenanceSubgroups = pgTable("maintenance_subgroups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  groupId: varchar("group_id").notNull().references(() => maintenanceGroups.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const maintenanceItems = pgTable("maintenance_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  subgroupId: varchar("subgroup_id").notNull().references(() => maintenanceSubgroups.id),
+  // Optional link to an inventory part — drives price auto-fill
+  partId: varchar("part_id").references(() => inventoryParts.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Inventory Parts table
 export const inventoryParts = pgTable("inventory_parts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -131,6 +163,9 @@ export const inventoryParts = pgTable("inventory_parts", {
   partNumber: text("part_number").notNull(),
   description: text("description"),
   category: text("category"),
+  // Catalog hierarchy links (optional — set when part is linked to a catalog item)
+  groupId: varchar("group_id"),
+  subgroupId: varchar("subgroup_id"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   quantityInStock: integer("quantity_in_stock").notNull().default(0),
   lowStockThreshold: integer("low_stock_threshold").notNull().default(5),
@@ -183,6 +218,9 @@ export const partsUsage = pgTable("parts_usage", {
   partId: varchar("part_id").notNull().references(() => inventoryParts.id),
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  // Catalog hierarchy snapshots — stored at usage time so reporting doesn't require joins
+  groupSnapshot: text("group_snapshot"),
+  subgroupSnapshot: text("subgroup_snapshot"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -213,6 +251,7 @@ export const companiesRelations = relations(companies, ({ many }) => ({
   repairOrders: many(repairOrders),
   inventoryParts: many(inventoryParts),
   inventoryIntakes: many(inventoryIntakes),
+  maintenanceGroups: many(maintenanceGroups),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -283,6 +322,7 @@ export const inventoryPartsRelations = relations(inventoryParts, ({ one, many })
   }),
   usage: many(partsUsage),
   intakeItems: many(inventoryIntakeItems),
+  maintenanceItems: many(maintenanceItems),
 }));
 
 export const inventoryIntakesRelations = relations(inventoryIntakes, ({ one, many }) => ({
@@ -321,6 +361,24 @@ export const partsUsageRelations = relations(partsUsage, ({ one }) => ({
     fields: [partsUsage.partId],
     references: [inventoryParts.id],
   }),
+}));
+
+// Maintenance Catalog Relations
+export const maintenanceGroupsRelations = relations(maintenanceGroups, ({ one, many }) => ({
+  company: one(companies, { fields: [maintenanceGroups.companyId], references: [companies.id] }),
+  subgroups: many(maintenanceSubgroups),
+}));
+
+export const maintenanceSubgroupsRelations = relations(maintenanceSubgroups, ({ one, many }) => ({
+  group: one(maintenanceGroups, { fields: [maintenanceSubgroups.groupId], references: [maintenanceGroups.id] }),
+  company: one(companies, { fields: [maintenanceSubgroups.companyId], references: [companies.id] }),
+  items: many(maintenanceItems),
+}));
+
+export const maintenanceItemsRelations = relations(maintenanceItems, ({ one }) => ({
+  subgroup: one(maintenanceSubgroups, { fields: [maintenanceItems.subgroupId], references: [maintenanceSubgroups.id] }),
+  company: one(companies, { fields: [maintenanceItems.companyId], references: [companies.id] }),
+  part: one(inventoryParts, { fields: [maintenanceItems.partId], references: [inventoryParts.id] }),
 }));
 
 // Insert schemas
@@ -387,6 +445,11 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   id: true,
   createdAt: true,
 });
+
+// Maintenance Catalog insert schemas
+export const insertMaintenanceGroupSchema = createInsertSchema(maintenanceGroups).omit({ id: true, createdAt: true });
+export const insertMaintenanceSubgroupSchema = createInsertSchema(maintenanceSubgroups).omit({ id: true, createdAt: true });
+export const insertMaintenanceItemSchema = createInsertSchema(maintenanceItems).omit({ id: true, createdAt: true });
 
 // Inventory Adjustments table — admin-only stock corrections
 export const inventoryAdjustments = pgTable("inventory_adjustments", {
@@ -586,3 +649,12 @@ export type InsertInventoryIntakeItem = z.infer<typeof insertInventoryIntakeItem
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+export type MaintenanceGroup = typeof maintenanceGroups.$inferSelect;
+export type InsertMaintenanceGroup = z.infer<typeof insertMaintenanceGroupSchema>;
+
+export type MaintenanceSubgroup = typeof maintenanceSubgroups.$inferSelect;
+export type InsertMaintenanceSubgroup = z.infer<typeof insertMaintenanceSubgroupSchema>;
+
+export type MaintenanceItem = typeof maintenanceItems.$inferSelect;
+export type InsertMaintenanceItem = z.infer<typeof insertMaintenanceItemSchema>;

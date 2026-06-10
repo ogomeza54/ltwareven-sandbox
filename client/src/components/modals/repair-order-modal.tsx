@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { SERVICE_TYPES, TRUCK_TYPES, WORK_ORDER_STATUSES } from "@shared/schema";
 import DateInput, { nowLocalValue } from "@/components/ui/date-input";
+import CatalogPartPicker from "@/components/catalog-part-picker";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
   "open":        { label: "Open",        color: "bg-blue-500/10 text-blue-400 border-blue-500/20",    icon: CircleDot },
@@ -54,7 +55,6 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
   const displayOrder = fullOrder || order;
 
   const { data: mechanics = [] } = useQuery<any[]>({ queryKey: ["/api/mechanics"] });
-  const { data: inventory = [] } = useQuery<any[]>({ queryKey: ["/api/inventory"] });
   const { data: partsUsage = [] } = useQuery<any[]>({
     queryKey: ["/api/parts-usage", orderId],
     queryFn: async () => {
@@ -67,8 +67,6 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
   });
 
   const [editFields, setEditFields] = useState<Record<string, any>>({});
-  const [addPartId, setAddPartId] = useState("");
-  const [addPartQty, setAddPartQty] = useState("1");
   const [progressNote, setProgressNote] = useState("");
 
   useEffect(() => {
@@ -116,28 +114,6 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
       onOpenChange(false);
     },
     onError: () => toast({ title: "Error", description: "Failed to delete work order", variant: "destructive" }),
-  });
-
-  const addPartMutation = useMutation({
-    mutationFn: async () => {
-      const part = inventory.find((p: any) => p.id === addPartId);
-      if (!part) throw new Error("Part not found");
-      const res = await apiRequest("POST", `/api/repair-orders/${orderId}/parts`, {
-        partId: addPartId,
-        repairOrderId: orderId,
-        quantity: parseInt(addPartQty),
-        unitPrice: String(part.price),
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/parts-usage", orderId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
-      setAddPartId("");
-      setAddPartQty("1");
-      toast({ title: "Part added", description: "Inventory automatically decremented." });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message || "Failed to add part", variant: "destructive" }),
   });
 
   const removePartMutation = useMutation({
@@ -465,8 +441,18 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
                 ) : (
                   <div className="space-y-2">
                     {partsUsage.map((pu: any) => (
-                      <div key={pu.id} className="flex items-center justify-between p-3 bg-slate-800 rounded border border-slate-700">
+                      <div key={pu.id} className="flex items-start justify-between p-3 bg-slate-800 rounded border border-slate-700">
                         <div>
+                          {(pu.groupSnapshot || pu.subgroupSnapshot) && (
+                            <div className="flex items-center gap-1 mb-1">
+                              {pu.groupSnapshot && (
+                                <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">{pu.groupSnapshot}</span>
+                              )}
+                              {pu.subgroupSnapshot && (
+                                <span className="text-xs bg-slate-700/60 text-slate-400 px-1.5 py-0.5 rounded">{pu.subgroupSnapshot}</span>
+                              )}
+                            </div>
+                          )}
                           <p className="font-medium text-sm">{pu.part?.name}</p>
                           <p className="text-xs text-muted-foreground">{pu.part?.partNumber} × {pu.quantity} @ ${Number(pu.unitPrice).toFixed(2)}</p>
                         </div>
@@ -483,24 +469,14 @@ export default function RepairOrderModal({ open, onOpenChange, orderId }: Repair
 
                 <Separator className="bg-slate-800" />
                 <h4 className="text-sm font-medium">Add Part</h4>
-                <div className="grid grid-cols-[1fr_auto_auto] gap-2">
-                  <Select value={addPartId} onValueChange={setAddPartId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select from inventory" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {inventory.filter((p: any) => p.quantityInStock > 0).map((p: any) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name} — ${Number(p.price).toFixed(2)} ({p.quantityInStock} in stock)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input type="number" min="1" value={addPartQty} onChange={e => setAddPartQty(e.target.value)} className="w-20" placeholder="Qty" />
-                  <Button onClick={() => addPartMutation.mutate()} disabled={!addPartId || addPartMutation.isPending} className="bg-amber-500 hover:bg-amber-600 text-white">
-                    <Plus className="w-4 h-4" />
-                  </Button>
-                </div>
+                {orderId && (
+                  <CatalogPartPicker
+                    orderId={orderId}
+                    onAdded={() => {
+                      queryClient.invalidateQueries({ queryKey: ["/api/parts-usage", orderId] });
+                    }}
+                  />
+                )}
               </div>
             </TabsContent>
 
