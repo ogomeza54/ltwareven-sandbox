@@ -23,8 +23,8 @@ interface LineItem {
   groupId?: string;
   subgroupId?: string;
   qty: number;
-  unitCost: string;
-  lineTotal: string;
+  lotPrice: string;  // user-entered total for the lot; unitCost is derived (lotPrice / qty)
+  lineTotal: string; // = lotPrice
 }
 
 interface ReceiveInventoryModalProps {
@@ -42,14 +42,15 @@ function newLineItem(): LineItem {
     groupId: undefined,
     subgroupId: undefined,
     qty: 1,
-    unitCost: "",
+    lotPrice: "",
     lineTotal: "0.00",
   };
 }
 
-function calcLineTotal(qty: number, unitCost: string): string {
-  const cost = parseFloat(unitCost) || 0;
-  return (qty * cost).toFixed(2);
+function derivedPerUnit(lotPrice: string, qty: number): string {
+  const lp = parseFloat(lotPrice) || 0;
+  const q = qty || 1;
+  return (lp / q).toFixed(2);
 }
 
 function sumLines(items: LineItem[]): number {
@@ -143,8 +144,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setItems(prev => prev.map(item => {
       if (item.id !== id) return item;
       const merged = { ...item, ...changes };
-      if (changes.qty !== undefined || changes.unitCost !== undefined) {
-        merged.lineTotal = calcLineTotal(merged.qty, merged.unitCost);
+      // Lot price is the source of truth — lineTotal always equals lotPrice
+      if ("lotPrice" in changes) {
+        merged.lineTotal = (parseFloat(changes.lotPrice as string) || 0).toFixed(2);
       }
       // When groupId changes (including when cleared to undefined), reset subgroupId
       if ("groupId" in changes && changes.groupId !== item.groupId) {
@@ -158,15 +160,22 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.id !== id));
 
   const selectPart = (itemId: string, part: any) => {
-    updateItem(itemId, {
-      partId: part.id,
-      partNameSnapshot: part.name,
-      partNumberSnapshot: part.partNumber || "",
-      unitCost: part.price?.toString() || "",
-      itemType: (part.itemType as ItemType) || "inventory",
-      groupId: part.groupId || undefined,
-      subgroupId: part.subgroupId || undefined,
-    });
+    // Lot price = unit price × current qty
+    setItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const lotPrice = ((parseFloat(part.price || "0")) * item.qty).toFixed(2);
+      return {
+        ...item,
+        partId: part.id,
+        partNameSnapshot: part.name,
+        partNumberSnapshot: part.partNumber || "",
+        lotPrice,
+        lineTotal: lotPrice,
+        itemType: (part.itemType as ItemType) || "inventory",
+        groupId: part.groupId || undefined,
+        subgroupId: part.subgroupId || undefined,
+      };
+    }));
     setPartSearch(prev => ({ ...prev, [itemId]: part.name }));
     setSearchFocus(null);
   };
@@ -221,17 +230,21 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         taxAmount: taxAmount || "0",
         deliveryFee: deliveryFee || "0",
         totalAmount: totalAmount || calculatedTotal.toFixed(2),
-        items: filledItems.map(item => ({
-          partId: item.partId,
-          partNameSnapshot: item.partNameSnapshot,
-          partNumberSnapshot: item.partNumberSnapshot || "",
-          itemType: item.itemType,
-          groupId: item.groupId || undefined,
-          subgroupId: item.subgroupId || undefined,
-          qty: item.qty,
-          unitCost: item.unitCost || "0",
-          lineTotal: item.lineTotal || "0",
-        })),
+        items: filledItems.map(item => {
+          const lp = parseFloat(item.lotPrice) || 0;
+          const qty = item.qty || 1;
+          return {
+            partId: item.partId,
+            partNameSnapshot: item.partNameSnapshot,
+            partNumberSnapshot: item.partNumberSnapshot || "",
+            itemType: item.itemType,
+            groupId: item.groupId || undefined,
+            subgroupId: item.subgroupId || undefined,
+            qty,
+            unitCost: qty > 0 ? (lp / qty).toFixed(6) : "0",
+            lineTotal: lp.toFixed(2),
+          };
+        }),
       };
       const res = await apiRequest("POST", "/api/inventory/intakes", payload);
       return res.json();
@@ -349,7 +362,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-24">Part #</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-16">Qty</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-24">Unit Cost</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-28">Lot Price</th>
                     <th className="text-right px-3 py-2 text-foreground font-medium w-24">Line Total</th>
                     <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Unit cost after proportional tax & delivery allocation">Landed</th>
                     <th className="w-8" />
@@ -527,7 +540,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           />
                         </td>
 
-                        {/* Unit Cost */}
+                        {/* Lot Price + per-unit derived display */}
                         <td className="px-3 py-2 pt-3">
                           <div className="flex items-center gap-1">
                             <span className="text-foreground/60">$</span>
@@ -537,10 +550,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               step="0.01"
                               className="w-full bg-transparent outline-none text-foreground"
                               placeholder="0.00"
-                              value={item.unitCost}
-                              onChange={e => updateItem(item.id, { unitCost: e.target.value })}
+                              value={item.lotPrice}
+                              onChange={e => updateItem(item.id, { lotPrice: e.target.value })}
                             />
                           </div>
+                          {item.lotPrice && item.qty > 1 && (
+                            <div className="text-xs text-muted-foreground mt-0.5 pl-3">
+                              ${derivedPerUnit(item.lotPrice, item.qty)}/unit
+                            </div>
+                          )}
                         </td>
 
                         {/* Line Total */}
