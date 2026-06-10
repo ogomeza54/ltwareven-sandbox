@@ -68,6 +68,7 @@ export default function Inventory() {
   const [addingSubgroupName, setAddingSubgroupName] = useState<Record<string, string>>({});
   const [addingItemName, setAddingItemName] = useState<Record<string, string>>({});
   const [editingCatalogItem, setEditingCatalogItem] = useState<{ type: string; id: string; name: string } | null>(null);
+  const [linkingItemId, setLinkingItemId] = useState<string | null>(null);
 
   const { data: catalogTree = [], isLoading: catalogLoading } = useQuery<any[]>({
     queryKey: ["/api/catalog/tree"],
@@ -113,6 +114,17 @@ export default function Inventory() {
       setEditingCatalogItem(null);
     },
     onError: () => toast({ title: "Failed to update item", variant: "destructive" }),
+  });
+
+  const linkPartMutation = useMutation({
+    mutationFn: async ({ itemId, partId }: { itemId: string; partId: string | null }) =>
+      apiRequest("PATCH", `/api/catalog/items/${itemId}`, { partId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      setLinkingItemId(null);
+      toast({ title: "Part linked to catalog item" });
+    },
+    onError: () => toast({ title: "Failed to link part", variant: "destructive" }),
   });
 
   const { data: parts = [], isLoading } = useQuery<any[]>({
@@ -1108,24 +1120,52 @@ export default function Inventory() {
                                       ) : (
                                         <span className="flex-1 text-xs text-slate-300">{item.name}</span>
                                       )}
-                                      {item.partId ? (
-                                        <Badge className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-400 border-green-500/20 border shrink-0">
-                                          {item.partName ?? "Linked"} · ${Number(item.partPrice ?? 0).toFixed(2)}
-                                        </Badge>
-                                      ) : (
-                                        <Badge className="text-[10px] px-1.5 py-0 bg-slate-700/50 text-slate-500 border-0 shrink-0">
-                                          no part
-                                        </Badge>
-                                      )}
-                                      {isAdmin && (
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <button className="p-0.5 text-muted-foreground hover:text-amber-400" onClick={() => setEditingCatalogItem({ type: "item", id: item.id, name: item.name })}>
-                                            <Edit className="w-3 h-3" />
-                                          </button>
-                                          <button className="p-0.5 text-muted-foreground hover:text-red-400" onClick={() => { if (confirm(`Delete item "${item.name}"?`)) catalogItemMutation.mutate({ action: "delete", id: item.id }); }}>
-                                            <Trash2 className="w-3 h-3" />
+                                      {linkingItemId === item.id ? (
+                                        <div className="flex items-center gap-1 flex-1">
+                                          <select
+                                            autoFocus
+                                            className="flex-1 text-xs bg-slate-800 border border-amber-500 rounded px-1.5 py-0.5 text-white focus:outline-none"
+                                            defaultValue={item.partId ?? ""}
+                                            onChange={e => {
+                                              linkPartMutation.mutate({ itemId: item.id, partId: e.target.value || null });
+                                            }}
+                                          >
+                                            <option value="">— unlink —</option>
+                                            {parts.map((p: any) => (
+                                              <option key={p.id} value={p.id}>
+                                                {p.name} (#{p.partNumber}) · ${Number(p.price).toFixed(2)}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          <button className="p-0.5 text-muted-foreground hover:text-red-400" onClick={() => setLinkingItemId(null)}>
+                                            <X className="w-3 h-3" />
                                           </button>
                                         </div>
+                                      ) : (
+                                        <>
+                                          {item.partId ? (
+                                            <Badge className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-400 border-green-500/20 border shrink-0">
+                                              {item.partName ?? "Linked"} · ${Number(item.partPrice ?? 0).toFixed(2)}
+                                            </Badge>
+                                          ) : (
+                                            <Badge className="text-[10px] px-1.5 py-0 bg-slate-700/50 text-slate-500 border-0 shrink-0">
+                                              no part
+                                            </Badge>
+                                          )}
+                                          {isAdmin && (
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <button className="p-0.5 text-muted-foreground hover:text-amber-400" title="Link inventory part" onClick={() => setLinkingItemId(item.id)}>
+                                                <Tag className="w-3 h-3" />
+                                              </button>
+                                              <button className="p-0.5 text-muted-foreground hover:text-amber-400" onClick={() => setEditingCatalogItem({ type: "item", id: item.id, name: item.name })}>
+                                                <Edit className="w-3 h-3" />
+                                              </button>
+                                              <button className="p-0.5 text-muted-foreground hover:text-red-400" onClick={() => { if (confirm(`Delete item "${item.name}"?`)) catalogItemMutation.mutate({ action: "delete", id: item.id }); }}>
+                                                <Trash2 className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </>
                                       )}
                                     </div>
                                   ))}

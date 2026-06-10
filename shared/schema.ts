@@ -164,8 +164,8 @@ export const inventoryParts = pgTable("inventory_parts", {
   description: text("description"),
   category: text("category"),
   // Catalog hierarchy links (optional — set when part is linked to a catalog item)
-  groupId: varchar("group_id"),
-  subgroupId: varchar("subgroup_id"),
+  groupId: varchar("group_id").references(() => maintenanceGroups.id),
+  subgroupId: varchar("subgroup_id").references(() => maintenanceSubgroups.id),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   quantityInStock: integer("quantity_in_stock").notNull().default(0),
   lowStockThreshold: integer("low_stock_threshold").notNull().default(5),

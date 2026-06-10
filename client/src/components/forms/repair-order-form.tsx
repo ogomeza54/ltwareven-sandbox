@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,13 +11,11 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import CatalogPartPicker from "@/components/catalog-part-picker";
 import { 
   User, 
-  Plus, 
   Trash2, 
-  Search,
   Clock,
-  DollarSign
 } from "lucide-react";
 
 const repairOrderSchema = z.object({
@@ -50,9 +48,6 @@ export default function RepairOrderForm({
   onSave,
   isLoading
 }: RepairOrderFormProps) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedPart, setSelectedPart] = useState<any>(null);
-  const [partQuantity, setPartQuantity] = useState(1);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -63,40 +58,6 @@ export default function RepairOrderForm({
       progressNotes: order.progressNotes || "",
       actualHours: order.actualHours?.toString() || "",
       totalEstimate: order.totalEstimate?.toString() || "",
-    },
-  });
-
-  const { data: searchResults = [] } = useQuery<any[]>({
-    queryKey: ["/api/inventory/search", { q: searchTerm }],
-    enabled: searchTerm.length > 2,
-  });
-
-  const addPartMutation = useMutation({
-    mutationFn: async (partData: any) => {
-      const response = await fetch(`/api/repair-orders/${order.id}/parts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(partData),
-      });
-      if (!response.ok) throw new Error("Failed to add part");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/repair-orders", order.id, "parts"] });
-      setSearchTerm("");
-      setSelectedPart(null);
-      setPartQuantity(1);
-      toast({
-        title: "Success",
-        description: "Part added to repair order",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to add part",
-        variant: "destructive",
-      });
     },
   });
 
@@ -130,16 +91,6 @@ export default function RepairOrderForm({
       totalEstimate: data.totalEstimate ? parseFloat(data.totalEstimate) : undefined,
     };
     onSave(updates);
-  };
-
-  const handleAddPart = () => {
-    if (!selectedPart) return;
-    
-    addPartMutation.mutate({
-      partId: selectedPart.id,
-      quantity: partQuantity,
-      unitPrice: selectedPart.price,
-    });
   };
 
   const totalPartsValue = partsUsage.reduce((sum, usage) => 
@@ -185,24 +136,17 @@ export default function RepairOrderForm({
       {/* Parts & Materials */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Parts & Materials</CardTitle>
-            {isEditing && (
-              <Button
-                size="sm"
-                onClick={() => setSearchTerm(searchTerm || " ")}
-                disabled={addPartMutation.isPending}
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Add Part
-              </Button>
-            )}
-          </div>
+          <CardTitle>Parts & Materials</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {partsUsage.map((usage: any) => (
             <div key={usage.id} className="flex items-center justify-between p-3 bg-white rounded-lg border">
               <div className="flex-1">
+                {(usage.groupSnapshot || usage.subgroupSnapshot) && (
+                  <p className="text-xs text-gray-400 mb-0.5">
+                    {[usage.groupSnapshot, usage.subgroupSnapshot].filter(Boolean).join(" / ")}
+                  </p>
+                )}
                 <p className="font-medium text-gray-900">{usage.part?.name}</p>
                 <p className="text-sm text-gray-500">Part #{usage.part?.partNumber}</p>
               </div>
@@ -230,62 +174,11 @@ export default function RepairOrderForm({
             <p className="text-gray-500 text-center py-4">No parts assigned yet</p>
           )}
 
-          {/* Add Part Form */}
-          {isEditing && searchTerm && (
-            <div className="p-3 border-2 border-dashed border-gray-300 rounded-lg">
-              <div className="space-y-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    placeholder="Search parts..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                
-                {searchResults && searchResults.length > 0 && (
-                  <div className="max-h-32 overflow-y-auto border rounded">
-                    {searchResults.map((part: any) => (
-                      <div
-                        key={part.id}
-                        className={`p-2 cursor-pointer hover:bg-gray-50 ${
-                          selectedPart?.id === part.id ? "bg-blue-50" : ""
-                        }`}
-                        onClick={() => setSelectedPart(part)}
-                      >
-                        <p className="font-medium text-sm">{part.name}</p>
-                        <p className="text-xs text-gray-500">
-                          #{part.partNumber} - ${Number(part.price).toFixed(2)} 
-                          ({part.quantityInStock} in stock)
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {selectedPart && (
-                  <div className="flex items-center space-x-2">
-                    <Input
-                      type="number"
-                      value={partQuantity}
-                      onChange={(e) => setPartQuantity(parseInt(e.target.value) || 1)}
-                      min="1"
-                      max={selectedPart.quantityInStock}
-                      className="w-20"
-                    />
-                    <span className="text-sm text-gray-600">x {selectedPart.name}</span>
-                    <Button
-                      size="sm"
-                      onClick={handleAddPart}
-                      disabled={addPartMutation.isPending}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
+          {isEditing && (
+            <CatalogPartPicker
+              orderId={order.id}
+              onAdded={() => queryClient.invalidateQueries({ queryKey: ["/api/repair-orders", order.id, "parts"] })}
+            />
           )}
         </CardContent>
       </Card>

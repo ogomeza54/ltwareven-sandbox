@@ -1379,9 +1379,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Groups CRUD
+  // Groups CRUD (admin/super_admin only for mutations)
   app.post("/api/catalog/groups", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const data = insertMaintenanceGroupSchema.parse({ ...req.body, companyId: req.userContext.companyId });
       const group = await storage.createMaintenanceGroup(data);
       res.status(201).json(group);
@@ -1390,6 +1392,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/catalog/groups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const group = await storage.updateMaintenanceGroup(req.params.id, req.userContext.companyId, req.body);
       res.json(group);
     } catch (error) { res.status(400).json({ message: "Failed to update group" }); }
@@ -1397,14 +1401,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/catalog/groups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       await storage.deleteMaintenanceGroup(req.params.id, req.userContext.companyId);
       res.status(204).send();
     } catch (error) { res.status(400).json({ message: "Failed to delete group" }); }
   });
 
-  // Subgroups CRUD
+  // Subgroups CRUD (admin/super_admin only for mutations)
   app.post("/api/catalog/subgroups", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const data = insertMaintenanceSubgroupSchema.parse({ ...req.body, companyId: req.userContext.companyId });
       const sg = await storage.createMaintenanceSubgroup(data);
       res.status(201).json(sg);
@@ -1413,6 +1421,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/catalog/subgroups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const sg = await storage.updateMaintenanceSubgroup(req.params.id, req.userContext.companyId, req.body);
       res.json(sg);
     } catch (error) { res.status(400).json({ message: "Failed to update subgroup" }); }
@@ -1420,14 +1430,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/catalog/subgroups/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       await storage.deleteMaintenanceSubgroup(req.params.id, req.userContext.companyId);
       res.status(204).send();
     } catch (error) { res.status(400).json({ message: "Failed to delete subgroup" }); }
   });
 
-  // Items CRUD
+  // Items CRUD (admin/super_admin only for mutations)
   app.post("/api/catalog/items", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const data = insertMaintenanceItemSchema.parse({ ...req.body, companyId: req.userContext.companyId });
       const item = await storage.createMaintenanceItem(data);
       res.status(201).json(item);
@@ -1436,6 +1450,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/catalog/items/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       const item = await storage.updateMaintenanceItem(req.params.id, req.userContext.companyId, req.body);
       res.json(item);
     } catch (error) { res.status(400).json({ message: "Failed to update item" }); }
@@ -1443,6 +1459,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/catalog/items/:id", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
+      const { role } = req.userContext;
+      if (role !== "admin" && role !== "super_admin") return res.status(403).json({ message: "Admin access required" });
       await storage.deleteMaintenanceItem(req.params.id, req.userContext.companyId);
       res.status(204).send();
     } catch (error) { res.status(400).json({ message: "Failed to delete item" }); }
