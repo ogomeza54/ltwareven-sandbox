@@ -708,7 +708,7 @@ export class DatabaseStorage implements IStorage {
 
   async createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
-    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
+    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; itemType?: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
     companyId: string,
     userId: string
   ): Promise<InventoryIntake> {
@@ -757,6 +757,7 @@ export class DatabaseStorage implements IStorage {
           const [newPart] = await tx.insert(inventoryParts).values({
             name: item.partNameSnapshot,
             partNumber: item.partNumberSnapshot || "",
+            itemType: item.itemType || "inventory",
             price: item.landedCost || item.unitCost || "0",
             quantityInStock: 0,
             companyId,
@@ -771,6 +772,7 @@ export class DatabaseStorage implements IStorage {
             partId: item.partId || null,
             partNameSnapshot: item.partNameSnapshot,
             partNumberSnapshot: item.partNumberSnapshot,
+            itemType: item.itemType || "inventory",
             qty: item.qty,
             unitCost: item.unitCost,
             lineTotal: item.lineTotal,
@@ -779,13 +781,14 @@ export class DatabaseStorage implements IStorage {
           }))
         );
 
-        // Increment stock and update catalog price to landed cost for all parts
+        // Increment stock, update catalog price, and sync itemType for all parts
         for (const item of resolvedItems) {
           if (item.partId) {
             await tx.update(inventoryParts)
               .set({
                 quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}`,
                 price: item.landedCost,
+                itemType: item.itemType || "inventory",
               })
               .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
           }

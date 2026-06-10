@@ -12,11 +12,14 @@ import {
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
 
+type ItemType = "inventory" | "consumable";
+
 interface LineItem {
   id: string;
   partId?: string;
   partNameSnapshot: string;
   partNumberSnapshot: string;
+  itemType: ItemType;
   qty: number;
   unitCost: string;
   lineTotal: string;
@@ -33,6 +36,7 @@ function newLineItem(): LineItem {
     partId: undefined,
     partNameSnapshot: "",
     partNumberSnapshot: "",
+    itemType: "inventory",
     qty: 1,
     unitCost: "",
     lineTotal: "0.00",
@@ -164,6 +168,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           partId: item.partId,
           partNameSnapshot: item.partNameSnapshot,
           partNumberSnapshot: item.partNumberSnapshot || "",
+          itemType: item.itemType,
           qty: item.qty,
           unitCost: item.unitCost || "0",
           lineTotal: item.lineTotal || "0",
@@ -280,6 +285,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-6" title="Linked to catalog part = stock will update" />
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-36">Type</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-28">Part #</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-20">Qty</th>
@@ -310,6 +316,32 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               <Unlink className="h-3.5 w-3.5 text-muted-foreground/30" />
                             </span>
                           )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
+                            <button
+                              type="button"
+                              onClick={() => updateItem(item.id, { itemType: "inventory" })}
+                              className={`px-2 py-1 transition-colors ${
+                                item.itemType === "inventory"
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Inventory
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateItem(item.id, { itemType: "consumable" })}
+                              className={`px-2 py-1 transition-colors border-l border-border ${
+                                item.itemType === "consumable"
+                                  ? "bg-amber-500 text-white"
+                                  : "bg-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Consumable
+                            </button>
+                          </div>
                         </td>
                         <td className="px-3 py-2">
                           <div className="relative">

@@ -948,6 +948,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
           return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
         }
+        if (item.itemType && item.itemType !== "consumable" && item.itemType !== "inventory") {
+          return res.status(400).json({ message: "itemType must be 'consumable' or 'inventory'" });
+        }
       }
 
       // Calculate reconciliation status

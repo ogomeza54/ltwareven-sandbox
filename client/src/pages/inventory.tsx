@@ -455,11 +455,18 @@ export default function Inventory() {
                               <p className="text-sm text-muted-foreground line-clamp-2">{part.description}</p>
                             )}
                           </div>
-                          {part.quantityInStock <= part.lowStockThreshold && (
-                            <Badge variant="outline" className="border-amber-500/40 text-amber-400 ml-2">
-                              Low Stock
-                            </Badge>
-                          )}
+                          <div className="flex flex-col items-end gap-1 ml-2">
+                            {part.itemType === "consumable" && (
+                              <Badge className="bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs">
+                                Consumable
+                              </Badge>
+                            )}
+                            {part.quantityInStock <= part.lowStockThreshold && (
+                              <Badge variant="outline" className="border-amber-500/40 text-amber-400">
+                                Low Stock
+                              </Badge>
+                            )}
+                          </div>
                         </div>
 
                         <div className="space-y-2 text-sm">

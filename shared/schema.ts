@@ -163,6 +163,8 @@ export const inventoryParts = pgTable("inventory_parts", {
   partNumber: text("part_number").notNull(),
   description: text("description"),
   category: text("category"),
+  // "consumable" | "inventory" — classification used for QB treatment and reporting
+  itemType: text("item_type").notNull().default("inventory"),
   // Catalog hierarchy links (optional — set when part is linked to a catalog item)
   groupId: varchar("group_id").references(() => maintenanceGroups.id),
   subgroupId: varchar("subgroup_id").references(() => maintenanceSubgroups.id),
@@ -203,6 +205,8 @@ export const inventoryIntakeItems = pgTable("inventory_intake_items", {
   partId: varchar("part_id").references(() => inventoryParts.id),
   partNameSnapshot: text("part_name_snapshot").notNull(),
   partNumberSnapshot: text("part_number_snapshot").notNull().default(""),
+  // "consumable" | "inventory" — mirrors the classification on the part itself
+  itemType: text("item_type").notNull().default("inventory"),
   qty: integer("qty").notNull(),
   unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(),
   lineTotal: decimal("line_total", { precision: 12, scale: 2 }).notNull(),
