@@ -677,6 +677,11 @@ export class DatabaseStorage implements IStorage {
         .where(eq(inventoryParts.id, usage.partId));
       
       await db.delete(partsUsage).where(eq(partsUsage.id, id));
+
+      // Revert intake QB status: if the removed part belonged to a "not_synced" intake,
+      // check whether all inventory-type items in that intake are still used. If any
+      // item is now uncovered, flip the intake back to "pending_usage".
+      await this._checkAndRevertIntakeQbStatus(usage.partId, companyId);
     }
   }
 
@@ -729,6 +734,60 @@ export class DatabaseStorage implements IStorage {
       if (allUsed) {
         await db.update(inventoryIntakes)
           .set({ quickbooksSyncStatus: "not_synced" })
+          .where(eq(inventoryIntakes.id, intakeId));
+      }
+    }
+  }
+
+  // Helper: after a part usage is deleted, check if any "not_synced" intake that
+  // contained this part now has an inventory-type item with zero remaining usages.
+  // If so, flip that intake back to "pending_usage" so it isn't exported prematurely.
+  private async _checkAndRevertIntakeQbStatus(partId: string, companyId: string): Promise<void> {
+    // Find all intake items for this part in not_synced intakes
+    const affectedIntakeItems = await db.select({
+      intakeId: inventoryIntakeItems.inventoryIntakeId,
+    }).from(inventoryIntakeItems)
+      .innerJoin(inventoryIntakes, eq(inventoryIntakeItems.inventoryIntakeId, inventoryIntakes.id))
+      .where(
+        and(
+          eq(inventoryIntakeItems.partId, partId),
+          eq(inventoryIntakes.companyId, companyId),
+          eq(inventoryIntakes.quickbooksSyncStatus, "not_synced"),
+        )
+      );
+
+    if (affectedIntakeItems.length === 0) return;
+
+    const intakeIds = [...new Set(affectedIntakeItems.map(r => r.intakeId))];
+
+    for (const intakeId of intakeIds) {
+      // All inventory-type items in this intake
+      const inventoryItems = await db.select({
+        partId: inventoryIntakeItems.partId,
+      }).from(inventoryIntakeItems)
+        .where(
+          and(
+            eq(inventoryIntakeItems.inventoryIntakeId, intakeId),
+            eq(inventoryIntakeItems.itemType, "inventory"),
+          )
+        );
+
+      if (inventoryItems.length === 0) continue;
+
+      // Check which of those parts still have at least one usage record
+      const usedPartIds = await db.selectDistinct({
+        partId: partsUsage.partId,
+      }).from(partsUsage)
+        .where(
+          sql`${partsUsage.partId} = ANY(ARRAY[${sql.join(inventoryItems.map(i => sql`${i.partId}`), sql`, `)}])`
+        );
+
+      const usedSet = new Set(usedPartIds.map(r => r.partId));
+      const allUsed = inventoryItems.every(item => item.partId && usedSet.has(item.partId));
+
+      if (!allUsed) {
+        await db.update(inventoryIntakes)
+          .set({ quickbooksSyncStatus: "pending_usage" })
           .where(eq(inventoryIntakes.id, intakeId));
       }
     }
