@@ -460,6 +460,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Notifications — aggregates live alerts for the bell icon
+  app.get("/api/notifications", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { companyId, role } = req.userContext;
+      const [lowStock, pendingOrders] = await Promise.all([
+        storage.getLowStockParts(companyId),
+        storage.getRepairOrdersByStatus("pending", companyId),
+      ]);
+      let pendingCountReviews: any[] = [];
+      if (role === "admin" || role === "super_admin") {
+        const allSessions = await storage.getCountSessionsByCompany(companyId);
+        pendingCountReviews = allSessions.filter((s: any) => s.status === "submitted");
+      }
+      res.json({
+        lowStock: lowStock.map(p => ({
+          id: p.id,
+          name: p.name,
+          quantityInStock: p.quantityInStock,
+          lowStockThreshold: p.lowStockThreshold,
+        })),
+        pendingCountReviews: pendingCountReviews.map((s: any) => ({
+          id: s.id,
+          createdAt: s.createdAt,
+          startedByName: s.startedByName ?? null,
+        })),
+        pendingRepairOrders: pendingOrders.map((o: any) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          priority: o.priority ?? null,
+        })),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
   // Dashboard Stats
   app.get("/api/dashboard/stats", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {

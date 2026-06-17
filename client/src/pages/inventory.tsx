@@ -23,7 +23,8 @@ import {
   BookOpen, Plus, X, Layers, Tag, Camera,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import InventoryPartModal from "@/components/modals/inventory-part-modal";
 import ReceiveInventoryModal from "@/components/modals/receive-inventory-modal";
 import InventoryAdjustmentModal from "@/components/modals/inventory-adjustment-modal";
@@ -33,6 +34,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Inventory() {
   const { toast } = useToast();
+  const [location] = useLocation();
+  const [activeTab, setActiveTab] = useState("parts");
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -168,6 +171,15 @@ export default function Inventory() {
     setSelectedCountSessionId(session.id);
     setIsCountModalOpen(true);
   };
+
+  useEffect(() => {
+    const search = window.location.search;
+    const params = new URLSearchParams(search);
+    const tab = params.get("tab");
+    if (tab && ["parts", "intakes", "counts", "adjustments", "catalog"].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [location]);
 
   const handleStartCount = () => {
     if (openCountSession) {
@@ -330,7 +342,7 @@ export default function Inventory() {
             </Card>
           </div>
 
-          <Tabs defaultValue="parts">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <div className="flex items-center justify-between mb-4">
               <TabsList>
                 <TabsTrigger value="parts">Parts Catalog</TabsTrigger>
