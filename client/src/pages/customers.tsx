@@ -134,7 +134,7 @@ export default function Customers() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Total Customers</p>
+                    <p className="text-sm font-medium text-gray-600">Total Owner Ops</p>
                     <p className="text-3xl font-bold text-gray-900">
                       {isLoading ? "..." : customers.length}
                     </p>
@@ -151,7 +151,7 @@ export default function Customers() {
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
-                placeholder="Search customers..."
+                placeholder="Search owner ops..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
