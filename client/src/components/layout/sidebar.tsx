@@ -35,7 +35,7 @@ const allNavigation: NavItem[] = [
   { name: "Work Orders", href: "/repair-orders", icon: Wrench },
   { name: "Parts & Inventory", href: "/inventory", icon: Package },
   { name: "Technicians", href: "/mechanics", icon: Users },
-  { name: "Clients", href: "/customers", icon: UserCircle },
+  { name: "Owner Operator", href: "/customers", icon: UserCircle },
   { name: "Fleet", href: "/vehicles", icon: Truck },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Reports", href: "/reports", icon: BarChart3 },

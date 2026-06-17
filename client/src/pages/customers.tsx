@@ -124,7 +124,7 @@ export default function Customers() {
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <TopBar
-          title="Client Management"
+          title="Owner Operator Management"
           subtitle="View and manage your clients"
         />
 
@@ -162,7 +162,7 @@ export default function Customers() {
               setIsAddModalOpen(true);
             }}>
               <UserPlus className="w-4 h-4 mr-2" />
-              Add Customer
+              Add Owner Op
             </Button>
           </div>
 
@@ -272,7 +272,7 @@ export default function Customers() {
               onClick={() => createMutation.mutate(formData)}
               disabled={createMutation.isPending || !formData.name || !formData.phone}
             >
-              {createMutation.isPending ? "Adding..." : "Add Customer"}
+              {createMutation.isPending ? "Adding..." : "Add Owner Op"}
             </Button>
           </DialogFooter>
         </DialogContent>
