@@ -232,7 +232,7 @@ export default function Dashboard() {
                     <div className="flex items-center space-x-3">
                       <Calendar className="w-5 h-5 text-slate-500" />
                       <div className="text-left">
-                        <p className="font-medium text-sm">Driver Schedule</p>
+                        <p className="font-medium text-sm">Technician Schedule</p>
                         <p className="text-xs text-slate-500">View assignments</p>
                       </div>
                     </div>
