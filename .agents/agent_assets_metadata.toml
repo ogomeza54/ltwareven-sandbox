@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "fCp69HfD0KaXeScb9D2RZ"
+uri = "file://schema-reference.md"
+type = "text"
+title = "HaulMaster Pro — Database Schema Reference"
