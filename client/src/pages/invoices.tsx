@@ -9,9 +9,9 @@ export default function Invoices() {
     queryKey: ["/api/repair-orders"],
   });
 
-  const completedOrders = (orders as any[]).filter((o) => o.status === "completed");
+  const completedOrders = (orders as any[]).filter((o) => ["completed", "delivered", "closed"].includes(o.status));
   const totalRevenue = completedOrders.reduce((sum, o) => sum + (Number(o.totalEstimate) || 0), 0);
-  const pendingOrders = (orders as any[]).filter((o) => ["in_progress", "pending"].includes(o.status));
+  const pendingOrders = (orders as any[]).filter((o) => ["open", "in-progress", "on-hold"].includes(o.status));
   const pendingRevenue = pendingOrders.reduce((sum, o) => sum + (Number(o.totalEstimate) || 0), 0);
 
   return (
@@ -89,15 +89,17 @@ export default function Invoices() {
                       (orders as any[]).map((order) => (
                         <tr key={order.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
                           <td className="px-4 py-3 text-slate-300 font-mono text-xs">{order.orderNumber || order.id.slice(0, 8)}</td>
-                          <td className="px-4 py-3 text-white">{order.customerName || "—"}</td>
-                          <td className="px-4 py-3 text-slate-400">{[order.vehicleYear, order.vehicleMake, order.vehicleModel].filter(Boolean).join(" ") || "—"}</td>
+                          <td className="px-4 py-3 text-white">{order.customer?.name || "—"}</td>
+                          <td className="px-4 py-3 text-slate-400">{[order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(" ") || "—"}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                              order.status === "completed" ? "bg-green-500/10 text-green-400" :
-                              order.status === "in_progress" ? "bg-amber-500/10 text-amber-400" :
+                              ["completed", "delivered", "closed"].includes(order.status) ? "bg-green-500/10 text-green-400" :
+                              order.status === "in-progress" ? "bg-amber-500/10 text-amber-400" :
+                              order.status === "on-hold" ? "bg-red-500/10 text-red-400" :
+                              order.status === "open" ? "bg-blue-500/10 text-blue-400" :
                               "bg-slate-700 text-slate-400"
                             }`}>
-                              {order.status?.replace("_", " ")}
+                              {order.status?.replaceAll("-", " ")}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-white">
