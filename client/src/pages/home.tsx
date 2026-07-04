@@ -172,7 +172,7 @@ export default function Home() {
             <Card className="bg-slate-900 border-slate-800 hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/5 transition-all cursor-pointer group">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">
-                  Clients
+                  Owner Operators
                 </CardTitle>
                 <div className="w-8 h-8 bg-amber-500/10 rounded-lg flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
                   <UserCircle className="h-4 w-4 text-amber-400" />
@@ -180,7 +180,7 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-slate-500">
-                  Manage client database
+                  Manage owner operator database
                 </CardDescription>
               </CardContent>
             </Card>

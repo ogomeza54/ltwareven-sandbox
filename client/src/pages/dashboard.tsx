@@ -35,16 +35,18 @@ export default function Dashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "pending":
+      case "open":
         return "bg-blue-500/10 text-blue-400 border border-blue-500/20";
       case "in-progress":
         return "bg-amber-500/10 text-amber-400 border border-amber-500/20";
-      case "ready-pickup":
-        return "bg-green-500/10 text-green-400 border border-green-500/20";
+      case "on-hold":
+        return "bg-red-500/10 text-red-400 border border-red-500/20";
       case "completed":
+      case "delivered":
+      case "closed":
+        return "bg-green-500/10 text-green-400 border border-green-500/20";
+      case "abandoned":
         return "bg-slate-500/10 text-slate-400 border border-slate-500/20";
-      case "waiting-parts":
-        return "bg-orange-500/10 text-orange-400 border border-orange-500/20";
       default:
         return "bg-slate-500/10 text-slate-400 border border-slate-500/20";
     }
@@ -182,7 +184,7 @@ export default function Dashboard() {
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                              {order.status.replace("-", " ")}
+                              {order.status.replaceAll("-", " ")}
                             </span>
                             <p className="text-xs text-slate-600 mt-1">
                               {order.mechanic?.name || "Unassigned"}
