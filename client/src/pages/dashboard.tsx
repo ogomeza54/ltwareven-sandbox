@@ -29,9 +29,21 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
-  const { data: recentOrders, isLoading: ordersLoading } = useQuery({
+  const { data: recentOrders = [], isLoading: ordersLoading } = useQuery<any[]>({
     queryKey: ["/api/repair-orders"],
   });
+
+  const weeklyOrderChange = (() => {
+    const now = Date.now();
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+    const thisWeek = recentOrders.filter((o: any) => now - new Date(o.createdAt).getTime() < oneWeek).length;
+    const lastWeek = recentOrders.filter((o: any) => {
+      const age = now - new Date(o.createdAt).getTime();
+      return age >= oneWeek && age < 2 * oneWeek;
+    }).length;
+    if (lastWeek === 0) return thisWeek > 0 ? 100 : 0;
+    return Math.round(((thisWeek - lastWeek) / lastWeek) * 100);
+  })();
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -78,9 +90,11 @@ export default function Dashboard() {
                     <ClipboardList className="text-amber-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-green-400 mt-3 flex items-center gap-1">
-                  <ArrowUp className="w-3 h-3" />
-                  12% from last week
+                <p className={`text-xs mt-3 flex items-center gap-1 ${weeklyOrderChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {weeklyOrderChange >= 0
+                    ? <ArrowUp className="w-3 h-3" />
+                    : <ArrowDown className="w-3 h-3" />}
+                  {Math.abs(weeklyOrderChange)}% vs last week
                 </p>
               </CardContent>
             </Card>
@@ -135,9 +149,8 @@ export default function Dashboard() {
                     <DollarSign className="text-purple-400 w-6 h-6" />
                   </div>
                 </div>
-                <p className="text-xs text-green-400 mt-3 flex items-center gap-1">
-                  <ArrowUp className="w-3 h-3" />
-                  8% from last month
+                <p className="text-xs text-slate-500 mt-3">
+                  Closed &amp; delivered this month
                 </p>
               </CardContent>
             </Card>
