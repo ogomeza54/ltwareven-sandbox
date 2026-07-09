@@ -223,6 +223,18 @@ export const inventoryIntakeItems = pgTable("inventory_intake_items", {
   lineTotal: decimal("line_total", { precision: 12, scale: 2 }).notNull(),
   landedCost: decimal("landed_cost", { precision: 12, scale: 4 }),
   companyId: varchar("company_id").notNull().references(() => companies.id),
+  // QuickBooks integration placeholders (mirrors inventory_intakes QB fields)
+  quickbooksSyncStatus: text("quickbooks_sync_status").default("not_synced"),
+  quickbooksId: text("quickbooks_id"),
+  quickbooksLastSyncedAt: timestamp("quickbooks_last_synced_at"),
+  externalReferenceNumber: text("external_reference_number"),
+  // QuickBooks structured transaction fields
+  qbTransactionType: text("qb_transaction_type"),
+  qbDebitAccount: text("qb_debit_account"),
+  qbCreditAccount: text("qb_credit_account"),
+  qbVendorName: text("qb_vendor_name"),
+  qbInvoiceNumber: text("qb_invoice_number"),
+  qbAmount: decimal("qb_amount", { precision: 12, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
