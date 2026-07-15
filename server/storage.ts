@@ -900,16 +900,22 @@ export class DatabaseStorage implements IStorage {
 
     // Wrap everything in a transaction for all-or-nothing consistency
     return await db.transaction(async (tx) => {
+      const qbFields = buildIntakeQbFields(
+        intakeHeader.vendor as string,
+        intakeHeader.invoiceNumber as string | null | undefined,
+      );
+      assertQbFieldsComplete(qbFields);
+
       const [intake] = await tx.insert(inventoryIntakes)
         .values({
           ...intakeHeader,
           companyId,
           createdByUserId: userId,
-          qbTransactionType: "bill",
-          qbDebitAccount: "Inventory Asset",
-          qbCreditAccount: "Accounts Payable",
-          qbVendorName: intakeHeader.vendor,
-          qbInvoiceNumber: intakeHeader.invoiceNumber || null,
+          qbTransactionType: qbFields.qbTransactionType,
+          qbDebitAccount: qbFields.qbDebitAccount,
+          qbCreditAccount: qbFields.qbCreditAccount,
+          qbVendorName: qbFields.qbVendorName,
+          qbInvoiceNumber: qbFields.qbInvoiceNumber,
           qbAmount: intakeHeader.totalAmount || "0",
           quickbooksSyncStatus: qbSyncStatus,
         })
@@ -964,27 +970,9 @@ export class DatabaseStorage implements IStorage {
         }));
 
         await tx.insert(inventoryIntakeItems).values(
-          resolvedItems.map(item => ({
-            inventoryIntakeId: intake.id,
-            partId: item.partId || null,
-            partNameSnapshot: item.partNameSnapshot,
-            partNumberSnapshot: item.partNumberSnapshot,
-            itemType: item.itemType || "inventory",
-            groupId: item.groupId || null,
-            subgroupId: item.subgroupId || null,
-            qty: item.qty,
-            unitCost: item.unitCost,
-            lineTotal: item.lineTotal,
-            landedCost: item.landedCost,
-            companyId,
-            quickbooksSyncStatus: "not_synced",
-            qbTransactionType: intake.qbTransactionType,
-            qbDebitAccount: intake.qbDebitAccount,
-            qbCreditAccount: intake.qbCreditAccount,
-            qbVendorName: intake.qbVendorName,
-            qbInvoiceNumber: intake.qbInvoiceNumber,
-            qbAmount: item.lineTotal,
-          }))
+          resolvedItems.map(item =>
+            buildLineItemInsertValues(intake.id, intake, item, companyId)
+          )
         );
 
         // Increment stock, update catalog price, sync itemType and catalog placement for all parts
@@ -1710,3 +1698,86 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+/**
+ * Builds the complete insert-value record for one inventory_intake_items row,
+ * mirroring the QB fields from the parent intake header.  Keeping this as a
+ * pure exported function lets tests exercise the exact mapping that
+ * createInventoryIntake uses without requiring a live database connection.
+ */
+export function buildLineItemInsertValues(
+  intakeId: string,
+  intake: {
+    qbTransactionType: string | null;
+    qbDebitAccount: string | null;
+    qbCreditAccount: string | null;
+    qbVendorName: string | null;
+    qbInvoiceNumber: string | null;
+  },
+  item: {
+    partId?: string | null;
+    partNameSnapshot: string;
+    partNumberSnapshot?: string;
+    itemType?: string;
+    groupId?: string | null;
+    subgroupId?: string | null;
+    qty: number;
+    unitCost: string;
+    lineTotal: string;
+    landedCost?: string;
+  },
+  companyId: string,
+) {
+  return {
+    inventoryIntakeId: intakeId,
+    partId: item.partId || null,
+    partNameSnapshot: item.partNameSnapshot,
+    partNumberSnapshot: item.partNumberSnapshot ?? "",
+    itemType: item.itemType || "inventory",
+    groupId: item.groupId || null,
+    subgroupId: item.subgroupId || null,
+    qty: item.qty,
+    unitCost: item.unitCost,
+    lineTotal: item.lineTotal,
+    landedCost: item.landedCost,
+    companyId,
+    quickbooksSyncStatus: "not_synced",
+    qbTransactionType: intake.qbTransactionType,
+    qbDebitAccount: intake.qbDebitAccount,
+    qbCreditAccount: intake.qbCreditAccount,
+    qbVendorName: intake.qbVendorName,
+    qbInvoiceNumber: intake.qbInvoiceNumber,
+    qbAmount: item.lineTotal,
+  };
+}
+
+/**
+ * Builds the four required QuickBooks header fields from an intake's vendor string
+ * and optional invoice number.  All values are deterministic — nothing from this
+ * function should ever be undefined once vendor is present.
+ */
+export function buildIntakeQbFields(vendor: string, invoiceNumber: string | null | undefined) {
+  return {
+    qbVendorName: vendor.trim() || null,
+    qbTransactionType: "bill" as const,
+    qbDebitAccount: "Inventory Asset" as const,
+    qbCreditAccount: "Accounts Payable" as const,
+    qbInvoiceNumber: invoiceNumber ?? null,
+  };
+}
+
+export type IntakeQbFields = ReturnType<typeof buildIntakeQbFields>;
+
+/**
+ * Throws a descriptive error if any of the four required QB fields is null/empty.
+ * Call this before inserting an intake or its line items so null values never
+ * propagate silently to the QB export queue.
+ */
+export function assertQbFieldsComplete(fields: IntakeQbFields): void {
+  const required = ["qbVendorName", "qbTransactionType", "qbDebitAccount", "qbCreditAccount"] as const;
+  for (const key of required) {
+    if (!fields[key]) {
+      throw new Error(`Cannot save intake: required QB field "${key}" is missing or empty`);
+    }
+  }
+}
