@@ -977,6 +977,13 @@ export class DatabaseStorage implements IStorage {
             lineTotal: item.lineTotal,
             landedCost: item.landedCost,
             companyId,
+            quickbooksSyncStatus: "not_synced",
+            qbTransactionType: intake.qbTransactionType,
+            qbDebitAccount: intake.qbDebitAccount,
+            qbCreditAccount: intake.qbCreditAccount,
+            qbVendorName: intake.qbVendorName,
+            qbInvoiceNumber: intake.qbInvoiceNumber,
+            qbAmount: item.lineTotal,
           }))
         );
 
