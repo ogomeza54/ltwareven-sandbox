@@ -468,7 +468,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden" });
       }
       const integrations = await storage.getIntegrationsByCompany(companyId);
-      res.json(integrations);
+      // Strip OAuth secrets — never expose tokens to the browser
+      const safe = integrations.map(({ oauthAccessToken: _a, oauthRefreshToken: _r, ...rest }) => rest);
+      res.json(safe);
     } catch (error) {
       console.error("Failed to fetch integrations:", error);
       res.status(500).json({ message: "Failed to fetch integrations" });
