@@ -3,6 +3,7 @@ import {
   inventoryIntakes, inventoryIntakeItems, invoices, inventoryAdjustments,
   inventoryCountSessions, inventoryCountItems, adminAuditLog,
   maintenanceGroups, maintenanceSubgroups, maintenanceItems,
+  companyIntegrations,
   type Company, type InsertCompany,
   type User, type InsertUser, type UpsertUser,
   type Mechanic, type InsertMechanic,
@@ -16,6 +17,7 @@ import {
   type Invoice, type InsertInvoice,
   type InventoryAdjustment, type InsertInventoryAdjustment,
   type InventoryCountSession, type AdminAuditLog,
+  type CompanyIntegration,
   type MaintenanceGroup, type InsertMaintenanceGroup,
   type MaintenanceSubgroup, type InsertMaintenanceSubgroup,
   type MaintenanceItem, type InsertMaintenanceItem,
@@ -136,6 +138,11 @@ export interface IStorage {
   // Admin audit log operations
   createAdminAuditLog(entry: { adminUserId: string; targetCompanyId: string | null; action: string; note?: string }): Promise<AdminAuditLog>;
   getAdminAuditLog(limit?: number): Promise<any[]>;
+
+  // Integration config operations
+  getIntegrationConfig(provider: string, companyId: string): Promise<CompanyIntegration | undefined>;
+  getIntegrationsByCompany(companyId: string): Promise<CompanyIntegration[]>;
+  upsertIntegrationConfig(provider: string, data: Partial<CompanyIntegration>, companyId: string): Promise<CompanyIntegration>;
 
   // Dashboard stats
   getDashboardStats(companyId: string): Promise<{
@@ -898,11 +905,15 @@ export class DatabaseStorage implements IStorage {
     const hasInventoryItem = items.some(i => (i.itemType || "inventory") === "inventory");
     const qbSyncStatus = hasInventoryItem ? "pending_usage" : "not_synced";
 
+    // Look up company QB config to override hardcoded defaults if set
+    const qbConfig = await this.getIntegrationConfig("quickbooks", companyId);
+
     // Wrap everything in a transaction for all-or-nothing consistency
     return await db.transaction(async (tx) => {
       const qbFields = buildIntakeQbFields(
         intakeHeader.vendor as string,
         intakeHeader.invoiceNumber as string | null | undefined,
+        qbConfig ?? undefined,
       );
       assertQbFieldsComplete(qbFields);
 
@@ -1664,6 +1675,36 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // ── Company Integrations ──────────────────────────────────────────────────────
+  async getIntegrationConfig(provider: string, companyId: string): Promise<CompanyIntegration | undefined> {
+    const [row] = await db
+      .select()
+      .from(companyIntegrations)
+      .where(and(eq(companyIntegrations.companyId, companyId), eq(companyIntegrations.provider, provider)));
+    return row || undefined;
+  }
+
+  async getIntegrationsByCompany(companyId: string): Promise<CompanyIntegration[]> {
+    return await db
+      .select()
+      .from(companyIntegrations)
+      .where(eq(companyIntegrations.companyId, companyId))
+      .orderBy(asc(companyIntegrations.provider));
+  }
+
+  async upsertIntegrationConfig(provider: string, data: Partial<CompanyIntegration>, companyId: string): Promise<CompanyIntegration> {
+    const { id: _id, createdAt: _ca, ...safeData } = data as any;
+    const [row] = await db
+      .insert(companyIntegrations)
+      .values({ ...safeData, provider, companyId })
+      .onConflictDoUpdate({
+        target: [companyIntegrations.companyId, companyIntegrations.provider],
+        set: { ...safeData, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
   // ── Admin Audit Log ───────────────────────────────────────────────────────────
   async createAdminAuditLog(entry: { adminUserId: string; targetCompanyId: string | null; action: string; note?: string }): Promise<AdminAuditLog> {
     const [log] = await db.insert(adminAuditLog).values({
@@ -1756,12 +1797,16 @@ export function buildLineItemInsertValues(
  * and optional invoice number.  All values are deterministic — nothing from this
  * function should ever be undefined once vendor is present.
  */
-export function buildIntakeQbFields(vendor: string, invoiceNumber: string | null | undefined) {
+export function buildIntakeQbFields(
+  vendor: string,
+  invoiceNumber: string | null | undefined,
+  config?: { qbTransactionType?: string | null; qbDebitAccount?: string | null; qbCreditAccount?: string | null },
+) {
   return {
     qbVendorName: vendor.trim() || null,
-    qbTransactionType: "bill" as const,
-    qbDebitAccount: "Inventory Asset" as const,
-    qbCreditAccount: "Accounts Payable" as const,
+    qbTransactionType: (config?.qbTransactionType || "bill") as string,
+    qbDebitAccount: (config?.qbDebitAccount || "Inventory Asset") as string,
+    qbCreditAccount: (config?.qbCreditAccount || "Accounts Payable") as string,
     qbInvoiceNumber: invoiceNumber ?? null,
   };
 }

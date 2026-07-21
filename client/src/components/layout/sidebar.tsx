@@ -20,6 +20,7 @@ import {
   FileText,
   UserCog,
   LogOut,
+  Plug,
 } from "lucide-react";
 
 interface CompanyOption {
@@ -124,6 +125,21 @@ export default function Sidebar() {
               )}>
                 <UserCog className="w-4 h-4 flex-shrink-0" />
                 <span>Users</span>
+              </Link>
+            </li>
+          )}
+
+          {/* Integrations — admin + super_admin only */}
+          {isAdminOrSuper && (
+            <li>
+              <Link href="/integrations" className={cn(
+                "flex items-center space-x-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors",
+                location === "/integrations"
+                  ? "sidebar-active" 
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
+              )}>
+                <Plug className="w-4 h-4 flex-shrink-0" />
+                <span>Integrations</span>
               </Link>
             </li>
           )}

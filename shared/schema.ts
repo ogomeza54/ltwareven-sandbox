@@ -568,6 +568,36 @@ export type InsertInventoryCountSession = z.infer<typeof insertInventoryCountSes
 export type InventoryCountItem = typeof inventoryCountItems.$inferSelect;
 export type InsertInventoryCountItem = z.infer<typeof insertInventoryCountItemSchema>;
 
+// Company Integrations — per-company config for external accounting software
+export const companyIntegrations = pgTable("company_integrations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  companyId: varchar("company_id").notNull().references(() => companies.id),
+  provider: text("provider").notNull(), // 'quickbooks' | 'xero' | 'freshbooks'
+  isEnabled: boolean("is_enabled").notNull().default(false),
+  qbTransactionType: text("qb_transaction_type").default("bill"),
+  qbDebitAccount: text("qb_debit_account").default("Inventory Asset"),
+  qbCreditAccount: text("qb_credit_account").default("Accounts Payable"),
+  oauthAccessToken: text("oauth_access_token"),
+  oauthRefreshToken: text("oauth_refresh_token"),
+  oauthExpiresAt: timestamp("oauth_expires_at"),
+  oauthRealmId: text("oauth_realm_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("company_integrations_company_provider_idx").on(table.companyId, table.provider),
+]);
+
+export const companyIntegrationsRelations = relations(companyIntegrations, ({ one }) => ({
+  company: one(companies, { fields: [companyIntegrations.companyId], references: [companies.id] }),
+}));
+
+export const insertCompanyIntegrationSchema = createInsertSchema(companyIntegrations).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+
+export type CompanyIntegration = typeof companyIntegrations.$inferSelect;
+export type InsertCompanyIntegration = z.infer<typeof insertCompanyIntegrationSchema>;
+
 // Admin Audit Log — tracks super admin company switches for accountability
 export const adminAuditLog = pgTable("admin_audit_log", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

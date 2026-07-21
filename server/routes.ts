@@ -460,6 +460,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Integration config — admin + super_admin only
+  app.get("/api/integrations", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { companyId, role } = req.userContext;
+      if (!["admin", "super_admin"].includes(role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const integrations = await storage.getIntegrationsByCompany(companyId);
+      res.json(integrations);
+    } catch (error) {
+      console.error("Failed to fetch integrations:", error);
+      res.status(500).json({ message: "Failed to fetch integrations" });
+    }
+  });
+
+  app.put("/api/integrations/:provider", isAuthenticated, withCompanyContext, async (req: any, res) => {
+    try {
+      const { companyId, role } = req.userContext;
+      if (!["admin", "super_admin"].includes(role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const { provider } = req.params;
+      const allowed = ["quickbooks", "xero", "freshbooks"];
+      if (!allowed.includes(provider)) {
+        return res.status(400).json({ message: "Unknown integration provider" });
+      }
+      const { isEnabled, qbTransactionType, qbDebitAccount, qbCreditAccount } = req.body;
+      const updated = await storage.upsertIntegrationConfig(provider, {
+        isEnabled: typeof isEnabled === "boolean" ? isEnabled : false,
+        qbTransactionType: qbTransactionType || null,
+        qbDebitAccount: qbDebitAccount || null,
+        qbCreditAccount: qbCreditAccount || null,
+      }, companyId);
+      res.json(updated);
+    } catch (error) {
+      console.error("Failed to update integration:", error);
+      res.status(500).json({ message: "Failed to update integration" });
+    }
+  });
+
   // Notifications — aggregates live alerts for the bell icon
   app.get("/api/notifications", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
