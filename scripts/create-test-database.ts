@@ -11,8 +11,20 @@ const parsedUrl = new URL(testDatabaseUrl);
 if (!["localhost", "127.0.0.1"].includes(parsedUrl.hostname)) {
   throw new Error("TEST_DATABASE_URL must target local PostgreSQL");
 }
+for (const parameter of ["host", "hostaddr", "service"]) {
+  if (parsedUrl.searchParams.has(parameter)) {
+    throw new Error(
+      `TEST_DATABASE_URL forbids PostgreSQL connection override "${parameter}"`,
+    );
+  }
+}
 
 const databaseName = parsedUrl.pathname.slice(1);
+if (databaseName !== "talavera_invoice_test") {
+  throw new Error(
+    "TEST_DATABASE_URL must target the exact database talavera_invoice_test",
+  );
+}
 if (!/^[a-zA-Z0-9_]+$/.test(databaseName)) {
   throw new Error("TEST_DATABASE_URL contains an invalid database name");
 }

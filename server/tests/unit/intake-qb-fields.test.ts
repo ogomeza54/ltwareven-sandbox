@@ -18,7 +18,7 @@ import {
   buildIntakeQbFields,
   assertQbFieldsComplete,
   buildLineItemInsertValues,
-} from "../storage.js";
+} from "../../modules/inventory-receiving/inventory-intake-mappers.js";
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ const SAMPLE_ITEM = {
 };
 
 const COMPANY_ID = "company-test-001";
-const INTAKE_ID  = "intake-test-001";
+const INTAKE_ID = "intake-test-001";
 
 // ─── buildIntakeQbFields ──────────────────────────────────────────────────────
 
@@ -52,13 +52,21 @@ describe("buildIntakeQbFields", () => {
 
   test("invoice number null → writes null, not undefined", () => {
     const fields = buildIntakeQbFields("Vendor Co", null);
-    assert.equal(fields.qbInvoiceNumber, null, "null input must yield null, not undefined");
+    assert.equal(
+      fields.qbInvoiceNumber,
+      null,
+      "null input must yield null, not undefined",
+    );
     assert.notEqual(fields.qbInvoiceNumber, undefined);
   });
 
   test("invoice number undefined → writes null, not undefined", () => {
     const fields = buildIntakeQbFields("Vendor Co", undefined);
-    assert.equal(fields.qbInvoiceNumber, null, "undefined input must yield null");
+    assert.equal(
+      fields.qbInvoiceNumber,
+      null,
+      "undefined input must yield null",
+    );
     assert.notEqual(fields.qbInvoiceNumber, undefined);
   });
 
@@ -111,7 +119,11 @@ describe("assertQbFieldsComplete", () => {
   test("all four hardcoded fields survive the completeness check", () => {
     const fields = buildIntakeQbFields("Any Vendor", null);
     const result = assertQbFieldsComplete(fields);
-    assert.equal(result, undefined, "assertQbFieldsComplete returns void on success");
+    assert.equal(
+      result,
+      undefined,
+      "assertQbFieldsComplete returns void on success",
+    );
   });
 });
 
@@ -126,35 +138,62 @@ describe("buildLineItemInsertValues — the function createInventoryIntake uses 
     assertQbFieldsComplete(qbFields); // confirms header is valid
 
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
-    assert.notEqual(record.qbTransactionType, null, "qbTransactionType must not be null");
-    assert.notEqual(record.qbDebitAccount,    null, "qbDebitAccount must not be null");
-    assert.notEqual(record.qbCreditAccount,   null, "qbCreditAccount must not be null");
-    assert.notEqual(record.qbVendorName,      null, "qbVendorName must not be null");
+    assert.notEqual(
+      record.qbTransactionType,
+      null,
+      "qbTransactionType must not be null",
+    );
+    assert.notEqual(
+      record.qbDebitAccount,
+      null,
+      "qbDebitAccount must not be null",
+    );
+    assert.notEqual(
+      record.qbCreditAccount,
+      null,
+      "qbCreditAccount must not be null",
+    );
+    assert.notEqual(record.qbVendorName, null, "qbVendorName must not be null");
 
     assert.notEqual(record.qbTransactionType, undefined);
-    assert.notEqual(record.qbDebitAccount,    undefined);
-    assert.notEqual(record.qbCreditAccount,   undefined);
-    assert.notEqual(record.qbVendorName,      undefined);
+    assert.notEqual(record.qbDebitAccount, undefined);
+    assert.notEqual(record.qbCreditAccount, undefined);
+    assert.notEqual(record.qbVendorName, undefined);
   });
 
   test("QB field values on the line item exactly match the intake header", () => {
     const qbFields = buildIntakeQbFields("Fleet Supply Co", "FSC-777");
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
     assert.equal(record.qbTransactionType, "bill");
-    assert.equal(record.qbDebitAccount,    "Inventory Asset");
-    assert.equal(record.qbCreditAccount,   "Accounts Payable");
-    assert.equal(record.qbVendorName,      "Fleet Supply Co");
-    assert.equal(record.qbInvoiceNumber,   "FSC-777");
+    assert.equal(record.qbDebitAccount, "Inventory Asset");
+    assert.equal(record.qbCreditAccount, "Accounts Payable");
+    assert.equal(record.qbVendorName, "Fleet Supply Co");
+    assert.equal(record.qbInvoiceNumber, "FSC-777");
   });
 
   test("qbInvoiceNumber on the line item is null (not undefined) when intake has no invoice number", () => {
     const qbFields = buildIntakeQbFields("Fleet Supply Co", null);
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
     assert.equal(record.qbInvoiceNumber, null, "must be null, not undefined");
     assert.notEqual(record.qbInvoiceNumber, undefined);
@@ -162,28 +201,69 @@ describe("buildLineItemInsertValues — the function createInventoryIntake uses 
 
   test("every line item in a multi-item intake has non-null QB fields", () => {
     const items = [
-      { partNameSnapshot: "Oil Filter", qty: 2, unitCost: "8.00",  lineTotal: "16.00" },
-      { partNameSnapshot: "Brake Pad",  qty: 4, unitCost: "25.00", lineTotal: "100.00" },
-      { partNameSnapshot: "Air Filter", qty: 1, unitCost: "15.00", lineTotal: "15.00" },
+      {
+        partNameSnapshot: "Oil Filter",
+        qty: 2,
+        unitCost: "8.00",
+        lineTotal: "16.00",
+      },
+      {
+        partNameSnapshot: "Brake Pad",
+        qty: 4,
+        unitCost: "25.00",
+        lineTotal: "100.00",
+      },
+      {
+        partNameSnapshot: "Air Filter",
+        qty: 1,
+        unitCost: "15.00",
+        lineTotal: "15.00",
+      },
     ];
 
     const qbFields = buildIntakeQbFields("Parts R Us", null);
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
 
     for (const item of items) {
-      const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, item, COMPANY_ID);
+      const record = buildLineItemInsertValues(
+        INTAKE_ID,
+        simulatedIntake,
+        item,
+        COMPANY_ID,
+      );
 
-      assert.notEqual(record.qbTransactionType, null, `${item.partNameSnapshot}: qbTransactionType must not be null`);
-      assert.notEqual(record.qbDebitAccount,    null, `${item.partNameSnapshot}: qbDebitAccount must not be null`);
-      assert.notEqual(record.qbCreditAccount,   null, `${item.partNameSnapshot}: qbCreditAccount must not be null`);
-      assert.notEqual(record.qbVendorName,      null, `${item.partNameSnapshot}: qbVendorName must not be null`);
+      assert.notEqual(
+        record.qbTransactionType,
+        null,
+        `${item.partNameSnapshot}: qbTransactionType must not be null`,
+      );
+      assert.notEqual(
+        record.qbDebitAccount,
+        null,
+        `${item.partNameSnapshot}: qbDebitAccount must not be null`,
+      );
+      assert.notEqual(
+        record.qbCreditAccount,
+        null,
+        `${item.partNameSnapshot}: qbCreditAccount must not be null`,
+      );
+      assert.notEqual(
+        record.qbVendorName,
+        null,
+        `${item.partNameSnapshot}: qbVendorName must not be null`,
+      );
     }
   });
 
   test("intake with vendor but no invoice number produces null (not undefined) on every line item", () => {
     const qbFields = buildIntakeQbFields("Vendor Inc", undefined);
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
     assert.strictEqual(record.qbInvoiceNumber, null);
   });
@@ -191,7 +271,12 @@ describe("buildLineItemInsertValues — the function createInventoryIntake uses 
   test("inventoryIntakeId on the line item matches the intake id", () => {
     const qbFields = buildIntakeQbFields("Vendor Inc", "INV-X");
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
     assert.equal(record.inventoryIntakeId, INTAKE_ID);
   });
@@ -199,7 +284,12 @@ describe("buildLineItemInsertValues — the function createInventoryIntake uses 
   test("companyId on the line item matches the intake companyId", () => {
     const qbFields = buildIntakeQbFields("Vendor Inc", "INV-X");
     const simulatedIntake = { id: INTAKE_ID, ...qbFields };
-    const record = buildLineItemInsertValues(INTAKE_ID, simulatedIntake, SAMPLE_ITEM, COMPANY_ID);
+    const record = buildLineItemInsertValues(
+      INTAKE_ID,
+      simulatedIntake,
+      SAMPLE_ITEM,
+      COMPANY_ID,
+    );
 
     assert.equal(record.companyId, COMPANY_ID);
   });
@@ -207,10 +297,7 @@ describe("buildLineItemInsertValues — the function createInventoryIntake uses 
   test("missing vendor is caught before line items are built (assertQbFieldsComplete throws first)", () => {
     const qbFields = buildIntakeQbFields("", null);
 
-    assert.throws(
-      () => assertQbFieldsComplete(qbFields),
-      /Cannot save intake/,
-    );
+    assert.throws(() => assertQbFieldsComplete(qbFields), /Cannot save intake/);
 
     // The throw happens BEFORE buildLineItemInsertValues is ever called,
     // guaranteeing null QB fields can never reach the DB.

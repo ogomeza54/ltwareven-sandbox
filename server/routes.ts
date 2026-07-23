@@ -14,6 +14,7 @@ import { z } from "zod";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { createInventoryIntakeHandler } from "./modules/inventory-receiving/inventory-intake-route";
 
 // Configure multer for file uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -1033,84 +1034,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/inventory/intakes", isAuthenticated, withCompanyContext, async (req: any, res) => {
-    try {
-      const { items, ...headerRaw } = req.body;
-
-      if (!headerRaw.vendor || !headerRaw.vendor.trim()) {
-        return res.status(400).json({ message: "Vendor is required" });
-      }
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ message: "At least one line item is required" });
-      }
-
-      // Validate items — name and quantity required; partId optional (new parts are auto-created)
-      for (const item of items) {
-        if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
-          return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
-        }
-        if (item.itemType && item.itemType !== "consumable" && item.itemType !== "inventory") {
-          return res.status(400).json({ message: "itemType must be 'consumable' or 'inventory'" });
-        }
-      }
-
-      // Validate that any supplied groupId/subgroupId values belong to this company
-      // and that each subgroup belongs to its stated group
-      const placements = items
-        .filter((i: any) => i.groupId || i.subgroupId)
-        .map((i: any) => ({ groupId: i.groupId || undefined, subgroupId: i.subgroupId || undefined }));
-      if (placements.length > 0) {
-        try {
-          await storage.validateCatalogPlacements(placements, req.userContext.companyId);
-        } catch (err: any) {
-          return res.status(400).json({ message: err.message ?? "Invalid catalog placement" });
-        }
-      }
-
-      // Calculate reconciliation status
-      const calculatedTotal =
-        Number(headerRaw.subtotal || 0) +
-        Number(headerRaw.taxAmount || 0) +
-        Number(headerRaw.deliveryFee || 0);
-      const enteredTotal = Number(headerRaw.totalAmount || 0);
-      const diff = Math.abs(calculatedTotal - enteredTotal);
-      const reconciliationStatus =
-        enteredTotal === 0
-          ? "warning"
-          : diff <= 0.01
-          ? "matched"
-          : "warning";
-
-      const header = {
-        vendor: headerRaw.vendor.trim(),
-        invoiceNumber: headerRaw.invoiceNumber || null,
-        invoiceDate: headerRaw.invoiceDate ? new Date(headerRaw.invoiceDate) : null,
-        subtotal: String(headerRaw.subtotal || "0"),
-        taxAmount: String(headerRaw.taxAmount || "0"),
-        deliveryFee: String(headerRaw.deliveryFee || "0"),
-        totalAmount: String(headerRaw.totalAmount || "0"),
-        reconciliationStatus,
-        notes: headerRaw.notes || null,
-        quickbooksSyncStatus: "not_synced",
-        quickbooksId: null,
-        quickbooksLastSyncedAt: null,
-        externalReferenceNumber: headerRaw.externalReferenceNumber || null,
-        invoicePhotoUrl: headerRaw.invoicePhotoUrl || null,
-      };
-
-      const intake = await storage.createInventoryIntake(
-        header,
-        items,
-        req.userContext.companyId,
-        req.userContext.userId
-      );
-
-      res.status(201).json(intake);
-    } catch (error) {
-      console.error("Failed to create inventory intake:", error);
-      res.status(400).json({ message: "Failed to create inventory intake", error: (error as any).message });
-    }
-  });
+  app.post(
+    "/api/inventory/intakes",
+    isAuthenticated,
+    withCompanyContext,
+    createInventoryIntakeHandler(storage),
+  );
 
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {
