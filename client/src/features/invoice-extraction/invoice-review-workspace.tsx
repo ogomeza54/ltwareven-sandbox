@@ -3,7 +3,10 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Link2,
+  PackagePlus,
   RotateCcw,
+  TriangleAlert,
   ZoomIn,
   ZoomOut,
   Plus,
@@ -320,6 +323,14 @@ export function InvoiceReviewWorkspace({
       setWorkspace(saved);
       linesRef.current = saved.lines;
       setLines(saved.lines);
+      if (match.decision === "existing") {
+        setNewPartDraft((value) => {
+          const next = { ...value };
+          delete next[lineId];
+          return next;
+        });
+      }
+      setCandidates((value) => ({ ...value, [lineId]: [] }));
       setSaveState("saved");
       await onDraftChanged?.();
     } catch (caught) {
@@ -608,16 +619,45 @@ export function InvoiceReviewWorkspace({
                 ) : null}
               </div>
               <div className="space-y-2 border-t border-border pt-2 md:col-span-2 lg:col-span-6">
+                <div
+                  role="status"
+                  aria-label={`Stock resolution for invoice line ${index + 1}`}
+                  className={`flex items-start gap-3 rounded-md border p-3 ${
+                    line.match.decision === "existing" && line.match.selectedPart
+                      ? "border-green-500/50 bg-green-500/10"
+                      : line.match.decision === "new" && line.match.proposedNewPart
+                        ? "border-amber-500/50 bg-amber-500/10"
+                        : "border-destructive/50 bg-destructive/10"
+                  }`}
+                >
+                  {line.match.decision === "existing" && line.match.selectedPart ? (
+                    <Link2 className="mt-0.5 h-5 w-5 shrink-0 text-green-500" aria-hidden="true" />
+                  ) : line.match.decision === "new" && line.match.proposedNewPart ? (
+                    <PackagePlus className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" aria-hidden="true" />
+                  ) : (
+                    <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
+                  )}
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {line.match.decision === "existing" && line.match.selectedPart
+                        ? "Linked to existing stock"
+                        : line.match.decision === "new" && line.match.proposedNewPart
+                          ? "New stock part will be created"
+                          : "Not linked to stock"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {line.match.decision === "existing" && line.match.selectedPart
+                        ? `Linked to ${line.match.selectedPart.name} · Part #${line.match.selectedPart.partNumber || "No reference"}`
+                        : line.match.decision === "new" && line.match.proposedNewPart
+                          ? `${line.match.proposedNewPart.name} · Part #${line.match.proposedNewPart.partNumber} · Created only after final confirmation`
+                          : "Choose an existing inventory part or prepare a new one before confirmation."}
+                    </p>
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium">Catalog resolution</p>
-                    <p className="text-xs text-muted-foreground">
-                      {line.match.decision === "existing" && line.match.selectedPart
-                        ? `Linked to ${line.match.selectedPart.name} · ${line.match.selectedPart.partNumber}`
-                        : line.match.decision === "new" && line.match.proposedNewPart
-                          ? `New part prepared: ${line.match.proposedNewPart.name} · not created yet`
-                          : "Human selection required before confirmation."}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Search the current inventory or choose to create a part.</p>
                   </div>
                   {!readOnly && !line.id.startsWith("new-") ? (
                     <div className="flex flex-1 flex-wrap justify-end gap-2">
@@ -701,7 +741,7 @@ export function InvoiceReviewWorkspace({
                     ))}
                   </ul>
                 ) : null}
-                {newPartDraft[line.id] ? (
+                {newPartDraft[line.id] && line.match.decision !== "existing" ? (
                   <div className="grid gap-2 rounded border border-amber-500/40 p-2 sm:grid-cols-2 lg:grid-cols-3">
                     <div>
                       <Label htmlFor={`new-part-${line.id}-name`}>New part name</Label>

@@ -850,10 +850,15 @@ test("AI extraction is polled and stops at a human review result without stock w
   await vendor.blur();
   await expect.poll(() => state.reviewSaves).toBeGreaterThan(0);
   expect(state.reviewHeader.vendorName).toBe("Corrected Vendor");
+  await expect(page.getByText("Not linked to stock")).toBeVisible();
+  await page.getByRole("button", { name: "Prepare new part" }).click();
+  await expect(page.getByLabel("New part name")).toBeVisible();
   await page.getByRole("button", { name: "Find matches" }).click();
   await expect(page.getByText("Score 95/100")).toBeVisible();
   await page.getByRole("button", { name: "Select" }).click();
+  await expect(page.getByText("Linked to existing stock")).toBeVisible();
   await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  await expect(page.getByLabel("New part name")).toHaveCount(0);
   expect(state.selectedPartId).toBe(
     "00000000-0000-4000-8000-000000000030",
   );
