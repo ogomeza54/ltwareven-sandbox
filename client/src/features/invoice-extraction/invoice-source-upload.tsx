@@ -71,6 +71,7 @@ export function InvoiceSourceUpload({
   const fileInput = useRef<HTMLInputElement>(null);
   const preview = useRef<HTMLDivElement>(null);
   const pendingRef = useRef<PendingInvoiceCapture | null>(null);
+  const displayedDraftId = useRef<string | null>(null);
   const totalPages = assets.reduce(
     (sum, asset) => sum + (asset.pageCount ?? 0),
     0,
@@ -108,6 +109,18 @@ export function InvoiceSourceUpload({
     setExtraction(null);
     setExtractionError(null);
   }, [companyId]);
+
+  useEffect(() => {
+    if (!draft?.id || displayedDraftId.current === draft.id) return;
+    const replacedPreviousDraft = displayedDraftId.current !== null;
+    displayedDraftId.current = draft.id;
+    if (!replacedPreviousDraft) return;
+    setReplacementAsset(null);
+    setUploadFailed(false);
+    setLocalError(null);
+    setExtraction(null);
+    setExtractionError(null);
+  }, [draft?.id]);
 
   useEffect(() => {
     if (!draft?.activeRunId || extraction?.id === draft.activeRunId) return;
@@ -268,6 +281,7 @@ export function InvoiceSourceUpload({
       ) : null}
       {draft && ["needs_review", "rejected"].includes(draft.status) ? (
         <InvoiceReviewWorkspace
+          key={draft.id}
           draftId={draft.id}
           readOnly={draft.status === "rejected"}
           onDraftChanged={refresh}

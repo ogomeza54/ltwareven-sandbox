@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const draftId = "00000000-0000-4000-8000-000000000001";
+const freshDraftId = "00000000-0000-4000-8000-000000000101";
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
   "base64",
@@ -50,6 +51,8 @@ interface MockState {
   uploadAttempts: number;
   failFirstUpload: boolean;
   intakeSubmissions: number;
+  draftCreations: number;
+  freshDraftAssets: string[];
   assets: Array<{
     id: string;
     displayName: string;
@@ -124,6 +127,8 @@ async function mockApplication(
     uploadAttempts: 0,
     failFirstUpload,
     intakeSubmissions: 0,
+    draftCreations: 0,
+    freshDraftAssets: [],
     assets: [
       {
         id: "00000000-0000-4000-8000-000000000002",
@@ -173,6 +178,23 @@ async function mockApplication(
     }
     if (path === "/api/invoice-drafts" && request.method() === "GET") {
       return json(route, [draft(state)]);
+    }
+    if (path === "/api/invoice-drafts" && request.method() === "POST") {
+      state.draftCreations += 1;
+      return json(route, freshDraft(state), 201);
+    }
+    if (path === `/api/invoice-drafts/${freshDraftId}`) {
+      return json(route, freshDraft(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${freshDraftId}/assets` &&
+      request.method() === "POST"
+    ) {
+      const multipart = request.postDataBuffer()?.toString("utf8") ?? "";
+      const uploadedName =
+        /filename="([^"]+)"/.exec(multipart)?.[1] ?? "new-invoice.png";
+      state.freshDraftAssets.push(uploadedName);
+      return json(route, freshDraft(state), 202);
     }
     if (path === `/api/invoice-drafts/${draftId}`) {
       return json(route, draft(state));
@@ -385,6 +407,35 @@ async function mockApplication(
     return json(route, []);
   });
   return state;
+}
+
+function freshDraft(state: MockState) {
+  const timestamp = "2026-07-23T12:05:00.000Z";
+  return {
+    id: freshDraftId,
+    status: state.freshDraftAssets.length ? "uploaded" : "draft",
+    revision: state.freshDraftAssets.length,
+    activeRunId: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastActivityAt: timestamp,
+    source: state.freshDraftAssets.length
+      ? {
+          totalPages: state.freshDraftAssets.length,
+          assets: state.freshDraftAssets.map((displayName, index) => ({
+            id: `00000000-0000-4000-8000-${String(102 + index).padStart(12, "0")}`,
+            displayName,
+            checksumSha256: pngChecksum,
+            detectedType: "image/png",
+            byteSize: png.length,
+            pageCount: 1,
+            position: index + 1,
+            state: "Saved",
+            createdAt: timestamp,
+          })),
+        }
+      : null,
+  };
 }
 
 function extractionRun(
@@ -811,6 +862,19 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(page.getByText("Rejected: Document is not a supplier invoice")).toBeVisible();
   expect(state.reviewDecision).toBe("rejected");
   expect(state.intakeSubmissions).toBe(0);
+
+  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+    name: "replacement-invoice.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await page.getByRole("button", { name: /Use document/ }).click();
+  await expect(page.getByText("replacement-invoice.png saved.")).toBeVisible();
+  await expect(
+    page.getByText("Rejected: Document is not a supplier invoice"),
+  ).toHaveCount(0);
+  expect(state.draftCreations).toBe(1);
+  expect(state.freshDraftAssets).toEqual(["replacement-invoice.png"]);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
 });
 

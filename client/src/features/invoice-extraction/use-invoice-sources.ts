@@ -8,6 +8,7 @@ import type {
 import {
   createInvoiceDraft,
   deleteInvoiceSource,
+  invoiceDraftAcceptsSourceUpload,
   getInvoiceDraft,
   invoiceFileChecksum,
   listInvoiceDrafts,
@@ -125,7 +126,9 @@ export function useInvoiceSources(open: boolean) {
     try {
       let current: InvoiceDraftDto;
       try {
-        current = draftRef.current ?? (await createInvoiceDraft());
+        current = invoiceDraftAcceptsSourceUpload(draftRef.current)
+          ? draftRef.current
+          : await createInvoiceDraft();
         if (!updateDraft(current, operationTenant)) return null;
       } catch (caught) {
         try {

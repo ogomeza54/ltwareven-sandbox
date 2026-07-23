@@ -38,7 +38,6 @@ function LocalPdfPreview({ file }: { file: File }) {
         GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
         const loadingTask = getDocument({
           data: new Uint8Array(await file.arrayBuffer()),
-          disableEval: true,
           isEvalSupported: false,
           useWorkerFetch: false,
           stopAtErrors: true,

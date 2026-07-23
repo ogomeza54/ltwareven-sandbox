@@ -6,6 +6,7 @@ import type {
 } from "@shared/invoice-extraction/contracts";
 import {
   deleteInvoiceSource,
+  invoiceDraftAcceptsSourceUpload,
   invoiceFileChecksum,
   InvoiceSourceApiError,
   listInvoiceDrafts,
@@ -94,6 +95,34 @@ test("client resume prefers a saved source over a newer empty draft", () => {
     },
   } satisfies InvoiceDraftDto;
   assert.equal(selectResumableInvoiceDraft([empty, saved])?.id, saved.id);
+});
+
+test("client starts a fresh draft when the previous invoice is terminal or under review", () => {
+  assert.equal(invoiceDraftAcceptsSourceUpload(draft), true);
+  assert.equal(
+    invoiceDraftAcceptsSourceUpload({ ...draft, status: "draft" }),
+    true,
+  );
+  for (const status of [
+    "needs_review",
+    "rejected",
+    "confirmed",
+    "canceled",
+  ] as const) {
+    assert.equal(
+      invoiceDraftAcceptsSourceUpload({ ...draft, status }),
+      false,
+      status,
+    );
+  }
+  assert.equal(
+    invoiceDraftAcceptsSourceUpload({
+      ...draft,
+      activeRunId: "00000000-0000-4000-8000-000000000099",
+    }),
+    false,
+  );
+  assert.equal(invoiceDraftAcceptsSourceUpload(null), false);
 });
 
 test("client upload announcements remove paths, controls and bidi overrides", () => {

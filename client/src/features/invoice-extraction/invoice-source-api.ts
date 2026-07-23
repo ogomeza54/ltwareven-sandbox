@@ -109,6 +109,16 @@ export function selectResumableInvoiceDraft(
   );
 }
 
+export function invoiceDraftAcceptsSourceUpload(
+  draft: InvoiceDraftDto | null,
+): draft is InvoiceDraftDto {
+  return (
+    draft !== null &&
+    ["draft", "uploaded"].includes(draft.status) &&
+    draft.activeRunId === null
+  );
+}
+
 export async function startInvoiceExtraction(
   draft: InvoiceDraftDto,
 ): Promise<InvoiceExtractionRunDto> {
