@@ -149,6 +149,8 @@ export const invoiceErrorCodeSchema = z.enum([
   "INVOICE_PROVIDER_UNAVAILABLE",
   "INVOICE_PROVIDER_INVALID_OUTPUT",
   "INVOICE_WEBHOOK_INVALID",
+  "INVOICE_NUMERIC_INVALID",
+  "INVOICE_RECONCILIATION_REQUIRED",
 ]);
 export type InvoiceErrorCode = z.infer<typeof invoiceErrorCodeSchema>;
 
@@ -189,6 +191,10 @@ const safeMessages: Record<InvoiceErrorCode, string> = {
   INVOICE_PROVIDER_INVALID_OUTPUT:
     "The invoice could not be read reliably. Review it manually or try again.",
   INVOICE_WEBHOOK_INVALID: "The provider callback could not be verified.",
+  INVOICE_NUMERIC_INVALID:
+    "An invoice quantity or amount has an invalid value or precision.",
+  INVOICE_RECONCILIATION_REQUIRED:
+    "Correct the invoice totals before completing line review.",
 };
 
 export class InvoiceDomainError extends Error {
@@ -332,12 +338,59 @@ export const invoiceReviewWorkspaceDtoSchema = z.object({
   finalHeader: invoiceFinalHeaderSchema,
   reviewedFields: z.array(invoiceHeaderFieldSchema),
   issues: z.array(invoiceReviewIssueSchema),
+  lines: z.array(
+    z.object({
+      id: z.string().uuid(),
+      sourceLineIndex: z.number().int().nonnegative().nullable(),
+      position: z.number().int().positive(),
+      description: z.string().nullable(),
+      vendorPartNumber: z.string().nullable(),
+      quantity: z.string().nullable(),
+      unitCost: z.string().nullable(),
+      calculatedLineTotal: z.string().nullable(),
+      classification: z.enum(["inventory", "consumable", "unknown"]),
+      proposed: invoiceProposalSchema.shape.lines.element.nullable(),
+    }),
+  ),
+  reconciliation: z.object({
+    decision: z.enum(["draft", "approved"]),
+    complete: z.boolean(),
+    withinTolerance: z.boolean(),
+    observedSubtotal: z.string().nullable(),
+    observedTax: z.string().nullable(),
+    observedFreight: z.string().nullable(),
+    observedTotal: z.string().nullable(),
+    calculatedSubtotal: z.string().nullable(),
+    calculatedTax: z.string().nullable(),
+    calculatedFreight: z.string().nullable(),
+    calculatedTotal: z.string().nullable(),
+    difference: z.string().nullable(),
+  }),
   source: invoiceSourceDtoSchema,
   updatedAt: z.string().datetime(),
 });
 export type InvoiceReviewWorkspaceDto = z.infer<
   typeof invoiceReviewWorkspaceDtoSchema
 >;
+
+const invoiceEditableLineSchema = z
+  .object({
+    id: z.string().uuid().nullable(),
+    description: z.string().trim().max(500).nullable(),
+    vendorPartNumber: z.string().trim().max(160).nullable(),
+    quantity: z.string().max(40).nullable(),
+    unitCost: z.string().max(40).nullable(),
+    classification: z.enum(["inventory", "consumable", "unknown"]),
+  })
+  .strict();
+
+export const updateInvoiceLinesReviewSchema = z
+  .object({
+    revision: invoiceDraftRevisionSchema,
+    lines: z.array(invoiceEditableLineSchema).max(500),
+    decision: z.enum(["draft", "approved"]),
+  })
+  .strict();
 
 export const updateInvoiceHeaderReviewSchema = z
   .object({

@@ -28,6 +28,12 @@ const invoiceConfigSchema = z.object({
   workerMaxAttempts: positiveInteger(3).pipe(z.number().max(10)),
   workerLeaseSeconds: positiveInteger(120).pipe(z.number().max(3600)),
   workerPollSeconds: positiveInteger(15).pipe(z.number().max(300)),
+  reconciliationToleranceCents: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .max(100)
+    .default(1),
   provider: z.literal("openai").default("openai"),
   openaiApiKey: z.string().min(1).optional(),
   openaiWebhookSecret: z.string().min(1).optional(),
@@ -68,6 +74,8 @@ export function loadInvoiceConfig(
     workerMaxAttempts: environment.INVOICE_WORKER_MAX_ATTEMPTS,
     workerLeaseSeconds: environment.INVOICE_WORKER_LEASE_SECONDS,
     workerPollSeconds: environment.INVOICE_WORKER_POLL_SECONDS,
+    reconciliationToleranceCents:
+      environment.INVOICE_RECONCILIATION_TOLERANCE_CENTS,
     provider: environment.INVOICE_EXTRACTION_PROVIDER,
     openaiApiKey: environment.OPENAI_API_KEY,
     openaiWebhookSecret: environment.OPENAI_WEBHOOK_SECRET,

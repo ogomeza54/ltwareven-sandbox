@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -325,6 +326,139 @@ export const invoiceReviewHeaders = pgTable(
       columns: [table.updatedByCompanyId, table.updatedByUserId],
       foreignColumns: [users.companyId, users.id],
       name: "invoice_review_headers_updater_fk",
+    }),
+  ],
+);
+
+export const invoiceReviewLines = pgTable(
+  "invoice_review_lines",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    sourceLineIndex: integer("source_line_index"),
+    position: integer("position").notNull(),
+    description: text("description"),
+    vendorPartNumber: text("vendor_part_number"),
+    quantity: numeric("quantity", { precision: 20, scale: 6 }),
+    unitCost: numeric("unit_cost", { precision: 20, scale: 4 }),
+    classification: varchar("classification", { length: 16 })
+      .default("unknown")
+      .notNull(),
+    revision: integer("revision").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("invoice_review_lines_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_review_lines_company_draft_position_unique").on(
+      table.companyId,
+      table.draftId,
+      table.position,
+    ),
+    unique("invoice_review_lines_company_draft_source_unique").on(
+      table.companyId,
+      table.draftId,
+      table.sourceLineIndex,
+    ),
+    index("invoice_review_lines_company_draft_idx").on(
+      table.companyId,
+      table.draftId,
+      table.position,
+    ),
+    check("invoice_review_lines_position_positive", sql`${table.position} > 0`),
+    check(
+      "invoice_review_lines_source_index_nonnegative",
+      sql`${table.sourceLineIndex} is null or ${table.sourceLineIndex} >= 0`,
+    ),
+    check(
+      "invoice_review_lines_quantity_positive",
+      sql`${table.quantity} is null or ${table.quantity} > 0`,
+    ),
+    check(
+      "invoice_review_lines_unit_cost_nonnegative",
+      sql`${table.unitCost} is null or ${table.unitCost} >= 0`,
+    ),
+    check(
+      "invoice_review_lines_classification_valid",
+      sql`${table.classification} in ('inventory', 'consumable', 'unknown')`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_review_lines_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId, table.proposalId],
+      foreignColumns: [
+        invoiceExtractionProposals.companyId,
+        invoiceExtractionProposals.draftId,
+        invoiceExtractionProposals.id,
+      ],
+      name: "invoice_review_lines_proposal_fk",
+    }),
+  ],
+);
+
+export const invoiceReviewTotals = pgTable(
+  "invoice_review_totals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    decision: varchar("decision", { length: 16 }).default("draft").notNull(),
+    observedSubtotal: numeric("observed_subtotal", { precision: 20, scale: 2 }),
+    observedTax: numeric("observed_tax", { precision: 20, scale: 2 }),
+    observedFreight: numeric("observed_freight", { precision: 20, scale: 2 }),
+    observedTotal: numeric("observed_total", { precision: 20, scale: 2 }),
+    calculatedSubtotal: numeric("calculated_subtotal", { precision: 20, scale: 2 }),
+    calculatedTax: numeric("calculated_tax", { precision: 20, scale: 2 }),
+    calculatedFreight: numeric("calculated_freight", { precision: 20, scale: 2 }),
+    calculatedTotal: numeric("calculated_total", { precision: 20, scale: 2 }),
+    difference: numeric("difference", { precision: 20, scale: 2 }),
+    complete: boolean("complete").default(false).notNull(),
+    withinTolerance: boolean("within_tolerance").default(false).notNull(),
+    revision: integer("revision").default(0).notNull(),
+    updatedByCompanyId: varchar("updated_by_company_id").notNull(),
+    updatedByUserId: varchar("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_review_totals_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_review_totals_company_draft_unique").on(
+      table.companyId,
+      table.draftId,
+    ),
+    check(
+      "invoice_review_totals_decision_valid",
+      sql`${table.decision} in ('draft', 'approved')`,
+    ),
+    check("invoice_review_totals_revision_nonnegative", sql`${table.revision} >= 0`),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_review_totals_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId, table.proposalId],
+      foreignColumns: [
+        invoiceExtractionProposals.companyId,
+        invoiceExtractionProposals.draftId,
+        invoiceExtractionProposals.id,
+      ],
+      name: "invoice_review_totals_proposal_fk",
+    }),
+    foreignKey({
+      columns: [table.updatedByCompanyId, table.updatedByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_review_totals_updater_fk",
     }),
   ],
 );

@@ -6,6 +6,8 @@ import {
   RotateCcw,
   ZoomIn,
   ZoomOut,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import type {
   InvoiceFinalHeader,
@@ -20,6 +22,7 @@ import {
   privateInvoiceAssetUrl,
   rejectInvoiceReview,
   updateInvoiceHeaderReview,
+  updateInvoiceLinesReview,
 } from "./invoice-source-api";
 
 const fields: ReadonlyArray<{ key: InvoiceHeaderField; label: string }> = [
@@ -65,6 +68,10 @@ export function InvoiceReviewWorkspace({
   const [zoom, setZoom] = useState(1);
   const [issueIndex, setIssueIndex] = useState(0);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [lines, setLines] = useState<InvoiceReviewWorkspaceDto["lines"]>([]);
+  const linesRef = useRef<InvoiceReviewWorkspaceDto["lines"]>([]);
+  const lineDirty = useRef(false);
+  const lineSaving = useRef(false);
 
   useEffect(() => {
     let current = true;
@@ -77,6 +84,8 @@ export function InvoiceReviewWorkspace({
         setWorkspace(value);
         setHeader(value.finalHeader);
         setReviewed(value.reviewedFields);
+        linesRef.current = value.lines;
+        setLines(value.lines);
       })
       .catch((caught) =>
         current
@@ -112,6 +121,10 @@ export function InvoiceReviewWorkspace({
         );
         workspaceRef.current = saved;
         setWorkspace(saved);
+        if (!lineDirty.current) {
+          linesRef.current = saved.lines;
+          setLines(saved.lines);
+        }
         setSaveState("saved");
       } while (dirty.current && decision === "draft");
       await onDraftChanged?.();
@@ -145,6 +158,74 @@ export function InvoiceReviewWorkspace({
     setSaveState("idle");
   };
 
+  const flushLines = async (
+    decision: "draft" | "approved" = "draft",
+  ): Promise<boolean> => {
+    if (lineSaving.current) {
+      lineDirty.current = true;
+      return false;
+    }
+    lineSaving.current = true;
+    setSaveState("saving");
+    setError(null);
+    try {
+      do {
+        lineDirty.current = false;
+        const current = workspaceRef.current;
+        if (!current) return false;
+        const saved = await updateInvoiceLinesReview(
+          current,
+          linesRef.current.map((line) => ({
+            id: line.id.startsWith("new-") ? null : line.id,
+            description: line.description,
+            vendorPartNumber: line.vendorPartNumber,
+            quantity: line.quantity,
+            unitCost: line.unitCost,
+            classification: line.classification,
+          })),
+          decision,
+        );
+        workspaceRef.current = saved;
+        setWorkspace(saved);
+        linesRef.current = saved.lines;
+        setLines(saved.lines);
+        setSaveState("saved");
+      } while (lineDirty.current && decision === "draft");
+      await onDraftChanged?.();
+      return true;
+    } catch (caught) {
+      lineDirty.current = true;
+      setSaveState("error");
+      setError(
+        caught instanceof Error
+          ? `${caught.message} Your line edits remain on screen.`
+          : "Invoice lines could not be saved. Your edits remain on screen.",
+      );
+      return false;
+    } finally {
+      lineSaving.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!workspace || readOnly || !lineDirty.current) return;
+    const timer = window.setTimeout(() => void flushLines(), 600);
+    return () => window.clearTimeout(timer);
+  }, [lines, readOnly, workspace?.draftRevision]);
+
+  const changeLine = (
+    id: string,
+    patch: Partial<InvoiceReviewWorkspaceDto["lines"][number]>,
+  ): void => {
+    const next = linesRef.current.map((line) =>
+      line.id === id ? { ...line, ...patch } : line,
+    );
+    linesRef.current = next;
+    setLines(next);
+    lineDirty.current = true;
+    setSaveState("idle");
+  };
+
   const change = (field: InvoiceHeaderField, value: string | null): void => {
     if (!headerRef.current) return;
     const next = { ...headerRef.current, [field]: value };
@@ -172,13 +253,14 @@ export function InvoiceReviewWorkspace({
   );
 
   const goToIssue = (direction: -1 | 1): void => {
-    if (!issues.length) return;
+    const currentWorkspace = workspace;
+    if (!issues.length || !currentWorkspace) return;
     const next = (issueIndex + direction + issues.length) % issues.length;
     setIssueIndex(next);
     const field = issueField(issues[next].path);
     if (field) {
-      const sourceAssetId = workspace.proposedHeader[field].sourceAssetId;
-      const sourceIndex = workspace.source.assets.findIndex(
+      const sourceAssetId = currentWorkspace.proposedHeader[field].sourceAssetId;
+      const sourceIndex = currentWorkspace.source.assets.findIndex(
         (asset) => asset.id === sourceAssetId,
       );
       if (sourceIndex >= 0) setActiveAsset(sourceIndex);
@@ -309,6 +391,131 @@ export function InvoiceReviewWorkspace({
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div className="space-y-3 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 className="font-medium">Invoice lines</h4>
+            <p className="text-xs text-muted-foreground">
+              Line totals are recalculated by the server. Proposed values remain visible.
+            </p>
+          </div>
+          {!readOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              onClick={() => {
+                const id = `new-${Date.now()}-${linesRef.current.length}`;
+                const next = [
+                  ...linesRef.current,
+                  {
+                    id,
+                    sourceLineIndex: null,
+                    position: linesRef.current.length + 1,
+                    description: null,
+                    vendorPartNumber: null,
+                    quantity: null,
+                    unitCost: null,
+                    calculatedLineTotal: null,
+                    classification: "unknown" as const,
+                    proposed: null,
+                  },
+                ];
+                linesRef.current = next;
+                setLines(next);
+                lineDirty.current = true;
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add line
+            </Button>
+          ) : null}
+        </div>
+        <div className="space-y-3">
+          {lines.map((line, index) => (
+            <article
+              key={line.id}
+              className="grid gap-2 rounded-lg border border-border p-3 md:grid-cols-2 lg:grid-cols-6"
+              aria-label={`Invoice line ${index + 1}`}
+            >
+              <div className="lg:col-span-2">
+                <Label htmlFor={`review-line-${line.id}-description`}>Description</Label>
+                <Input id={`review-line-${line.id}-description`} value={line.description ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { description: event.target.value || null })} onBlur={() => void flushLines()} />
+                <p className="mt-1 text-xs text-muted-foreground">AI proposed: {line.proposed?.description.normalized ?? line.proposed?.description.observed ?? "Manually added"}</p>
+              </div>
+              <div>
+                <Label htmlFor={`review-line-${line.id}-part`}>Vendor part #</Label>
+                <Input id={`review-line-${line.id}-part`} value={line.vendorPartNumber ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { vendorPartNumber: event.target.value || null })} onBlur={() => void flushLines()} />
+              </div>
+              <div>
+                <Label htmlFor={`review-line-${line.id}-quantity`}>Quantity</Label>
+                <Input id={`review-line-${line.id}-quantity`} inputMode="decimal" value={line.quantity ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { quantity: event.target.value || null })} onBlur={() => void flushLines()} />
+              </div>
+              <div>
+                <Label htmlFor={`review-line-${line.id}-cost`}>Unit cost</Label>
+                <Input id={`review-line-${line.id}-cost`} inputMode="decimal" value={line.unitCost ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { unitCost: event.target.value || null })} onBlur={() => void flushLines()} />
+                <p className="mt-1 text-xs text-muted-foreground">Server line total: {line.calculatedLineTotal ?? "Incomplete"}</p>
+              </div>
+              <div>
+                <Label htmlFor={`review-line-${line.id}-type`}>Type</Label>
+                <select
+                  id={`review-line-${line.id}-type`}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={line.classification}
+                  disabled={readOnly}
+                  onChange={(event) => changeLine(line.id, { classification: event.target.value as typeof line.classification })}
+                  onBlur={() => void flushLines()}
+                >
+                  <option value="inventory">Inventory</option>
+                  <option value="consumable">Consumable</option>
+                  <option value="unknown">Needs review</option>
+                </select>
+                {!readOnly ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="mt-1 min-h-11 min-w-11"
+                    aria-label={`Remove invoice line ${index + 1}`}
+                    onClick={() => {
+                      if (line.sourceLineIndex !== null && !window.confirm("Remove this extracted invoice line?")) return;
+                      const next = linesRef.current.filter((item) => item.id !== line.id);
+                      linesRef.current = next;
+                      setLines(next);
+                      lineDirty.current = true;
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="rounded-lg border border-border p-3">
+          <h4 className="font-medium">Reconciliation</h4>
+          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            <div><dt className="text-muted-foreground">Calculated subtotal</dt><dd>{workspace.reconciliation.calculatedSubtotal ?? "Incomplete"}</dd></div>
+            <div><dt className="text-muted-foreground">Tax</dt><dd>{workspace.reconciliation.calculatedTax ?? "Incomplete"}</dd></div>
+            <div><dt className="text-muted-foreground">Freight</dt><dd>{workspace.reconciliation.calculatedFreight ?? "Incomplete"}</dd></div>
+            <div><dt className="text-muted-foreground">Calculated total</dt><dd>{workspace.reconciliation.calculatedTotal ?? "Incomplete"}</dd></div>
+            <div><dt className="text-muted-foreground">Invoice total</dt><dd>{workspace.reconciliation.observedTotal ?? "Missing"}</dd></div>
+            <div><dt className="text-muted-foreground">Difference</dt><dd>{workspace.reconciliation.difference ?? "Unknown"}</dd></div>
+          </dl>
+          <p className={`mt-2 text-sm ${workspace.reconciliation.withinTolerance ? "text-green-500" : "text-amber-500"}`} role="status">
+            {workspace.reconciliation.withinTolerance
+              ? "Amounts reconcile within the configured tolerance."
+              : "Correct missing values or the amount difference before approval."}
+          </p>
+          {!readOnly ? (
+            <Button type="button" className="mt-3 min-h-11" disabled={!workspace.reconciliation.withinTolerance || lineSaving.current} onClick={() => void flushLines("approved")}>
+              Approve lines & totals
+            </Button>
+          ) : null}
         </div>
       </div>
 

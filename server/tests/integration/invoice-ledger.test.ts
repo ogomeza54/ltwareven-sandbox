@@ -59,6 +59,14 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from invoice_review_totals where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
+    `delete from invoice_review_lines where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
     `delete from invoice_review_headers where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   ).catch(() => undefined);
@@ -101,7 +109,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 7);
+  assert.equal(journal.rowCount, 8);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -110,6 +118,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0004_invoice_attempt_ownership.sql",
     "0005_invoice_header_review.sql",
     "0006_invoice_header_review_state.sql",
+    "0007_invoice_line_review.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -158,7 +167,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 7);
+  assert.equal(journal.rows[0].count, 8);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1170,10 +1179,82 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
       "code" in error &&
       error.code === "INVOICE_DRAFT_REVISION_CONFLICT",
   );
+  const { InvoiceLineReviewService } =
+    await import("../../modules/invoice-extraction/services/invoice-line-review-service");
+  const lineReviews = new InvoiceLineReviewService();
+  const linesApproved = await lineReviews.update(
+    actorA,
+    draft.id,
+    {
+      revision: approved.draftRevision,
+      lines: [
+        {
+          id: null,
+          description: "Synthetic brake pad",
+          vendorPartNumber: "BP-TEST",
+          quantity: "2",
+          unitCost: "50.0000",
+          classification: "inventory",
+        },
+      ],
+      decision: "approved",
+    },
+    randomUUID(),
+  );
+  assert.equal(linesApproved.lines.length, 1);
+  assert.equal(linesApproved.lines[0].calculatedLineTotal, "100.00");
+  assert.equal(linesApproved.reconciliation.calculatedTotal, "100.00");
+  assert.equal(linesApproved.reconciliation.withinTolerance, true);
+  assert.equal(linesApproved.reconciliation.decision, "approved");
+  await assert.rejects(
+    lineReviews.update(actorA, draft.id, {
+      revision: linesApproved.draftRevision,
+      lines: [
+        {
+          id: linesApproved.lines[0].id,
+          description: "Synthetic brake pad",
+          vendorPartNumber: "BP-TEST",
+          quantity: "2",
+          unitCost: "49.0000",
+          classification: "inventory",
+        },
+      ],
+      decision: "approved",
+    }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_RECONCILIATION_REQUIRED",
+  );
+  const afterFailedApproval = await reviews.get(actorA, draft.id);
+  assert.equal(afterFailedApproval.draftRevision, linesApproved.draftRevision);
+  assert.equal(afterFailedApproval.lines[0].unitCost, "50.0000");
+  await assert.rejects(
+    lineReviews.update(actorA, draft.id, {
+      revision: linesApproved.draftRevision,
+      lines: [
+        {
+          id: linesApproved.lines[0].id,
+          description: "Synthetic brake pad",
+          vendorPartNumber: "BP-TEST",
+          quantity: "NaN",
+          unitCost: "50.00",
+          classification: "inventory",
+        },
+      ],
+      decision: "draft",
+    }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_NUMERIC_INVALID",
+  );
   const rejected = await reviews.reject(
     actorA,
     draft.id,
-    approved.draftRevision,
+    linesApproved.draftRevision,
     "Not a supplier invoice",
     randomUUID(),
   );

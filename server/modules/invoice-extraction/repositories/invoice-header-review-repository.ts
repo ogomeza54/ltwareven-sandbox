@@ -11,6 +11,7 @@ import {
   type InvoiceProposal,
 } from "@shared/invoice-extraction/contracts";
 import { db as applicationDatabase } from "../../../db";
+import { recalculateReviewTotals } from "./invoice-line-review-repository";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type Result<T> = { rows: T[] };
@@ -121,7 +122,7 @@ export class PostgresInvoiceHeaderReviewRepository {
       if (locked.status !== "needs_review") {
         throw new InvoiceDomainError("INVOICE_INVALID_STATE");
       }
-      const updatedReview = rows<{ revision: number }>(
+      const updatedReview = rows<{ revision: number; proposal_id: string }>(
         await tx.execute(sql`
           update invoice_review_headers
           set final_values = ${JSON.stringify(header)}::jsonb,
@@ -134,10 +135,19 @@ export class PostgresInvoiceHeaderReviewRepository {
               updated_at = now()
           where company_id = ${actor.effectiveCompanyId}
             and draft_id = ${draftId}::uuid
-          returning revision
+          returning revision, proposal_id
         `),
       )[0];
       if (!updatedReview) throw new InvoiceDomainError("INVOICE_INVALID_STATE");
+      await recalculateReviewTotals(
+        tx,
+        actor.effectiveCompanyId,
+        draftId,
+        updatedReview.proposal_id,
+        actor,
+        header,
+        "draft",
+      );
       await tx.execute(sql`
         update invoice_review_drafts
         set revision = revision + 1,

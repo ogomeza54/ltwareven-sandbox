@@ -184,6 +184,35 @@ export async function rejectInvoiceReview(
   );
 }
 
+export async function updateInvoiceLinesReview(
+  workspace: InvoiceReviewWorkspaceDto,
+  lines: Array<{
+    id: string | null;
+    description: string | null;
+    vendorPartNumber: string | null;
+    quantity: string | null;
+    unitCost: string | null;
+    classification: "inventory" | "consumable" | "unknown";
+  }>,
+  decision: "draft" | "approved" = "draft",
+): Promise<InvoiceReviewWorkspaceDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/review/lines`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: workspace.draftRevision,
+          lines,
+          decision,
+        }),
+      },
+    ),
+  );
+}
+
 export async function createInvoiceDraft(): Promise<InvoiceDraftDto> {
   return responseJson(
     await fetch("/api/invoice-drafts", {

@@ -5,6 +5,7 @@ import {
   invoiceDraftIdSchema,
   rejectInvoiceReviewSchema,
   updateInvoiceHeaderReviewSchema,
+  updateInvoiceLinesReviewSchema,
 } from "@shared/invoice-extraction/contracts";
 import { isAuthenticated } from "../../../replitAuth";
 import {
@@ -12,6 +13,7 @@ import {
   withCompanyContext,
 } from "../../../auth-context";
 import { InvoiceHeaderReviewService } from "../services/invoice-header-review-service";
+import { InvoiceLineReviewService } from "../services/invoice-line-review-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
@@ -26,6 +28,7 @@ function sendError(error: unknown, request: RequestWithId, response: Response): 
           ? 403
           : error.code === "INVOICE_DRAFT_REVISION_CONFLICT" ||
               error.code === "INVOICE_INVALID_STATE"
+              || error.code === "INVOICE_RECONCILIATION_REQUIRED"
             ? 409
             : 400;
     response.status(status).json({
@@ -46,6 +49,7 @@ function sendError(error: unknown, request: RequestWithId, response: Response): 
 export function registerInvoiceReviewRoutes(
   app: Express,
   service = new InvoiceHeaderReviewService(),
+  lineService = new InvoiceLineReviewService(),
 ): void {
   app.get(
     "/api/invoice-drafts/:draftId/review",
@@ -108,6 +112,32 @@ export function registerInvoiceReviewRoutes(
             draftId.data,
             input.data.revision,
             input.data.reason,
+            (request as RequestWithId).requestId,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.patch(
+    "/api/invoice-drafts/:draftId/review/lines",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const input = updateInvoiceLinesReviewSchema.safeParse(request.body);
+        if (!draftId.success || !input.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.json(
+          await lineService.update(
+            invoiceActorFromRequest(request),
+            draftId.data,
+            input.data,
             (request as RequestWithId).requestId,
           ),
         );

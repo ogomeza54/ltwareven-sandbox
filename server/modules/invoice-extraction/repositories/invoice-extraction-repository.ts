@@ -5,11 +5,19 @@ import {
   invoiceProposalSchema,
   type InvoiceActorContext,
   type InvoiceExtractionRunDto,
+  type InvoiceFinalHeader,
   type InvoiceProposal,
 } from "@shared/invoice-extraction/contracts";
 import { db as applicationDatabase } from "../../../db";
 import type { InvoiceConfig } from "../config/invoice-config";
 import type { InvoiceProviderResult } from "../providers/extraction-provider";
+import {
+  InvoiceNumericError,
+  moneyToCents,
+  normalizeQuantity,
+  normalizeUnitCost,
+} from "../domain/invoice-money";
+import { recalculateReviewTotals } from "./invoice-line-review-repository";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type RowResult<T> = { rows: T[] };
@@ -431,7 +439,7 @@ export class PostgresInvoiceExtractionRepository {
           key,
           value.normalized ?? value.observed,
         ]),
-      );
+      ) as InvoiceFinalHeader;
       await tx.execute(sql`
         insert into invoice_review_headers (
           company_id, draft_id, proposal_id, final_values,
@@ -445,6 +453,69 @@ export class PostgresInvoiceExtractionRepository {
         )
         on conflict (company_id, draft_id) do nothing
       `);
+      const numericOrNull = (
+        value: string | null,
+        kind: "quantity" | "unitCost" | "money",
+      ): string | null => {
+        if (value === null) return null;
+        try {
+          if (kind === "quantity") return normalizeQuantity(value);
+          if (kind === "unitCost") return normalizeUnitCost(value);
+          moneyToCents(value, "header");
+          return value;
+        } catch (error) {
+          if (error instanceof InvoiceNumericError) return null;
+          throw error;
+        }
+      };
+      for (let index = 0; index < proposal.lines.length; index += 1) {
+        const line = proposal.lines[index];
+        const description =
+          line.description.normalized ?? line.description.observed;
+        const vendorPartNumber =
+          line.vendorPartNumber.normalized ?? line.vendorPartNumber.observed;
+        const quantity = numericOrNull(
+          line.quantity.normalized ?? line.quantity.observed,
+          "quantity",
+        );
+        const unitCost = numericOrNull(
+          line.unitCost.normalized ?? line.unitCost.observed,
+          "unitCost",
+        );
+        await tx.execute(sql`
+          insert into invoice_review_lines (
+            company_id, draft_id, proposal_id, source_line_index, position,
+            description, vendor_part_number, quantity, unit_cost, classification
+          ) values (
+            ${companyId}, ${run.draft_id}::uuid, ${proposalId}::uuid,
+            ${index}, ${index + 1}, ${description}, ${vendorPartNumber},
+            ${quantity}, ${unitCost},
+            ${line.classification?.kind ?? "unknown"}
+          )
+          on conflict (company_id, draft_id, source_line_index) do nothing
+        `);
+      }
+      const reconciliationHeader = {
+        ...finalHeader,
+        subtotal: numericOrNull(finalHeader.subtotal, "money"),
+        tax: numericOrNull(finalHeader.tax, "money"),
+        freight: numericOrNull(finalHeader.freight, "money"),
+        total: numericOrNull(finalHeader.total, "money"),
+      };
+      await recalculateReviewTotals(
+        tx,
+        companyId,
+        run.draft_id,
+        proposalId,
+        {
+          actorUserId: run.requested_by_user_id,
+          actorCompanyId: run.requested_by_company_id,
+          effectiveCompanyId: companyId,
+          role: "shop_user",
+          isProductAdministrator: false,
+        },
+        reconciliationHeader,
+      );
       await tx.execute(sql`
         update invoice_provider_attempts
         set status = 'completed', revision = revision + 1,

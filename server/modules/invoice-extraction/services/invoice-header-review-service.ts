@@ -10,6 +10,8 @@ import {
 } from "@shared/invoice-extraction/contracts";
 import { requireInvoiceCapability } from "../domain/policies";
 import { PostgresInvoiceDocumentRepository } from "../repositories/invoice-document-repository";
+import { PostgresInvoiceLineReviewRepository } from "../repositories/invoice-line-review-repository";
+import { InvoiceNumericError, moneyToCents } from "../domain/invoice-money";
 import {
   PostgresInvoiceHeaderReviewRepository,
   type HeaderReviewRecord,
@@ -73,6 +75,7 @@ export class InvoiceHeaderReviewService {
   constructor(
     private readonly repository = new PostgresInvoiceHeaderReviewRepository(),
     private readonly documents = new PostgresInvoiceDocumentRepository(),
+    private readonly lines = new PostgresInvoiceLineReviewRepository(),
   ) {}
 
   async get(
@@ -86,6 +89,8 @@ export class InvoiceHeaderReviewService {
     if (!source || source.assets.length === 0) {
       throw new InvoiceDomainError("INVOICE_SOURCE_REQUIRED");
     }
+    const lineReview = await this.lines.get(actor, draftId);
+    if (!lineReview) throw new InvoiceDomainError("INVOICE_INVALID_STATE");
     return {
       draftId,
       draftRevision: record.draftRevision,
@@ -96,6 +101,8 @@ export class InvoiceHeaderReviewService {
       finalHeader: record.finalHeader,
       reviewedFields: record.reviewedFields,
       issues: unresolvedIssues(record),
+      lines: lineReview.lines,
+      reconciliation: lineReview.totals,
       source,
       updatedAt: iso(record.updatedAt),
     };
@@ -114,6 +121,18 @@ export class InvoiceHeaderReviewService {
   ): Promise<InvoiceReviewWorkspaceDto> {
     requireInvoiceCapability(actor, "process_draft");
     const header = invoiceFinalHeaderSchema.parse(input.header);
+    try {
+      for (const field of ["subtotal", "tax", "freight", "total"] as const) {
+        if (header[field] !== null) moneyToCents(header[field], field);
+      }
+    } catch (error) {
+      if (error instanceof InvoiceNumericError) {
+        throw new InvoiceDomainError("INVOICE_NUMERIC_INVALID", {
+          field: error.field,
+        });
+      }
+      throw error;
+    }
     const reviewedFields = invoiceHeaderFieldSchema.array().parse(
       Array.from(new Set(input.reviewedFields)),
     );

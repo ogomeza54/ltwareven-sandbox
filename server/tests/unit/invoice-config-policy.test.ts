@@ -34,6 +34,7 @@ test("invoice pilot configuration has validated safe defaults", () => {
     workerMaxAttempts: 3,
     workerLeaseSeconds: 120,
     workerPollSeconds: 15,
+    reconciliationToleranceCents: 1,
     provider: "openai",
     openaiApiKey: undefined,
     openaiWebhookSecret: undefined,
