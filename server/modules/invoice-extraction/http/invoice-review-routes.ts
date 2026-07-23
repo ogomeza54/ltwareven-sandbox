@@ -29,7 +29,8 @@ function sendError(error: unknown, request: RequestWithId, response: Response): 
     const status =
       error.code === "INVOICE_DRAFT_NOT_FOUND"
         ? 404
-        : error.code === "INVOICE_FORBIDDEN"
+        : error.code === "INVOICE_FORBIDDEN" ||
+            error.code === "INVOICE_CONFIRMATION_DISABLED"
           ? 403
           : error.code === "INVOICE_DRAFT_REVISION_CONFLICT" ||
               error.code === "INVOICE_INVALID_STATE"
@@ -37,6 +38,7 @@ function sendError(error: unknown, request: RequestWithId, response: Response): 
               || error.code === "INVOICE_REVIEW_INCOMPLETE"
               || error.code === "INVOICE_DUPLICATE_SUSPECTED"
               || error.code === "INVOICE_IDEMPOTENCY_CONFLICT"
+              || error.code === "INVOICE_CONFIRMATION_CONFLICT"
             ? 409
             : 400;
     response.status(status).json({
@@ -263,6 +265,38 @@ export function registerInvoiceReviewRoutes(
             (request as RequestWithId).requestId,
           ),
         );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.post(
+    "/api/invoice-drafts/:draftId/confirmation-intents/:intentId/confirm",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const intentId = invoiceDraftIdSchema.safeParse(request.params.intentId);
+        const idempotencyKey = request.header("Idempotency-Key");
+        if (
+          !draftId.success ||
+          !intentId.success ||
+          !idempotencyKey ||
+          Object.keys(request.body ?? {}).length > 0
+        ) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        const result = await confirmationService.confirm(
+          invoiceActorFromRequest(request),
+          draftId.data,
+          intentId.data,
+          idempotencyKey,
+          (request as RequestWithId).requestId,
+        );
+        response.status(result.status === "completed" ? 200 : 201).json(result);
       } catch (error) {
         sendError(error, request, response);
       }

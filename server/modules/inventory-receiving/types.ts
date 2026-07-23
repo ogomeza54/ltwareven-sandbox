@@ -10,6 +10,7 @@ export interface InventoryReceivingLine {
   partNameSnapshot: string;
   partNumberSnapshot: string;
   itemType?: string;
+  category?: string;
   groupId?: string;
   subgroupId?: string;
   qty: number;

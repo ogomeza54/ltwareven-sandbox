@@ -112,6 +112,14 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from inventory_intake_items where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  );
+  await client.query(
+    `delete from inventory_intakes where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  );
+  await client.query(
     `delete from inventory_parts where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   );
@@ -125,7 +133,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 10);
+  assert.equal(journal.rowCount, 11);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -137,6 +145,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0007_invoice_line_review.sql",
     "0008_invoice_part_matching.sql",
     "0009_invoice_confirmation_intents.sql",
+    "0010_invoice_confirmation_completion.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -185,7 +194,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 10);
+  assert.equal(journal.rows[0].count, 11);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1210,17 +1219,25 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
           id: null,
           description: "Synthetic brake pad",
           vendorPartNumber: "BP-TEST",
-          quantity: "2",
+          quantity: "1",
           unitCost: "50.0000",
           classification: "inventory",
+        },
+        {
+          id: null,
+          description: "Synthetic oil filter",
+          vendorPartNumber: "OF-NEW",
+          quantity: "1",
+          unitCost: "50.0000",
+          classification: "consumable",
         },
       ],
       decision: "approved",
     },
     randomUUID(),
   );
-  assert.equal(linesApproved.lines.length, 1);
-  assert.equal(linesApproved.lines[0].calculatedLineTotal, "100.00");
+  assert.equal(linesApproved.lines.length, 2);
+  assert.equal(linesApproved.lines[0].calculatedLineTotal, "50.00");
   assert.equal(linesApproved.reconciliation.calculatedTotal, "100.00");
   assert.equal(linesApproved.reconciliation.withinTolerance, true);
   assert.equal(linesApproved.reconciliation.decision, "approved");
@@ -1323,12 +1340,26 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
         selectedPartId: ownedPartId,
         proposedNewPart: null,
       },
+      {
+        lineId: linesApproved.lines[1].id,
+        decision: "new",
+        selectedPartId: null,
+        proposedNewPart: {
+          name: "Synthetic oil filter",
+          partNumber: "OF-NEW",
+          itemType: "consumable",
+          category: "Filters",
+          groupId: null,
+          subgroupId: null,
+        },
+      },
     ],
     randomUUID(),
   );
   assert.equal(matched.lines[0].match.decision, "existing");
   assert.equal(matched.lines[0].match.selectedPart?.id, ownedPartId);
   assert.equal(matched.lines[0].match.originalSuggestion?.partId, ownedPartId);
+  assert.equal(matched.lines[1].match.decision, "new");
   await client.query(
     `insert into company_invoice_feature_flags (
        company_id, capability, enabled, updated_by_company_id, updated_by_user_id
@@ -1351,6 +1382,8 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(intent.summary.total, "100.00");
   assert.equal(intent.summary.stockUnitDelta, "2");
   assert.equal(intent.summary.lines[0].resolution.kind, "existing");
+  assert.equal(intent.summary.lines[1].resolution.kind, "new");
+  assert.equal(intent.summary.newPartCount, 1);
   assert.match(intent.payloadHash, /^[0-9a-f]{64}$/);
   assert.equal(
     (
@@ -1379,6 +1412,89 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(
     (await ledger.getDraft(actorA, draft.id))?.status,
     "confirming",
+  );
+  await assert.rejects(
+    confirmations.confirm(
+      actorA,
+      draft.id,
+      intent.id,
+      idempotencyKey,
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_CONFIRMATION_DISABLED",
+  );
+  assert.equal(
+    (
+      await client.query(
+        `select quantity_in_stock from inventory_parts
+          where company_id = $1 and id = $2`,
+        [companyA, ownedPartId],
+      )
+    ).rows[0].quantity_in_stock,
+    0,
+  );
+  await client.query(
+    `insert into company_invoice_feature_flags (
+       company_id, capability, enabled, updated_by_company_id, updated_by_user_id
+     ) values ($1, 'stock_confirmation', true, $1, $2)`,
+    [companyA, userA],
+  );
+  const confirmed = await confirmations.confirm(
+    actorA,
+    draft.id,
+    intent.id,
+    idempotencyKey,
+    randomUUID(),
+  );
+  assert.equal(confirmed.status, "completed");
+  assert.ok(confirmed.intakeId);
+  assert.equal(
+    (
+      await confirmations.confirm(
+        actorA,
+        draft.id,
+        intent.id,
+        idempotencyKey,
+      )
+    ).intakeId,
+    confirmed.intakeId,
+  );
+  const stock = await client.query(
+    `select quantity_in_stock, price::text
+       from inventory_parts where company_id = $1 and id = $2`,
+    [companyA, ownedPartId],
+  );
+  assert.equal(stock.rows[0].quantity_in_stock, 1);
+  const createdPart = await client.query(
+    `select part_number, item_type, category, quantity_in_stock
+       from inventory_parts
+      where company_id = $1 and part_number = 'OF-NEW'`,
+    [companyA],
+  );
+  assert.deepEqual(createdPart.rows, [
+    {
+      part_number: "OF-NEW",
+      item_type: "consumable",
+      category: "Filters",
+      quantity_in_stock: 1,
+    },
+  ]);
+  assert.equal(
+    (
+      await client.query(
+        `select count(*)::int as count
+           from inventory_intakes where company_id = $1 and id = $2`,
+        [companyA, confirmed.intakeId],
+      )
+    ).rows[0].count,
+    1,
+  );
+  assert.equal(
+    (await ledger.getDraft(actorA, draft.id))?.status,
+    "confirmed",
   );
 
   const eventId = `evt_${randomUUID()}`;

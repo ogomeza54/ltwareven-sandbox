@@ -205,6 +205,7 @@ export async function receiveInventoryWithinTransaction(
           name: item.partNameSnapshot,
           partNumber: item.partNumberSnapshot || "",
           itemType: item.itemType || "inventory",
+          category: item.category || null,
           groupId: item.groupId || null,
           subgroupId: item.subgroupId || null,
           price: item.landedCost || item.unitCost || "0",

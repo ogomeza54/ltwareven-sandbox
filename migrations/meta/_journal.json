@@ -71,6 +71,13 @@
       "when": 1784828901723,
       "tag": "0009_invoice_confirmation_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784829193477,
+      "tag": "0010_invoice_confirmation_completion",
+      "breakpoints": true
     }
   ]
 }

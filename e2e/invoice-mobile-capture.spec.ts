@@ -10,7 +10,7 @@ const pngChecksum = createHash("sha256").update(png).digest("hex");
 
 interface MockState {
   revision: number;
-  draftStatus: "uploaded" | "needs_review" | "rejected";
+  draftStatus: "uploaded" | "needs_review" | "rejected" | "confirmed";
   activeRunId: string | null;
   extractionPolls: number;
   reviewSaves: number;
@@ -18,6 +18,10 @@ interface MockState {
   reviewHeader: Record<string, string | null>;
   reviewedFields: string[];
   selectedPartId: string | null;
+  lineUnitCost: string | null;
+  lineDecision: "draft" | "approved";
+  confirmationStatus: "reserved" | "completed";
+  stockConfirmations: number;
   rejectionReason: string | null;
   uploadAttempts: number;
   failFirstUpload: boolean;
@@ -88,6 +92,10 @@ async function mockApplication(
     },
     reviewedFields: [],
     selectedPartId: null,
+    lineUnitCost: null,
+    lineDecision: "draft",
+    confirmationStatus: "reserved",
+    stockConfirmations: 0,
     rejectionReason: null,
     uploadAttempts: 0,
     failFirstUpload,
@@ -182,6 +190,35 @@ async function mockApplication(
       state.selectedPartId = body.matches[0]?.selectedPartId ?? null;
       state.revision += 1;
       return json(route, reviewWorkspace(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/review/lines` &&
+      request.method() === "PATCH"
+    ) {
+      const body = request.postDataJSON() as {
+        decision: "draft" | "approved";
+        lines: Array<{ unitCost: string | null }>;
+      };
+      state.lineUnitCost = body.lines[0]?.unitCost ?? null;
+      state.lineDecision = body.decision;
+      state.revision += 1;
+      return json(route, reviewWorkspace(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/confirmation-intents` &&
+      request.method() === "POST"
+    ) {
+      return json(route, confirmationIntent(state), 201);
+    }
+    if (
+      path ===
+        `/api/invoice-drafts/${draftId}/confirmation-intents/00000000-0000-4000-8000-000000000040/confirm` &&
+      request.method() === "POST"
+    ) {
+      state.confirmationStatus = "completed";
+      state.stockConfirmations += 1;
+      state.draftStatus = "confirmed";
+      return json(route, confirmationIntent(state));
     }
     if (
       path === `/api/invoice-drafts/${draftId}/review` &&
@@ -411,8 +448,8 @@ function reviewWorkspace(state: MockState) {
         description: "Brake pad",
         vendorPartNumber: null,
         quantity: "2",
-        unitCost: null,
-        calculatedLineTotal: null,
+        unitCost: state.lineUnitCost,
+        calculatedLineTotal: state.lineUnitCost ? "100.00" : null,
         classification: "inventory",
         proposed: completed.proposal?.lines[0],
         match: {
@@ -432,21 +469,68 @@ function reviewWorkspace(state: MockState) {
       },
     ],
     reconciliation: {
-      decision: "draft",
-      complete: false,
-      withinTolerance: false,
+      decision: state.lineDecision,
+      complete: state.lineUnitCost !== null,
+      withinTolerance: state.lineUnitCost === "50",
       observedSubtotal: null,
       observedTax: null,
       observedFreight: null,
-      observedTotal: null,
-      calculatedSubtotal: null,
-      calculatedTax: null,
-      calculatedFreight: null,
-      calculatedTotal: null,
-      difference: null,
+      observedTotal: state.reviewHeader.total,
+      calculatedSubtotal: state.lineUnitCost ? "100.00" : null,
+      calculatedTax: state.lineUnitCost ? "0.00" : null,
+      calculatedFreight: state.lineUnitCost ? "0.00" : null,
+      calculatedTotal: state.lineUnitCost ? "100.00" : null,
+      difference: state.lineUnitCost ? "0.00" : null,
     },
     source: draft(state).source,
     updatedAt: "2026-07-23T12:00:02.000Z",
+  };
+}
+
+function confirmationIntent(state: MockState) {
+  return {
+    id: "00000000-0000-4000-8000-000000000040",
+    draftId,
+    draftRevision: state.revision,
+    idempotencyKey: "invoice-confirmation-e2e-key",
+    payloadHash: "a".repeat(64),
+    status: state.confirmationStatus,
+    duplicateStatus: "clear",
+    duplicateSignals: [],
+    overrideReason: null,
+    summary: {
+      vendor: state.reviewHeader.vendorName,
+      invoiceNumber: state.reviewHeader.invoiceNumber,
+      invoiceDate: state.reviewHeader.invoiceDate,
+      currency: "USD",
+      subtotal: "100.00",
+      tax: "0.00",
+      freight: "0.00",
+      total: "100.00",
+      lines: [
+        {
+          lineId: "00000000-0000-4000-8000-000000000020",
+          description: "Brake pad",
+          partNumber: "BP-100",
+          itemType: "inventory",
+          quantity: "2",
+          unitCost: "50",
+          lineTotal: "100.00",
+          resolution: {
+            kind: "existing",
+            partId: "00000000-0000-4000-8000-000000000030",
+            partName: "Brake Pad Catalog",
+          },
+        },
+      ],
+      newPartCount: 0,
+      stockUnitDelta: "2",
+    },
+    intakeId:
+      state.confirmationStatus === "completed"
+        ? "00000000-0000-4000-8000-000000000050"
+        : null,
+    createdAt: "2026-07-23T12:00:03.000Z",
   };
 }
 
@@ -681,5 +765,45 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(page.getByText("Rejected: Document is not a supplier invoice")).toBeVisible();
   expect(state.reviewDecision).toBe("rejected");
   expect(state.intakeSubmissions).toBe(0);
+  await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
+});
+
+test("reviewed invoice confirms stock exactly once through the reserved intent", async ({
+  page,
+}) => {
+  const state = await mockApplication(page);
+  await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await expect(
+    page.getByRole("region", { name: "Invoice review workspace" }),
+  ).toBeVisible({ timeout: 8_000 });
+
+  await page.getByLabel("Invoice number").fill("INV-E2E-1");
+  await page.getByLabel("Invoice number").blur();
+  await page.getByLabel("Invoice date").fill("2026-07-23");
+  await page.getByLabel("Invoice date").blur();
+  await page.getByLabel("Invoice total").fill("100.00");
+  await page.getByLabel("Invoice total").blur();
+  await expect.poll(() => state.reviewedFields.includes("total")).toBe(true);
+  await page.getByRole("button", { name: "Approve header" }).click();
+  await expect.poll(() => state.reviewDecision).toBe("approved");
+
+  await page.getByLabel("Unit cost").fill("50");
+  await page.getByLabel("Unit cost").blur();
+  await expect.poll(() => state.lineUnitCost).toBe("50");
+  await page.getByRole("button", { name: "Approve lines & totals" }).click();
+  await expect.poll(() => state.lineDecision).toBe("approved");
+
+  await page.getByRole("button", { name: "Find matches" }).click();
+  await page.getByRole("button", { name: "Select" }).click();
+  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Prepare confirmation summary" })
+    .click();
+  await expect(
+    page.getByLabel("Invoice confirmation summary"),
+  ).toContainText("100.00 USD");
+  await page.getByRole("button", { name: "Confirm & update stock" }).click();
+  await expect.poll(() => state.stockConfirmations).toBe(1);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
 });

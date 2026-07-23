@@ -314,6 +314,25 @@ export async function overrideInvoiceDuplicate(
   );
 }
 
+export async function confirmInvoiceIntent(
+  intent: InvoiceConfirmationIntentDto,
+): Promise<InvoiceConfirmationIntentDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(intent.draftId)}/confirmation-intents/${encodeURIComponent(intent.id)}/confirm`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": intent.idempotencyKey,
+        },
+        body: "{}",
+      },
+    ),
+  );
+}
+
 export async function createInvoiceDraft(): Promise<InvoiceDraftDto> {
   return responseJson(
     await fetch("/api/invoice-drafts", {

@@ -597,6 +597,9 @@ export const invoiceConfirmationIntents = pgTable(
     uniqueIndex("invoice_confirmation_intents_active_draft_unique")
       .on(table.companyId, table.draftId)
       .where(sql`${table.status} = 'reserved'`),
+    uniqueIndex("invoice_confirmation_intents_completed_draft_unique")
+      .on(table.companyId, table.draftId)
+      .where(sql`${table.status} = 'completed'`),
     index("invoice_confirmation_intents_duplicate_idx").on(
       table.companyId,
       table.duplicateStatus,

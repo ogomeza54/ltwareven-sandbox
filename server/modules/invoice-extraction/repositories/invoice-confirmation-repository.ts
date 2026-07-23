@@ -18,6 +18,9 @@ import {
   centsToDecimal,
   lineExtensionCents,
 } from "../domain/invoice-money";
+import Decimal from "decimal.js";
+import { receiveInventoryWithinTransaction } from "../../inventory-receiving/postgres-inventory-intake-service";
+import type { InventoryReceivingCommand } from "../../inventory-receiving/types";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type TransactionExecutor = Parameters<
@@ -130,7 +133,7 @@ export class PostgresInvoiceConfirmationRepository {
       throw new InvoiceDomainError("INVOICE_DRAFT_REVISION_CONFLICT");
     }
     if (
-      headerRow.draft_status !== "needs_review" ||
+      !["needs_review", "confirming"].includes(headerRow.draft_status) ||
       headerRow.decision !== "approved" ||
       headerRow.totals_decision !== "approved" ||
       !headerRow.complete ||
@@ -479,6 +482,334 @@ export class PostgresInvoiceConfirmationRepository {
         )
       `);
       return intentDto(updated);
+    });
+  }
+
+  async confirm(
+    actor: InvoiceActorContext,
+    draftId: string,
+    intentId: string,
+    idempotencyKey: string,
+    requestId?: string,
+  ): Promise<InvoiceConfirmationIntentDto> {
+    return this.database.transaction(async (tx) => {
+      const intent = rows<IntentRow>(
+        await tx.execute(sql`
+          select id, draft_id, draft_revision, idempotency_key, payload_hash,
+                 canonical_payload, status, duplicate_status, duplicate_signals,
+                 override_reason, intake_id, created_at
+          from invoice_confirmation_intents
+          where company_id = ${actor.effectiveCompanyId}
+            and draft_id = ${draftId}::uuid and id = ${intentId}::uuid
+          for update
+        `),
+      )[0];
+      if (!intent) throw new InvoiceDomainError("INVOICE_CONFIRMATION_NOT_FOUND");
+      if (intent.idempotency_key !== idempotencyKey) {
+        throw new InvoiceDomainError("INVOICE_IDEMPOTENCY_CONFLICT");
+      }
+      if (intent.status === "completed") return intentDto(intent);
+      if (intent.status !== "reserved") {
+        throw new InvoiceDomainError("INVOICE_INVALID_STATE");
+      }
+      const feature = rows<{ enabled: boolean }>(
+        await tx.execute(sql`
+          select enabled from company_invoice_feature_flags
+          where company_id = ${actor.effectiveCompanyId}
+            and capability = 'stock_confirmation'
+          for update
+        `),
+      )[0];
+      if (!feature?.enabled) {
+        throw new InvoiceDomainError("INVOICE_CONFIRMATION_DISABLED");
+      }
+      if (intent.duplicate_status === "suspected") {
+        throw new InvoiceDomainError("INVOICE_DUPLICATE_SUSPECTED");
+      }
+      const summary = await this.buildSummary(
+        tx,
+        actor.effectiveCompanyId,
+        draftId,
+        intent.draft_revision,
+      );
+      const canonicalPayload = {
+        draftId,
+        draftRevision: intent.draft_revision,
+        summary,
+        duplicateSignals: intent.duplicate_signals,
+        duplicateOverrideReason: intent.override_reason,
+      };
+      if (canonicalPayloadHash(canonicalPayload) !== intent.payload_hash) {
+        throw new InvoiceDomainError("INVOICE_CONFIRMATION_CONFLICT");
+      }
+      const identity = normalizedInvoiceIdentity(
+        summary.vendor,
+        summary.invoiceNumber,
+      );
+      const completed = rows<{
+        intake_id: string;
+        canonical_payload: { summary?: { vendor?: string; invoiceNumber?: string | null } };
+      }>(
+        await tx.execute(sql`
+          select intake_id, canonical_payload
+          from invoice_confirmation_intents
+          where company_id = ${actor.effectiveCompanyId}
+            and status = 'completed' and intake_id is not null
+            and id <> ${intentId}::uuid
+        `),
+      );
+      const identityDuplicate =
+        identity === null
+          ? null
+          : completed.find(
+              (candidate) =>
+                normalizedInvoiceIdentity(
+                  candidate.canonical_payload.summary?.vendor ?? "",
+                  candidate.canonical_payload.summary?.invoiceNumber ?? null,
+                ) === identity,
+            );
+      const fingerprints = rows<{ fingerprint_sha256: string }>(
+        await tx.execute(sql`
+          select fingerprint_sha256 from invoice_documents
+          where company_id = ${actor.effectiveCompanyId}
+            and draft_id = ${draftId}::uuid
+        `),
+      ).map((row) => row.fingerprint_sha256);
+      const fingerprintDuplicate =
+        fingerprints.length === 0
+          ? null
+          : rows<{ intake_id: string }>(
+              await tx.execute(sql`
+                select distinct completed_intent.intake_id
+                from invoice_confirmation_intents completed_intent
+                join invoice_documents document
+                  on document.company_id = completed_intent.company_id
+                 and document.draft_id = completed_intent.draft_id
+                where completed_intent.company_id = ${actor.effectiveCompanyId}
+                  and completed_intent.status = 'completed'
+                  and completed_intent.intake_id is not null
+                  and completed_intent.id <> ${intentId}::uuid
+                  and document.fingerprint_sha256 in (
+                    ${sql.join(fingerprints.map((value) => sql`${value}`), sql`, `)}
+                  )
+                limit 1
+              `),
+            )[0];
+      if (
+        (identityDuplicate || fingerprintDuplicate) &&
+        intent.duplicate_status !== "overridden"
+      ) {
+        const duplicateSignals: InvoiceConfirmationIntentDto["duplicateSignals"] = [];
+        if (fingerprintDuplicate) {
+          duplicateSignals.push({
+            kind: "source_fingerprint",
+            intakeId: fingerprintDuplicate.intake_id,
+          });
+        }
+        if (
+          identityDuplicate &&
+          !duplicateSignals.some(
+            (signal) => signal.intakeId === identityDuplicate.intake_id,
+          )
+        ) {
+          duplicateSignals.push({
+            kind: "supplier_invoice_number",
+            intakeId: identityDuplicate.intake_id,
+          });
+        }
+        const duplicatePayload = {
+          draftId,
+          draftRevision: intent.draft_revision,
+          summary,
+          duplicateSignals,
+          duplicateOverrideReason: null,
+        };
+        const suspected = rows<IntentRow>(
+          await tx.execute(sql`
+            update invoice_confirmation_intents
+            set duplicate_status = 'suspected',
+                duplicate_signals = ${JSON.stringify(duplicateSignals)}::jsonb,
+                canonical_payload = ${JSON.stringify(duplicatePayload)}::jsonb,
+                payload_hash = ${canonicalPayloadHash(duplicatePayload)},
+                revision = revision + 1
+            where company_id = ${actor.effectiveCompanyId}
+              and id = ${intentId}::uuid and status = 'reserved'
+            returning id, draft_id, draft_revision, idempotency_key, payload_hash,
+                      canonical_payload, status, duplicate_status, duplicate_signals,
+                      override_reason, intake_id, created_at
+          `),
+        )[0];
+        return intentDto(suspected);
+      }
+      const existingPartIds = summary.lines
+        .filter((line) => line.resolution.kind === "existing")
+        .map((line) =>
+          line.resolution.kind === "existing" ? line.resolution.partId : "",
+        );
+      const existingParts = existingPartIds.length
+        ? rows<{ id: string; name: string; part_number: string }>(
+            await tx.execute(sql`
+              select id, name, part_number from inventory_parts
+              where company_id = ${actor.effectiveCompanyId}
+                and id in (
+                  ${sql.join(existingPartIds.map((id) => sql`${id}`), sql`, `)}
+                )
+              for update
+            `),
+          )
+        : [];
+      if (existingParts.length !== new Set(existingPartIds).size) {
+        throw new InvoiceDomainError("INVOICE_CONFIRMATION_CONFLICT");
+      }
+      const partById = new Map(existingParts.map((part) => [part.id, part]));
+      for (const line of summary.lines) {
+        const quantity = new Decimal(line.quantity);
+        if (
+          !quantity.isInteger() ||
+          quantity.lessThan(1) ||
+          quantity.greaterThan(2_147_483_647)
+        ) {
+          throw new InvoiceDomainError("INVOICE_CONFIRMATION_CONFLICT", {
+            reason: "stock_quantity_must_be_integer",
+            lineId: line.lineId,
+          });
+        }
+        if (line.resolution.kind !== "new") continue;
+        const proposal = line.resolution.proposedPart;
+        const duplicate = rows<{ id: string }>(
+          await tx.execute(sql`
+            select id from inventory_parts
+            where company_id = ${actor.effectiveCompanyId}
+              and (
+                lower(regexp_replace(part_number, '[^a-zA-Z0-9]', '', 'g')) =
+                  ${proposal.partNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}
+                or lower(trim(name)) = ${proposal.name.trim().toLowerCase()}
+              )
+            limit 1
+          `),
+        )[0];
+        if (duplicate) {
+          throw new InvoiceDomainError("INVOICE_CONFIRMATION_CONFLICT", {
+            reason: "new_part_duplicate",
+            partId: duplicate.id,
+          });
+        }
+      }
+      const command: InventoryReceivingCommand = {
+        header: {
+          vendor: summary.vendor,
+          invoiceNumber: summary.invoiceNumber,
+          invoiceDate: new Date(summary.invoiceDate!),
+          subtotal: summary.subtotal,
+          taxAmount: summary.tax,
+          deliveryFee: summary.freight,
+          totalAmount: summary.total,
+          reconciliationStatus: "matched",
+          notes: `Confirmed from invoice review ${draftId}`,
+          quickbooksSyncStatus: "not_synced",
+          quickbooksId: null,
+          quickbooksLastSyncedAt: null,
+          externalReferenceNumber: summary.invoiceNumber,
+          invoicePhotoUrl: null,
+        },
+        items: summary.lines.map((line) => {
+          const existing =
+            line.resolution.kind === "existing"
+              ? partById.get(line.resolution.partId)
+              : null;
+          const proposed =
+            line.resolution.kind === "new"
+              ? line.resolution.proposedPart
+              : null;
+          return {
+            partId: existing?.id,
+            partNameSnapshot: existing?.name ?? proposed!.name,
+            partNumberSnapshot: existing?.part_number ?? proposed!.partNumber,
+            itemType: existing ? line.itemType : proposed!.itemType,
+            category: proposed?.category ?? undefined,
+            groupId: proposed?.groupId ?? undefined,
+            subgroupId: proposed?.subgroupId ?? undefined,
+            qty: Number(line.quantity),
+            unitCost: line.unitCost,
+            lineTotal: line.lineTotal,
+          };
+        }),
+      };
+      const intake = await receiveInventoryWithinTransaction(
+        tx,
+        command,
+        {
+          companyId: actor.effectiveCompanyId,
+          userId: actor.actorUserId,
+        },
+      );
+      const receivedLines = rows<{
+        part_id: string;
+        part_name_snapshot: string;
+        part_number_snapshot: string;
+      }>(
+        await tx.execute(sql`
+          select part_id, part_name_snapshot, part_number_snapshot
+          from inventory_intake_items
+          where company_id = ${actor.effectiveCompanyId}
+            and inventory_intake_id = ${intake.id}
+        `),
+      );
+      for (const received of receivedLines) {
+        await tx.execute(sql`
+          insert into invoice_part_aliases (
+            company_id, part_id, vendor_name_normalized,
+            vendor_part_number_normalized, description_normalized
+          ) values (
+            ${actor.effectiveCompanyId}, ${received.part_id},
+            ${summary.vendor.trim().toLowerCase()},
+            ${received.part_number_snapshot.trim().toLowerCase()},
+            ${received.part_name_snapshot.trim().toLowerCase()}
+          )
+          on conflict do nothing
+        `);
+      }
+      const completedIntent = rows<IntentRow>(
+        await tx.execute(sql`
+          update invoice_confirmation_intents
+          set status = 'completed', intake_id = ${intake.id},
+              completed_at = now(), revision = revision + 1
+          where company_id = ${actor.effectiveCompanyId}
+            and id = ${intentId}::uuid and status = 'reserved'
+          returning id, draft_id, draft_revision, idempotency_key, payload_hash,
+                    canonical_payload, status, duplicate_status, duplicate_signals,
+                    override_reason, intake_id, created_at
+        `),
+      )[0];
+      if (!completedIntent) {
+        throw new InvoiceDomainError("INVOICE_IDEMPOTENCY_CONFLICT");
+      }
+      await tx.execute(sql`
+        update invoice_review_drafts
+        set status = 'confirmed', revision = revision + 1,
+            updated_by_company_id = ${actor.actorCompanyId},
+            updated_by_user_id = ${actor.actorUserId},
+            updated_at = now(), last_activity_at = now()
+        where company_id = ${actor.effectiveCompanyId}
+          and id = ${draftId}::uuid and status = 'confirming'
+          and revision = ${intent.draft_revision}
+      `);
+      await tx.execute(sql`
+        insert into invoice_audit_events (
+          company_id, actor_user_id, actor_company_id, action, target_type,
+          target_id, correlation_id, request_id, metadata
+        ) values (
+          ${actor.effectiveCompanyId}, ${actor.actorUserId}, ${actor.actorCompanyId},
+          'confirmation.completed', 'confirmation_intent', ${intentId}::uuid,
+          ${randomUUID()}::uuid, ${requestId ?? null}::uuid,
+          ${JSON.stringify({
+            draftId,
+            intakeId: intake.id,
+            payloadHash: intent.payload_hash,
+          })}::jsonb
+        )
+      `);
+      return intentDto(completedIntent);
     });
   }
 }

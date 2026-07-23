@@ -156,6 +156,7 @@ export const invoiceErrorCodeSchema = z.enum([
   "INVOICE_IDEMPOTENCY_CONFLICT",
   "INVOICE_CONFIRMATION_NOT_FOUND",
   "INVOICE_CONFIRMATION_DISABLED",
+  "INVOICE_CONFIRMATION_CONFLICT",
 ]);
 export type InvoiceErrorCode = z.infer<typeof invoiceErrorCodeSchema>;
 
@@ -210,6 +211,8 @@ const safeMessages: Record<InvoiceErrorCode, string> = {
     "The invoice confirmation could not be found.",
   INVOICE_CONFIRMATION_DISABLED:
     "Invoice stock confirmation is not enabled for this company.",
+  INVOICE_CONFIRMATION_CONFLICT:
+    "The reviewed invoice or catalog changed. Return to review before confirming.",
 };
 
 export class InvoiceDomainError extends Error {

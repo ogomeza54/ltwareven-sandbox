@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import {
   getInvoiceReview,
   createInvoiceConfirmationIntent,
+  confirmInvoiceIntent,
   getInvoicePartCandidates,
   privateInvoiceAssetUrl,
   rejectInvoiceReview,
@@ -954,6 +955,27 @@ export function InvoiceReviewWorkspace({
                 <p className="text-xs text-muted-foreground">
                   Reserved intent {confirmationIntent.id} · hash {confirmationIntent.payloadHash.slice(0, 12)}…
                 </p>
+                {confirmationIntent.status === "completed" ? (
+                  <p className="rounded border border-green-500/50 p-2 text-sm text-green-500">
+                    Inventory received exactly once. Intake {confirmationIntent.intakeId}. Use inventory adjustments for later corrections.
+                  </p>
+                ) : confirmationIntent.duplicateStatus !== "suspected" ? (
+                  <Button
+                    type="button"
+                    className="min-h-11"
+                    onClick={async () => {
+                      try {
+                        const completed = await confirmInvoiceIntent(confirmationIntent);
+                        setConfirmationIntent(completed);
+                        await onDraftChanged?.();
+                      } catch (caught) {
+                        setError(caught instanceof Error ? caught.message : "Inventory confirmation failed.");
+                      }
+                    }}
+                  >
+                    Confirm & update stock
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

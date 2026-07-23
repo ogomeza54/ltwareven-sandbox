@@ -55,4 +55,28 @@ export class InvoiceConfirmationService {
       requestId,
     );
   }
+
+  async confirm(
+    actor: InvoiceActorContext,
+    draftId: string,
+    intentId: string,
+    idempotencyKey: string,
+    requestId?: string,
+  ): Promise<InvoiceConfirmationIntentDto> {
+    requireInvoiceCapability(actor, "process_draft");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{15,159}$/.test(idempotencyKey)) {
+      throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+    }
+    const flags = await this.invoices.resolveFeatures(actor.effectiveCompanyId);
+    if (!flags.stockConfirmation) {
+      throw new InvoiceDomainError("INVOICE_CONFIRMATION_DISABLED");
+    }
+    return this.confirmations.confirm(
+      actor,
+      draftId,
+      intentId,
+      idempotencyKey,
+      requestId,
+    );
+  }
 }
