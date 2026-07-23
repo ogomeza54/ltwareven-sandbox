@@ -5,6 +5,7 @@ import {
   invoiceDraftIdSchema,
   rejectInvoiceReviewSchema,
   updateInvoiceHeaderReviewSchema,
+  updateInvoiceLineMatchesSchema,
   updateInvoiceLinesReviewSchema,
 } from "@shared/invoice-extraction/contracts";
 import { isAuthenticated } from "../../../replitAuth";
@@ -14,6 +15,7 @@ import {
 } from "../../../auth-context";
 import { InvoiceHeaderReviewService } from "../services/invoice-header-review-service";
 import { InvoiceLineReviewService } from "../services/invoice-line-review-service";
+import { InvoicePartMatchService } from "../services/invoice-part-match-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
@@ -50,6 +52,7 @@ export function registerInvoiceReviewRoutes(
   app: Express,
   service = new InvoiceHeaderReviewService(),
   lineService = new InvoiceLineReviewService(),
+  matchService = new InvoicePartMatchService(),
 ): void {
   app.get(
     "/api/invoice-drafts/:draftId/review",
@@ -138,6 +141,62 @@ export function registerInvoiceReviewRoutes(
             invoiceActorFromRequest(request),
             draftId.data,
             input.data,
+            (request as RequestWithId).requestId,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.get(
+    "/api/invoice-drafts/:draftId/review/lines/:lineId/candidates",
+    isAuthenticated,
+    withCompanyContext,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const lineId = invoiceDraftIdSchema.safeParse(request.params.lineId);
+        if (!draftId.success || !lineId.success) {
+          throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+        }
+        const query =
+          typeof request.query.q === "string"
+            ? request.query.q.trim().slice(0, 160)
+            : undefined;
+        response.json(
+          await matchService.candidates(
+            invoiceActorFromRequest(request),
+            draftId.data,
+            lineId.data,
+            query,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.patch(
+    "/api/invoice-drafts/:draftId/review/matches",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const input = updateInvoiceLineMatchesSchema.safeParse(request.body);
+        if (!draftId.success || !input.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.json(
+          await matchService.update(
+            invoiceActorFromRequest(request),
+            draftId.data,
+            input.data.revision,
+            input.data.matches,
             (request as RequestWithId).requestId,
           ),
         );

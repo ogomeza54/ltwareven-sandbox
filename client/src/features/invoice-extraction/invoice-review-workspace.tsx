@@ -12,6 +12,7 @@ import {
 import type {
   InvoiceFinalHeader,
   InvoiceHeaderField,
+  InvoicePartCandidate,
   InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
 import { Button } from "@/components/ui/button";
@@ -19,11 +20,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   getInvoiceReview,
+  getInvoicePartCandidates,
   privateInvoiceAssetUrl,
   rejectInvoiceReview,
   updateInvoiceHeaderReview,
   updateInvoiceLinesReview,
+  updateInvoiceLineMatches,
 } from "./invoice-source-api";
+
+interface CatalogGroup {
+  id: string;
+  name: string;
+  subgroups?: Array<{ id: string; name: string }>;
+}
 
 const fields: ReadonlyArray<{ key: InvoiceHeaderField; label: string }> = [
   { key: "vendorName", label: "Vendor / Supplier" },
@@ -72,6 +81,17 @@ export function InvoiceReviewWorkspace({
   const linesRef = useRef<InvoiceReviewWorkspaceDto["lines"]>([]);
   const lineDirty = useRef(false);
   const lineSaving = useRef(false);
+  const [candidates, setCandidates] = useState<Record<string, InvoicePartCandidate[]>>({});
+  const [candidateQuery, setCandidateQuery] = useState<Record<string, string>>({});
+  const [catalogTree, setCatalogTree] = useState<CatalogGroup[]>([]);
+  const [newPartDraft, setNewPartDraft] = useState<Record<string, {
+    name: string;
+    partNumber: string;
+    itemType: "inventory" | "consumable";
+    category: string;
+    groupId: string;
+    subgroupId: string;
+  }>>({});
 
   useEffect(() => {
     let current = true;
@@ -96,6 +116,13 @@ export function InvoiceReviewWorkspace({
       current = false;
     };
   }, [draftId]);
+
+  useEffect(() => {
+    void fetch("/api/catalog/tree", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : []))
+      .then((value) => setCatalogTree(Array.isArray(value) ? value : []))
+      .catch(() => setCatalogTree([]));
+  }, []);
 
   const flush = async (
     decision: "draft" | "approved" = "draft",
@@ -233,6 +260,63 @@ export function InvoiceReviewWorkspace({
     setHeader(next);
     dirty.current = true;
     setSaveState("idle");
+  };
+
+  const loadCandidates = async (lineId: string): Promise<void> => {
+    if (lineId.startsWith("new-") && !(await flushLines())) return;
+    const current = workspaceRef.current;
+    if (!current) return;
+    const persistedLine =
+      current.lines.find((line) => line.id === lineId) ??
+      current.lines.find(
+        (line) =>
+          line.description ===
+          linesRef.current.find((candidate) => candidate.id === lineId)?.description,
+      );
+    if (!persistedLine) return;
+    try {
+      setError(null);
+      const result = await getInvoicePartCandidates(
+        current,
+        persistedLine.id,
+        candidateQuery[lineId] ?? "",
+      );
+      setCandidates((value) => ({ ...value, [persistedLine.id]: result }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Part candidates could not be loaded.");
+    }
+  };
+
+  const saveMatch = async (
+    lineId: string,
+    match:
+      | { decision: "existing"; selectedPartId: string; proposedNewPart: null }
+      | {
+          decision: "new";
+          selectedPartId: null;
+          proposedNewPart: {
+            name: string;
+            partNumber: string;
+            itemType: "inventory" | "consumable";
+            category: string | null;
+            groupId: string | null;
+            subgroupId: string | null;
+          };
+        },
+  ): Promise<void> => {
+    const current = workspaceRef.current;
+    if (!current) return;
+    try {
+      const saved = await updateInvoiceLineMatches(current, [{ lineId, ...match }]);
+      workspaceRef.current = saved;
+      setWorkspace(saved);
+      linesRef.current = saved.lines;
+      setLines(saved.lines);
+      setSaveState("saved");
+      await onDraftChanged?.();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Part decision could not be saved.");
+    }
   };
 
   const issues = workspace?.issues ?? [];
@@ -422,6 +506,12 @@ export function InvoiceReviewWorkspace({
                     calculatedLineTotal: null,
                     classification: "unknown" as const,
                     proposed: null,
+                    match: {
+                      decision: "unresolved" as const,
+                      selectedPart: null,
+                      proposedNewPart: null,
+                      originalSuggestion: null,
+                    },
                   },
                 ];
                 linesRef.current = next;
@@ -490,6 +580,238 @@ export function InvoiceReviewWorkspace({
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                ) : null}
+              </div>
+              <div className="space-y-2 border-t border-border pt-2 md:col-span-2 lg:col-span-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">Catalog resolution</p>
+                    <p className="text-xs text-muted-foreground">
+                      {line.match.decision === "existing" && line.match.selectedPart
+                        ? `Linked to ${line.match.selectedPart.name} · ${line.match.selectedPart.partNumber}`
+                        : line.match.decision === "new" && line.match.proposedNewPart
+                          ? `New part prepared: ${line.match.proposedNewPart.name} · not created yet`
+                          : "Human selection required before confirmation."}
+                    </p>
+                  </div>
+                  {!readOnly && !line.id.startsWith("new-") ? (
+                    <div className="flex flex-1 flex-wrap justify-end gap-2">
+                      <Input
+                        className="min-w-44 max-w-64"
+                        aria-label={`Search catalog for invoice line ${index + 1}`}
+                        placeholder="Name or part reference"
+                        value={candidateQuery[line.id] ?? ""}
+                        onChange={(event) =>
+                          setCandidateQuery((value) => ({
+                            ...value,
+                            [line.id]: event.target.value,
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void loadCandidates(line.id);
+                          }
+                        }}
+                      />
+                      <Button type="button" variant="outline" className="min-h-11" onClick={() => void loadCandidates(line.id)}>
+                        Find matches
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11"
+                        onClick={() =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: value[line.id] ?? {
+                              name: line.description ?? "",
+                              partNumber: line.vendorPartNumber ?? "",
+                              itemType:
+                                line.classification === "consumable"
+                                  ? "consumable"
+                                  : "inventory",
+                              category: "",
+                              groupId: "",
+                              subgroupId: "",
+                            },
+                          }))
+                        }
+                      >
+                        Prepare new part
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+                {(candidates[line.id] ?? []).length ? (
+                  <ul className="grid gap-2 sm:grid-cols-2" aria-label={`Part candidates for invoice line ${index + 1}`}>
+                    {candidates[line.id].map((candidate) => (
+                      <li key={candidate.part.id} className="rounded border border-border p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium">{candidate.part.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {candidate.part.partNumber} · {candidate.part.category ?? "No category"}
+                            </p>
+                            <p className="mt-1 text-xs">
+                              Score {candidate.score}/100 · {candidate.signals.join(" · ")}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="min-h-10"
+                            onClick={() =>
+                              void saveMatch(line.id, {
+                                decision: "existing",
+                                selectedPartId: candidate.part.id,
+                                proposedNewPart: null,
+                              })
+                            }
+                          >
+                            Select
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {newPartDraft[line.id] ? (
+                  <div className="grid gap-2 rounded border border-amber-500/40 p-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-name`}>New part name</Label>
+                      <Input
+                        id={`new-part-${line.id}-name`}
+                        value={newPartDraft[line.id].name}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: { ...value[line.id], name: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-reference`}>New part reference</Label>
+                      <Input
+                        id={`new-part-${line.id}-reference`}
+                        value={newPartDraft[line.id].partNumber}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: { ...value[line.id], partNumber: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-item-type`}>New part type</Label>
+                      <select
+                        id={`new-part-${line.id}-item-type`}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={newPartDraft[line.id].itemType}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: {
+                              ...value[line.id],
+                              itemType: event.target.value as "inventory" | "consumable",
+                            },
+                          }))
+                        }
+                      >
+                        <option value="inventory">Inventory</option>
+                        <option value="consumable">Consumable</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-category`}>Category label</Label>
+                      <Input
+                        id={`new-part-${line.id}-category`}
+                        value={newPartDraft[line.id].category}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: { ...value[line.id], category: event.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-group`}>Catalog group</Label>
+                      <select
+                        id={`new-part-${line.id}-group`}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={newPartDraft[line.id].groupId}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: {
+                              ...value[line.id],
+                              groupId: event.target.value,
+                              subgroupId: "",
+                            },
+                          }))
+                        }
+                      >
+                        <option value="">No catalog group</option>
+                        {catalogTree.map((group) => (
+                          <option key={group.id} value={group.id}>{group.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor={`new-part-${line.id}-subgroup`}>Catalog subgroup</Label>
+                      <select
+                        id={`new-part-${line.id}-subgroup`}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={newPartDraft[line.id].subgroupId}
+                        disabled={!newPartDraft[line.id].groupId}
+                        onChange={(event) =>
+                          setNewPartDraft((value) => ({
+                            ...value,
+                            [line.id]: { ...value[line.id], subgroupId: event.target.value },
+                          }))
+                        }
+                      >
+                        <option value="">No catalog subgroup</option>
+                        {(catalogTree.find((group) => group.id === newPartDraft[line.id].groupId)?.subgroups ?? []).map((subgroup) => (
+                          <option key={subgroup.id} value={subgroup.id}>{subgroup.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-3">
+                      <Button
+                        type="button"
+                        className="min-h-11"
+                        disabled={!newPartDraft[line.id].name.trim() || !newPartDraft[line.id].partNumber.trim()}
+                        onClick={() => {
+                          const value = newPartDraft[line.id];
+                          void saveMatch(line.id, {
+                            decision: "new",
+                            selectedPartId: null,
+                            proposedNewPart: {
+                              name: value.name.trim(),
+                              partNumber: value.partNumber.trim(),
+                              itemType: value.itemType,
+                              category: value.category.trim() || null,
+                              groupId: value.groupId || null,
+                              subgroupId: value.subgroupId || null,
+                            },
+                          });
+                        }}
+                      >
+                        Save new-part proposal
+                      </Button>
+                      <Button type="button" variant="ghost" className="min-h-11" onClick={() => setNewPartDraft((value) => {
+                        const next = { ...value };
+                        delete next[line.id];
+                        return next;
+                      })}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
                 ) : null}
               </div>
             </article>

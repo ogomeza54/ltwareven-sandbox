@@ -59,6 +59,14 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from invoice_line_matches where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
+    `delete from invoice_part_aliases where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
     `delete from invoice_review_totals where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   ).catch(() => undefined);
@@ -99,6 +107,10 @@ after(async () => {
     `delete from invoice_review_drafts where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   );
+  await client.query(
+    `delete from inventory_parts where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  );
   // Audit is append-only by design, so company fixtures intentionally remain.
   await client.end();
   const { closeDatabase } = await import("../../db");
@@ -109,7 +121,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 8);
+  assert.equal(journal.rowCount, 9);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -119,6 +131,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0005_invoice_header_review.sql",
     "0006_invoice_header_review_state.sql",
     "0007_invoice_line_review.sql",
+    "0008_invoice_part_matching.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -167,7 +180,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 8);
+  assert.equal(journal.rows[0].count, 9);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1251,10 +1264,70 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
       "code" in error &&
       error.code === "INVOICE_NUMERIC_INVALID",
   );
-  const rejected = await reviews.reject(
+  const ownedPartId = randomUUID();
+  const foreignPartId = randomUUID();
+  await client.query(
+    `insert into inventory_parts (
+       id, name, part_number, category, item_type, price, company_id
+     ) values
+       ($1, 'Synthetic Brake Pad', 'BP-TEST', 'Brakes', 'inventory', 50, $2),
+       ($3, 'Foreign Brake Pad', 'BP-TEST', 'Brakes', 'inventory', 50, $4)`,
+    [ownedPartId, companyA, foreignPartId, companyB],
+  );
+  const { InvoicePartMatchService } =
+    await import("../../modules/invoice-extraction/services/invoice-part-match-service");
+  const partMatches = new InvoicePartMatchService();
+  const candidates = await partMatches.candidates(
+    actorA,
+    draft.id,
+    linesApproved.lines[0].id,
+  );
+  assert.equal(candidates[0].part.id, ownedPartId);
+  assert.equal(candidates.some((candidate) => candidate.part.id === foreignPartId), false);
+  assert.ok(candidates[0].signals.includes("Exact part reference"));
+  await assert.rejects(
+    partMatches.update(
+      actorA,
+      draft.id,
+      linesApproved.draftRevision,
+      [
+        {
+          lineId: linesApproved.lines[0].id,
+          decision: "existing",
+          selectedPartId: foreignPartId,
+          proposedNewPart: null,
+        },
+      ],
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_INVALID_REQUEST",
+  );
+  const afterForeignAttempt = await reviews.get(actorA, draft.id);
+  assert.equal(afterForeignAttempt.draftRevision, linesApproved.draftRevision);
+  const matched = await partMatches.update(
     actorA,
     draft.id,
     linesApproved.draftRevision,
+    [
+      {
+        lineId: linesApproved.lines[0].id,
+        decision: "existing",
+        selectedPartId: ownedPartId,
+        proposedNewPart: null,
+      },
+    ],
+    randomUUID(),
+  );
+  assert.equal(matched.lines[0].match.decision, "existing");
+  assert.equal(matched.lines[0].match.selectedPart?.id, ownedPartId);
+  assert.equal(matched.lines[0].match.originalSuggestion?.partId, ownedPartId);
+  const rejected = await reviews.reject(
+    actorA,
+    draft.id,
+    matched.draftRevision,
     "Not a supplier invoice",
     randomUUID(),
   );

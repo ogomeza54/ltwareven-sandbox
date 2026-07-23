@@ -3,6 +3,7 @@ import type {
   InvoiceExtractionRunDto,
   InvoiceFinalHeader,
   InvoiceHeaderField,
+  InvoicePartCandidate,
   InvoicePublicAssetDto,
   InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
@@ -207,6 +208,68 @@ export async function updateInvoiceLinesReview(
           revision: workspace.draftRevision,
           lines,
           decision,
+        }),
+      },
+    ),
+  );
+}
+
+export async function getInvoicePartCandidates(
+  workspace: InvoiceReviewWorkspaceDto,
+  lineId: string,
+  query = "",
+): Promise<InvoicePartCandidate[]> {
+  const parameters = query.trim()
+    ? `?q=${encodeURIComponent(query.trim())}`
+    : "";
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/review/lines/${encodeURIComponent(lineId)}/candidates${parameters}`,
+      { credentials: "include" },
+    ),
+  );
+}
+
+export async function updateInvoiceLineMatches(
+  workspace: InvoiceReviewWorkspaceDto,
+  matches: Array<
+    | {
+        lineId: string;
+        decision: "unresolved";
+        selectedPartId: null;
+        proposedNewPart: null;
+      }
+    | {
+        lineId: string;
+        decision: "existing";
+        selectedPartId: string;
+        proposedNewPart: null;
+      }
+    | {
+        lineId: string;
+        decision: "new";
+        selectedPartId: null;
+        proposedNewPart: {
+          name: string;
+          partNumber: string;
+          itemType: "inventory" | "consumable";
+          category: string | null;
+          groupId: string | null;
+          subgroupId: string | null;
+        };
+      }
+  >,
+): Promise<InvoiceReviewWorkspaceDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/review/matches`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: workspace.draftRevision,
+          matches,
         }),
       },
     ),

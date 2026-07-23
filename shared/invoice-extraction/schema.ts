@@ -463,6 +463,103 @@ export const invoiceReviewTotals = pgTable(
   ],
 );
 
+export const invoicePartAliases = pgTable(
+  "invoice_part_aliases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    partId: varchar("part_id").notNull(),
+    vendorNameNormalized: text("vendor_name_normalized"),
+    vendorPartNumberNormalized: text("vendor_part_number_normalized"),
+    descriptionNormalized: text("description_normalized"),
+    confirmations: integer("confirmations").default(1).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_part_aliases_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_part_aliases_identity_unique").on(
+      table.companyId,
+      table.partId,
+      table.vendorNameNormalized,
+      table.vendorPartNumberNormalized,
+      table.descriptionNormalized,
+    ),
+    index("invoice_part_aliases_lookup_idx").on(
+      table.companyId,
+      table.vendorPartNumberNormalized,
+    ),
+    check(
+      "invoice_part_aliases_confirmations_positive",
+      sql`${table.confirmations} > 0`,
+    ),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "invoice_part_aliases_company_fk",
+    }),
+  ],
+);
+
+export const invoiceLineMatches = pgTable(
+  "invoice_line_matches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    lineId: uuid("line_id").notNull(),
+    decision: varchar("decision", { length: 16 }).default("unresolved").notNull(),
+    selectedPartId: varchar("selected_part_id"),
+    proposedNewPart: jsonb("proposed_new_part"),
+    originalSuggestion: jsonb("original_suggestion"),
+    revision: integer("revision").default(0).notNull(),
+    updatedByCompanyId: varchar("updated_by_company_id").notNull(),
+    updatedByUserId: varchar("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_line_matches_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_line_matches_company_line_unique").on(
+      table.companyId,
+      table.lineId,
+    ),
+    index("invoice_line_matches_company_draft_idx").on(
+      table.companyId,
+      table.draftId,
+    ),
+    check(
+      "invoice_line_matches_decision_valid",
+      sql`${table.decision} in ('unresolved', 'existing', 'new')`,
+    ),
+    check(
+      "invoice_line_matches_revision_nonnegative",
+      sql`${table.revision} >= 0`,
+    ),
+    check(
+      "invoice_line_matches_decision_coherent",
+      sql`(${table.decision} = 'unresolved' and ${table.selectedPartId} is null and ${table.proposedNewPart} is null)
+          or (${table.decision} = 'existing' and ${table.selectedPartId} is not null and ${table.proposedNewPart} is null)
+          or (${table.decision} = 'new' and ${table.selectedPartId} is null and jsonb_typeof(${table.proposedNewPart}) = 'object')`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_line_matches_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.lineId],
+      foreignColumns: [invoiceReviewLines.companyId, invoiceReviewLines.id],
+      name: "invoice_line_matches_line_fk",
+    }),
+    foreignKey({
+      columns: [table.updatedByCompanyId, table.updatedByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_line_matches_updater_fk",
+    }),
+  ],
+);
+
 export const invoiceProviderWebhookEvents = pgTable(
   "invoice_provider_webhook_events",
   {

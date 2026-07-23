@@ -51,6 +51,29 @@ export interface ReviewLineRecord extends Omit<EditableReviewLine, "id"> {
   position: number;
   calculatedLineTotal: string | null;
   proposed: InvoiceProposal["lines"][number] | null;
+  match: {
+    decision: "unresolved" | "existing" | "new";
+    selectedPart: {
+      id: string;
+      name: string;
+      partNumber: string;
+      category: string | null;
+      itemType: "inventory" | "consumable";
+    } | null;
+    proposedNewPart: {
+      name: string;
+      partNumber: string;
+      itemType: "inventory" | "consumable";
+      category: string | null;
+      groupId: string | null;
+      subgroupId: string | null;
+    } | null;
+    originalSuggestion: {
+      partId: string;
+      score: number;
+      signals: string[];
+    } | null;
+  };
 }
 
 export interface ReviewTotalsRecord
@@ -67,6 +90,14 @@ interface LineRow {
   quantity: string | null;
   unit_cost: string | null;
   classification: ReviewLineRecord["classification"];
+  match_decision: "unresolved" | "existing" | "new" | null;
+  selected_part_id: string | null;
+  selected_part_name: string | null;
+  selected_part_number: string | null;
+  selected_part_category: string | null;
+  selected_part_type: "inventory" | "consumable" | null;
+  proposed_new_part: unknown;
+  original_suggestion: unknown;
 }
 
 function headerMoney(header: InvoiceFinalHeader) {
@@ -166,13 +197,22 @@ export class PostgresInvoiceLineReviewRepository {
     const proposal = invoiceProposalSchema.parse(proposalRow.payload);
     const lineRows = rows<LineRow>(
       await this.database.execute(sql`
-        select id, source_line_index, position, description,
-               vendor_part_number, quantity::text, unit_cost::text,
-               classification
-        from invoice_review_lines
-        where company_id = ${actor.effectiveCompanyId}
-          and draft_id = ${draftId}::uuid
-        order by position, id
+        select line.id, line.source_line_index, line.position, line.description,
+               line.vendor_part_number, line.quantity::text, line.unit_cost::text,
+               line.classification, match.decision as match_decision,
+               match.selected_part_id, part.name as selected_part_name,
+               part.part_number as selected_part_number,
+               part.category as selected_part_category,
+               part.item_type as selected_part_type,
+               match.proposed_new_part, match.original_suggestion
+        from invoice_review_lines line
+        left join invoice_line_matches match
+          on match.company_id = line.company_id and match.line_id = line.id
+        left join inventory_parts part
+          on part.company_id = line.company_id and part.id = match.selected_part_id
+        where line.company_id = ${actor.effectiveCompanyId}
+          and line.draft_id = ${draftId}::uuid
+        order by line.position, line.id
       `),
     );
     const totals = rows<{
@@ -221,6 +261,29 @@ export class PostgresInvoiceLineReviewRepository {
               )
             : null,
         classification: line.classification,
+        match: {
+          decision: line.match_decision ?? "unresolved",
+          selectedPart:
+            line.match_decision === "existing" && line.selected_part_id
+              ? {
+                  id: line.selected_part_id,
+                  name: line.selected_part_name ?? "",
+                  partNumber: line.selected_part_number ?? "",
+                  category: line.selected_part_category,
+                  itemType:
+                    line.selected_part_type === "consumable"
+                      ? "consumable"
+                      : "inventory",
+                }
+              : null,
+          proposedNewPart:
+            line.match_decision === "new"
+              ? (line.proposed_new_part as ReviewLineRecord["match"]["proposedNewPart"])
+              : null,
+          originalSuggestion:
+            (line.original_suggestion as ReviewLineRecord["match"]["originalSuggestion"]) ??
+            null,
+        },
         proposed:
           line.source_line_index === null
             ? null
@@ -279,14 +342,21 @@ export class PostgresInvoiceLineReviewRepository {
         `),
       )[0];
       if (!header) throw new InvoiceDomainError("INVOICE_INVALID_STATE");
-      const current = rows<{ id: string }>(
+      const current = rows<{
+        id: string;
+        description: string | null;
+        vendor_part_number: string | null;
+        classification: EditableReviewLine["classification"];
+      }>(
         await tx.execute(sql`
-          select id from invoice_review_lines
+          select id, description, vendor_part_number, classification
+          from invoice_review_lines
           where company_id = ${actor.effectiveCompanyId}
             and draft_id = ${draftId}::uuid
         `),
       );
       const currentIds = new Set(current.map((line) => line.id));
+      const currentById = new Map(current.map((line) => [line.id, line]));
       const retainedIds = inputLines
         .map((line) => line.id)
         .filter((id): id is string => id !== null);
@@ -299,6 +369,16 @@ export class PostgresInvoiceLineReviewRepository {
         }
       }
       const retained = retainedIds;
+      await tx.execute(
+        retained.length
+          ? sql`delete from invoice_line_matches
+                where company_id = ${actor.effectiveCompanyId}
+                  and draft_id = ${draftId}::uuid
+                  and line_id not in (${sql.join(retained.map((id) => sql`${id}::uuid`), sql`, `)})`
+          : sql`delete from invoice_line_matches
+                where company_id = ${actor.effectiveCompanyId}
+                  and draft_id = ${draftId}::uuid`,
+      );
       await tx.execute(
         retained.length
           ? sql`delete from invoice_review_lines
@@ -317,6 +397,7 @@ export class PostgresInvoiceLineReviewRepository {
       for (let index = 0; index < inputLines.length; index += 1) {
         const line = inputLines[index];
         if (line.id) {
+          const previous = currentById.get(line.id)!;
           await tx.execute(sql`
             update invoice_review_lines
             set position = ${index + 1}, description = ${line.description},
@@ -327,6 +408,20 @@ export class PostgresInvoiceLineReviewRepository {
             where company_id = ${actor.effectiveCompanyId}
               and draft_id = ${draftId}::uuid and id = ${line.id}::uuid
           `);
+          if (
+            previous.description !== line.description ||
+            previous.vendor_part_number !== line.vendorPartNumber ||
+            previous.classification !== line.classification
+          ) {
+            await tx.execute(sql`
+              update invoice_line_matches
+              set decision = 'unresolved', selected_part_id = null,
+                  proposed_new_part = null, revision = revision + 1,
+                  updated_at = now()
+              where company_id = ${actor.effectiveCompanyId}
+                and line_id = ${line.id}::uuid
+            `);
+          }
         } else {
           await tx.execute(sql`
             insert into invoice_review_lines (

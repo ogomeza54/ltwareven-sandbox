@@ -350,6 +350,35 @@ export const invoiceReviewWorkspaceDtoSchema = z.object({
       calculatedLineTotal: z.string().nullable(),
       classification: z.enum(["inventory", "consumable", "unknown"]),
       proposed: invoiceProposalSchema.shape.lines.element.nullable(),
+      match: z.object({
+        decision: z.enum(["unresolved", "existing", "new"]),
+        selectedPart: z
+          .object({
+            id: z.string().uuid(),
+            name: z.string(),
+            partNumber: z.string(),
+            category: z.string().nullable(),
+            itemType: z.enum(["inventory", "consumable"]),
+          })
+          .nullable(),
+        proposedNewPart: z
+          .object({
+            name: z.string(),
+            partNumber: z.string(),
+            itemType: z.enum(["inventory", "consumable"]),
+            category: z.string().nullable(),
+            groupId: z.string().uuid().nullable(),
+            subgroupId: z.string().uuid().nullable(),
+          })
+          .nullable(),
+        originalSuggestion: z
+          .object({
+            partId: z.string().uuid(),
+            score: z.number().int().min(0).max(100),
+            signals: z.array(z.string()),
+          })
+          .nullable(),
+      }),
     }),
   ),
   reconciliation: z.object({
@@ -389,6 +418,66 @@ export const updateInvoiceLinesReviewSchema = z
     revision: invoiceDraftRevisionSchema,
     lines: z.array(invoiceEditableLineSchema).max(500),
     decision: z.enum(["draft", "approved"]),
+  })
+  .strict();
+
+export const invoicePartCandidateSchema = z.object({
+  part: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    partNumber: z.string(),
+    category: z.string().nullable(),
+    itemType: z.enum(["inventory", "consumable"]),
+  }),
+  score: z.number().int().min(0).max(100),
+  signals: z.array(z.string()),
+});
+export type InvoicePartCandidate = z.infer<typeof invoicePartCandidateSchema>;
+
+const proposedNewInvoicePartSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    partNumber: z.string().trim().min(1).max(160),
+    itemType: z.enum(["inventory", "consumable"]),
+    category: z.string().trim().max(160).nullable(),
+    groupId: z.string().uuid().nullable(),
+    subgroupId: z.string().uuid().nullable(),
+  })
+  .strict();
+
+export const updateInvoiceLineMatchesSchema = z
+  .object({
+    revision: invoiceDraftRevisionSchema,
+    matches: z
+      .array(
+        z.discriminatedUnion("decision", [
+          z
+            .object({
+              lineId: z.string().uuid(),
+              decision: z.literal("unresolved"),
+              selectedPartId: z.null(),
+              proposedNewPart: z.null(),
+            })
+            .strict(),
+          z
+            .object({
+              lineId: z.string().uuid(),
+              decision: z.literal("existing"),
+              selectedPartId: z.string().uuid(),
+              proposedNewPart: z.null(),
+            })
+            .strict(),
+          z
+            .object({
+              lineId: z.string().uuid(),
+              decision: z.literal("new"),
+              selectedPartId: z.null(),
+              proposedNewPart: proposedNewInvoicePartSchema,
+            })
+            .strict(),
+        ]),
+      )
+      .max(500),
   })
   .strict();
 

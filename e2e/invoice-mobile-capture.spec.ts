@@ -17,6 +17,7 @@ interface MockState {
   reviewDecision: "draft" | "approved" | "rejected";
   reviewHeader: Record<string, string | null>;
   reviewedFields: string[];
+  selectedPartId: string | null;
   rejectionReason: string | null;
   uploadAttempts: number;
   failFirstUpload: boolean;
@@ -86,6 +87,7 @@ async function mockApplication(
       total: null,
     },
     reviewedFields: [],
+    selectedPartId: null,
     rejectionReason: null,
     uploadAttempts: 0,
     failFirstUpload,
@@ -147,6 +149,38 @@ async function mockApplication(
       path === `/api/invoice-drafts/${draftId}/review` &&
       request.method() === "GET"
     ) {
+      return json(route, reviewWorkspace(state));
+    }
+    if (
+      path ===
+        `/api/invoice-drafts/${draftId}/review/lines/00000000-0000-4000-8000-000000000020/candidates` &&
+      request.method() === "GET"
+    ) {
+      return json(route, [
+        {
+          part: {
+            id: "00000000-0000-4000-8000-000000000030",
+            name: "Brake Pad Catalog",
+            partNumber: "BP-100",
+            category: "Brakes",
+            itemType: "inventory",
+          },
+          score: 95,
+          signals: ["Exact part reference", "Name similarity 80%"],
+        },
+      ]);
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/review/matches` &&
+      request.method() === "PATCH"
+    ) {
+      const body = request.postDataJSON() as {
+        revision: number;
+        matches: Array<{ selectedPartId: string | null }>;
+      };
+      expect(body).not.toHaveProperty("companyId");
+      state.selectedPartId = body.matches[0]?.selectedPartId ?? null;
+      state.revision += 1;
       return json(route, reviewWorkspace(state));
     }
     if (
@@ -381,6 +415,20 @@ function reviewWorkspace(state: MockState) {
         calculatedLineTotal: null,
         classification: "inventory",
         proposed: completed.proposal?.lines[0],
+        match: {
+          decision: state.selectedPartId ? "existing" : "unresolved",
+          selectedPart: state.selectedPartId
+            ? {
+                id: state.selectedPartId,
+                name: "Brake Pad Catalog",
+                partNumber: "BP-100",
+                category: "Brakes",
+                itemType: "inventory",
+              }
+            : null,
+          proposedNewPart: null,
+          originalSuggestion: null,
+        },
       },
     ],
     reconciliation: {
@@ -621,6 +669,13 @@ test("AI extraction is polled and stops at a human review result without stock w
   await vendor.blur();
   await expect.poll(() => state.reviewSaves).toBeGreaterThan(0);
   expect(state.reviewHeader.vendorName).toBe("Corrected Vendor");
+  await page.getByRole("button", { name: "Find matches" }).click();
+  await expect(page.getByText("Score 95/100")).toBeVisible();
+  await page.getByRole("button", { name: "Select" }).click();
+  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  expect(state.selectedPartId).toBe(
+    "00000000-0000-4000-8000-000000000030",
+  );
   await page.getByLabel("Reject reason").fill("Document is not a supplier invoice");
   await page.getByRole("button", { name: "Reject invoice" }).click();
   await expect(page.getByText("Rejected: Document is not a supplier invoice")).toBeVisible();
