@@ -271,6 +271,118 @@ const requiredLedgerColumnShapes: Readonly<
   "invoice_audit_events.metadata": { type: "jsonb", nullable: false },
 };
 
+const requiredPrivateSourceColumns: Readonly<Record<string, readonly string[]>> =
+  {
+    invoice_documents: [
+      "id",
+      "company_id",
+      "draft_id",
+      "fingerprint_sha256",
+      "total_pages",
+      "retention_deadline",
+      "created_at",
+      "updated_at",
+    ],
+    invoice_source_assets: [
+      "id",
+      "company_id",
+      "draft_id",
+      "document_id",
+      "lifecycle",
+      "object_key",
+      "display_name",
+      "detected_type",
+      "byte_size",
+      "sha256",
+      "page_count",
+      "position",
+      "hold_at",
+      "delete_attempts",
+      "delete_failure_code",
+      "delete_requested_at",
+      "deleted_at",
+      "created_at",
+      "updated_at",
+    ],
+  };
+
+const requiredPrivateSourceConstraints = [
+  "invoice_documents_pkey",
+  "invoice_documents_company_draft_id_unique",
+  "invoice_documents_company_draft_unique",
+  "invoice_documents_pages_nonnegative",
+  "invoice_documents_fingerprint_shape",
+  "invoice_documents_company_fk",
+  "invoice_documents_draft_fk",
+  "invoice_source_assets_pkey",
+  "invoice_source_assets_company_id_id_unique",
+  "invoice_source_assets_company_document_id_unique",
+  "invoice_source_assets_size_positive",
+  "invoice_source_assets_pages_positive",
+  "invoice_source_assets_position_positive",
+  "invoice_source_assets_delete_attempts_nonnegative",
+  "invoice_source_assets_sha_shape",
+  "invoice_source_assets_lifecycle_coherent",
+  "invoice_source_assets_company_fk",
+  "invoice_source_assets_draft_fk",
+  "invoice_source_assets_document_fk",
+] as const;
+
+const privateConstraintTables: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    requiredPrivateSourceConstraints.map((name) => [
+      name,
+      name.startsWith("invoice_documents_")
+        ? "invoice_documents"
+        : "invoice_source_assets",
+    ]),
+  );
+
+const requiredPrivateSourceIndexes = [
+  "invoice_source_assets_attached_position_unique",
+  "invoice_source_assets_document_checksum_unique",
+  "invoice_source_assets_reconcile_idx",
+] as const;
+const privateSourceConstraintFingerprint =
+  "1760b56f6ab997253569e2a188a07ba34364965056ab5e6675607b423f821864";
+const privateSourceIndexFingerprint =
+  "43b3920ce7dbc5b8ea9de8f5893a6705d7a6408454c81b89102b0c64ec4007d1";
+
+const requiredPrivateSourceShapes: Readonly<
+  Record<string, { type: string; nullable: boolean }>
+> = {
+  "invoice_documents.id": { type: "uuid", nullable: false },
+  "invoice_documents.company_id": {
+    type: "character varying",
+    nullable: false,
+  },
+  "invoice_documents.draft_id": { type: "uuid", nullable: false },
+  "invoice_documents.total_pages": { type: "integer", nullable: false },
+  "invoice_documents.retention_deadline": {
+    type: "timestamp with time zone",
+    nullable: false,
+  },
+  "invoice_source_assets.id": { type: "uuid", nullable: false },
+  "invoice_source_assets.company_id": {
+    type: "character varying",
+    nullable: false,
+  },
+  "invoice_source_assets.draft_id": { type: "uuid", nullable: false },
+  "invoice_source_assets.document_id": { type: "uuid", nullable: false },
+  "invoice_source_assets.lifecycle": {
+    type: "USER-DEFINED",
+    nullable: false,
+  },
+  "invoice_source_assets.display_name": {
+    type: "character varying",
+    nullable: false,
+  },
+  "invoice_source_assets.delete_attempts": {
+    type: "integer",
+    nullable: false,
+  },
+};
+
 export async function assertBrownfieldBaseline(client: Client): Promise<void> {
   const result = await client.query<{
     table_name: string;
@@ -366,6 +478,28 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
     );
   }
   if (journal.rows[0]?.exists) {
+    const sourceTables = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public'
+          and table_name = any($1::text[])`,
+      [["invoice_documents", "invoice_source_assets"]],
+    );
+    const sourceJournal = await client.query<{ applied: boolean }>(
+      `select exists (
+         select 1 from drizzle.__drizzle_migrations
+          where created_at = 1784764802000
+       ) as applied`,
+    );
+    if (sourceTables.rowCount && !sourceJournal.rows[0]?.applied) {
+      throw new Error(
+        "Brownfield migration preflight failed: untracked private invoice source objects",
+      );
+    }
+    if (sourceJournal.rows[0]?.applied && sourceTables.rowCount !== 2) {
+      throw new Error(
+        "Brownfield migration preflight failed: journaled private invoice sources are incomplete",
+      );
+    }
     const recorded = await client.query<{ applied: boolean }>(
       `select exists (
          select 1 from drizzle.__drizzle_migrations
@@ -378,6 +512,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
       );
     }
     if (recorded.rows[0]?.applied) {
+      const ledgerColumnDrift: string[] = [];
       const ledgerColumns = await client.query<{
         table_name: string;
         column_name: string;
@@ -417,7 +552,6 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
           ledgerColumnDrift.push(`incompatible column ${key}`);
         }
       }
-      const ledgerColumnDrift: string[] = [];
       for (const [table, expectedColumns] of Object.entries(
         requiredLedgerColumns,
       )) {
@@ -548,6 +682,162 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
         throw new Error(
           `Brownfield migration preflight failed: journaled invoice ledger is incompatible (${missingLedgerObjects.join(", ")})`,
         );
+      }
+
+      const sourceRecorded = await client.query<{ applied: boolean }>(
+        `select exists (
+           select 1 from drizzle.__drizzle_migrations
+            where created_at = 1784764802000
+         ) as applied`,
+      );
+      if (sourceRecorded.rows[0]?.applied) {
+        const sourceColumns = await client.query<{
+          table_name: string;
+          column_name: string;
+          data_type: string;
+          is_nullable: "YES" | "NO";
+        }>(
+          `select table_name, column_name, data_type, is_nullable
+             from information_schema.columns
+            where table_schema = 'public'
+              and table_name = any($1::text[])`,
+          [Object.keys(requiredPrivateSourceColumns)],
+        );
+        const observed = new Map<string, Set<string>>();
+        const observedShapes = new Map<
+          string,
+          { type: string; nullable: boolean }
+        >();
+        for (const row of sourceColumns.rows) {
+          const names = observed.get(row.table_name) ?? new Set<string>();
+          names.add(row.column_name);
+          observed.set(row.table_name, names);
+          observedShapes.set(`${row.table_name}.${row.column_name}`, {
+            type: row.data_type,
+            nullable: row.is_nullable === "YES",
+          });
+        }
+        const drift: string[] = [];
+        for (const [table, expectedColumns] of Object.entries(
+          requiredPrivateSourceColumns,
+        )) {
+          const actualColumns = observed.get(table) ?? new Set<string>();
+          for (const column of expectedColumns) {
+            if (!actualColumns.has(column)) {
+              drift.push(`missing column ${table}.${column}`);
+            }
+          }
+          for (const column of actualColumns) {
+            if (!expectedColumns.includes(column)) {
+              drift.push(`unexpected column ${table}.${column}`);
+            }
+          }
+        }
+        for (const [column, expected] of Object.entries(
+          requiredPrivateSourceShapes,
+        )) {
+          const actual = observedShapes.get(column);
+          if (
+            !actual ||
+            actual.type !== expected.type ||
+            actual.nullable !== expected.nullable
+          ) {
+            drift.push(`incompatible column ${column}`);
+          }
+        }
+        const constraints = await client.query<{
+          conname: string;
+          table_name: string;
+          definition: string;
+        }>(
+          `select conname, conrelid::regclass::text as table_name,
+                  pg_get_constraintdef(oid, true) as definition
+             from pg_constraint
+            where connamespace = 'public'::regnamespace
+              and conname = any($1::text[])
+            order by conname`,
+          [[...requiredPrivateSourceConstraints]],
+        );
+        const constraintNames = new Set(
+          constraints.rows.map((row) => row.conname),
+        );
+        drift.push(
+          ...requiredPrivateSourceConstraints
+            .filter((name) => !constraintNames.has(name))
+            .map((name) => `constraint ${name}`),
+        );
+        for (const constraint of constraints.rows) {
+          if (
+            constraint.table_name !==
+            privateConstraintTables[constraint.conname]
+          ) {
+            drift.push(`misbound constraint ${constraint.conname}`);
+          }
+          if (!constraint.definition.trim()) {
+            drift.push(`empty constraint ${constraint.conname}`);
+          }
+        }
+        if (
+          createHash("sha256")
+            .update(JSON.stringify(constraints.rows))
+            .digest("hex") !== privateSourceConstraintFingerprint
+        ) {
+          drift.push("private source constraint definitions");
+        }
+        const indexes = await client.query<{
+          indexname: string;
+          table_name: string;
+          definition: string;
+        }>(
+          `select index_class.relname as indexname,
+                  table_class.relname as table_name,
+                  pg_get_indexdef(indexes.indexrelid) as definition
+             from pg_index indexes
+             join pg_class index_class on index_class.oid = indexes.indexrelid
+             join pg_class table_class on table_class.oid = indexes.indrelid
+            where index_class.relname = any($1::text[])
+            order by index_class.relname`,
+          [[...requiredPrivateSourceIndexes]],
+        );
+        const indexNames = new Set(indexes.rows.map((row) => row.indexname));
+        drift.push(
+          ...requiredPrivateSourceIndexes
+            .filter((name) => !indexNames.has(name))
+            .map((name) => `index ${name}`),
+        );
+        for (const index of indexes.rows) {
+          if (index.table_name !== "invoice_source_assets") {
+            drift.push(`misbound index ${index.indexname}`);
+          }
+          if (!index.definition.includes("invoice_source_assets")) {
+            drift.push(`incompatible index ${index.indexname}`);
+          }
+        }
+        if (
+          createHash("sha256")
+            .update(JSON.stringify(indexes.rows))
+            .digest("hex") !== privateSourceIndexFingerprint
+        ) {
+          drift.push("private source index definitions");
+        }
+        const lifecycle = await client.query<{ enumlabel: string }>(
+          `select value.enumlabel
+             from pg_type type
+             join pg_enum value on value.enumtypid = type.oid
+            where type.typname = 'invoice_source_asset_lifecycle'
+            order by value.enumsortorder`,
+        );
+        if (
+          JSON.stringify(lifecycle.rows.map((row) => row.enumlabel)) !==
+          JSON.stringify(["staging", "verified", "attached", "deleted"])
+        ) {
+          drift.push("enum invoice_source_asset_lifecycle");
+        }
+        if (drift.length) {
+          throw new Error(
+            `Brownfield migration preflight failed: journaled private invoice sources are incompatible (${drift.join(", ")})`,
+          );
+        }
       }
     }
   }

@@ -93,6 +93,25 @@ test("draft create/list/read preserve the tenant repository boundary", async () 
   );
 });
 
+test("draft listing includes saved source metadata for deterministic resume", async () => {
+  const source = { totalPages: 0, assets: [] };
+  const service = new InvoiceDraftService(
+    repository({
+      manualReceiving: true,
+      scanExtraction: true,
+      stockConfirmation: false,
+      engineActivation: false,
+    }),
+    {
+      async getSource(_actor, draftId) {
+        assert.equal(draftId, draft.id);
+        return source;
+      },
+    },
+  );
+  assert.deepEqual((await service.list(actor))[0].source, source);
+});
+
 test("draft list and read enforce processing RBAC", async () => {
   const service = new InvoiceDraftService(
     repository({

@@ -63,6 +63,14 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from invoice_source_assets where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  );
+  await client.query(
+    `delete from invoice_documents where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  );
+  await client.query(
     `update invoice_review_drafts set active_run_id = null
       where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
@@ -85,10 +93,11 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 2);
+  assert.equal(journal.rowCount, 3);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
+    "0002_invoice_private_sources.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -137,7 +146,307 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 2);
+  assert.equal(journal.rows[0].count, 3);
+});
+
+test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
+  const { PostgresInvoiceRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-repository");
+  const { PostgresInvoiceDocumentRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-document-repository");
+  const ledger = new PostgresInvoiceRepository();
+  const sources = new PostgresInvoiceDocumentRepository();
+  const context = {
+    actor: actorA,
+    correlationId: randomUUID(),
+    requestId: randomUUID(),
+  };
+  const draft = await ledger.createDraft(context);
+  const first = await sources.reserve(
+    context,
+    draft.id,
+    draft.revision,
+    "../../first.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    first.documentId,
+    first.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 100,
+      sha256: "a".repeat(64),
+      pageCount: 4,
+    },
+  );
+  const uploaded = await sources.attach(
+    context,
+    draft.id,
+    first.documentId,
+    first.assetId,
+    draft.revision,
+    10,
+  );
+  assert.equal(uploaded.status, "uploaded");
+  assert.equal(uploaded.revision, 1);
+  assert.equal(uploaded.source?.assets[0].displayName, "first.png");
+  assert.equal(uploaded.source?.totalPages, 4);
+
+  const second = await sources.reserve(
+    context,
+    draft.id,
+    uploaded.revision,
+    "second.pdf",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    second.documentId,
+    second.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "application/pdf",
+      byteSize: 200,
+      sha256: "b".repeat(64),
+      pageCount: 6,
+    },
+  );
+  const twoAssets = await sources.attach(
+    context,
+    draft.id,
+    second.documentId,
+    second.assetId,
+    uploaded.revision,
+    10,
+  );
+  assert.equal(twoAssets.source?.totalPages, 10);
+  const overLimit = await sources.reserve(
+    context,
+    draft.id,
+    twoAssets.revision,
+    "over-limit.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    overLimit.documentId,
+    overLimit.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 50,
+      sha256: "c".repeat(64),
+      pageCount: 1,
+    },
+  );
+  await assert.rejects(
+    sources.attach(
+      context,
+      draft.id,
+      overLimit.documentId,
+      overLimit.assetId,
+      twoAssets.revision,
+      10,
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_PAGE_LIMIT",
+  );
+  await sources.abandonVerified(
+    actorA,
+    draft.id,
+    overLimit.documentId,
+    overLimit.assetId,
+  );
+  const beforeFingerprint = await client.query<{ fingerprint_sha256: string }>(
+    `select fingerprint_sha256 from invoice_documents
+      where company_id = $1 and draft_id = $2`,
+    [companyA, draft.id],
+  );
+  assert.match(beforeFingerprint.rows[0].fingerprint_sha256, /^[0-9a-f]{64}$/);
+
+  const reordered = await sources.reorder(
+    context,
+    draft.id,
+    twoAssets.revision,
+    [second.assetId, first.assetId],
+  );
+  assert.deepEqual(
+    reordered.source?.assets.map((asset) => asset.id),
+    [second.assetId, first.assetId],
+  );
+  const afterFingerprint = await client.query<{ fingerprint_sha256: string }>(
+    `select fingerprint_sha256 from invoice_documents
+      where company_id = $1 and draft_id = $2`,
+    [companyA, draft.id],
+  );
+  assert.notEqual(
+    afterFingerprint.rows[0].fingerprint_sha256,
+    beforeFingerprint.rows[0].fingerprint_sha256,
+  );
+
+  await assert.rejects(
+    sources.getSource(actorB, draft.id),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_DRAFT_NOT_FOUND",
+  );
+  await assert.rejects(
+    client.query(
+      `insert into invoice_source_assets (
+         company_id, draft_id, document_id, display_name
+       ) values ($1, $2, $3, 'foreign')`,
+      [companyB, draft.id, first.documentId],
+    ),
+    /foreign key/i,
+  );
+
+  const replay = await sources.reorder(
+    context,
+    draft.id,
+    twoAssets.revision,
+    [second.assetId, first.assetId],
+  );
+  assert.equal(replay.revision, reordered.revision);
+  const pendingSecond = await sources.prepareDelete(
+    context,
+    draft.id,
+    second.assetId,
+    reordered.revision,
+  );
+  assert.equal(pendingSecond?.status, "pending");
+  assert.equal(pendingSecond?.status === "pending" && pendingSecond.revision, 4);
+  const pendingReplay = await sources.prepareDelete(
+    context,
+    draft.id,
+    second.assetId,
+    reordered.revision,
+  );
+  assert.deepEqual(pendingReplay, pendingSecond);
+  await assert.rejects(
+    ledger.createAndActivateRun(
+      context,
+      draft.id,
+      pendingSecond?.status === "pending"
+        ? pendingSecond.revision
+        : reordered.revision,
+      "uploaded",
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_INVALID_STATE",
+  );
+  await assert.rejects(
+    sources.reorder(
+      context,
+      draft.id,
+      pendingSecond?.status === "pending"
+        ? pendingSecond.revision
+        : reordered.revision,
+      [first.assetId, second.assetId],
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_INVALID_STATE",
+  );
+  const oneAsset = await sources.finalizeDelete(
+    context,
+    draft.id,
+    second.documentId,
+    second.assetId,
+    pendingSecond?.status === "pending"
+      ? pendingSecond.revision
+      : reordered.revision,
+  );
+  assert.equal(oneAsset.source?.totalPages, 4);
+  const pendingFirst = await sources.prepareDelete(
+    context,
+    draft.id,
+    first.assetId,
+    oneAsset.revision,
+  );
+  assert.equal(pendingFirst?.status, "pending");
+  const empty = await sources.finalizeDelete(
+    context,
+    draft.id,
+    first.documentId,
+    first.assetId,
+    pendingFirst?.status === "pending" ? pendingFirst.revision : oneAsset.revision,
+  );
+  assert.equal(empty.status, "draft");
+  assert.equal(empty.source?.totalPages, 0);
+  assert.deepEqual(empty.source?.assets, []);
+  assert.equal(
+    (
+      await sources.prepareDelete(
+        context,
+        draft.id,
+        first.assetId,
+        empty.revision,
+      )
+    )?.status,
+    "deleted",
+  );
+
+  const held = await sources.reserve(
+    context,
+    draft.id,
+    empty.revision,
+    "held.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    held.documentId,
+    held.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 10,
+      sha256: "d".repeat(64),
+      pageCount: 1,
+    },
+  );
+  const heldAttached = await sources.attach(
+    context,
+    draft.id,
+    held.documentId,
+    held.assetId,
+    empty.revision,
+    10,
+  );
+  await client.query(
+    `update invoice_source_assets set hold_at = now()
+      where company_id = $1 and id = $2`,
+    [companyA, held.assetId],
+  );
+  await assert.rejects(
+    sources.prepareDelete(
+      context,
+      draft.id,
+      held.assetId,
+      heldAttached.revision,
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_ASSET_HELD",
+  );
 });
 
 test("journal adoption rejects an incomplete ledger fingerprint", async () => {
@@ -149,6 +458,23 @@ test("journal adoption rejects an incomplete ledger fingerprint", async () => {
     await assert.rejects(
       assertBrownfieldBaseline(client),
       /journaled invoice ledger is incompatible/,
+    );
+  } finally {
+    await client.query("rollback");
+  }
+});
+
+test("journal adoption rejects drifted private source definitions", async () => {
+  const { assertBrownfieldBaseline } =
+    await import("../../../scripts/invoice-migration-preflight");
+  await client.query("begin");
+  try {
+    await client.query(
+      "drop index invoice_source_assets_document_checksum_unique",
+    );
+    await assert.rejects(
+      assertBrownfieldBaseline(client),
+      /journaled private invoice sources are incompatible/,
     );
   } finally {
     await client.query("rollback");

@@ -11,7 +11,9 @@ import {
   withCompanyContext,
 } from "../../../auth-context";
 import { PostgresInvoiceRepository } from "../repositories/invoice-repository";
+import { PostgresInvoiceDocumentRepository } from "../repositories/invoice-document-repository";
 import { InvoiceDraftService } from "../services/invoice-draft-service";
+import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
 
@@ -25,6 +27,17 @@ const statusByCode: Readonly<Record<InvoiceDomainError["code"], number>> = {
   INVOICE_INVALID_STATE: 409,
   INVOICE_LEASE_LOST: 409,
   INVOICE_PROVIDER_RESPONSE_CONFLICT: 409,
+  INVOICE_ASSET_NOT_FOUND: 404,
+  INVOICE_FILE_REQUIRED: 400,
+  INVOICE_FILE_TOO_LARGE: 413,
+  INVOICE_FILE_UNSUPPORTED: 415,
+  INVOICE_FILE_INVALID: 422,
+  INVOICE_FILE_COMPLEXITY_LIMIT: 422,
+  INVOICE_PAGE_LIMIT: 413,
+  INVOICE_ASSET_ORDER_CONFLICT: 409,
+  INVOICE_STORAGE_UNAVAILABLE: 503,
+  INVOICE_ASSET_HELD: 409,
+  INVOICE_DUPLICATE_SOURCE: 409,
 };
 
 function requestId(req: RequestWithId): string {
@@ -59,12 +72,16 @@ function sendInvoiceError(
 
 export function registerInvoiceDraftRoutes(
   app: Express,
-  service = new InvoiceDraftService(new PostgresInvoiceRepository()),
+  service = new InvoiceDraftService(
+    new PostgresInvoiceRepository(),
+    new PostgresInvoiceDocumentRepository(),
+  ),
 ): void {
   app.post(
     "/api/invoice-drafts",
     isAuthenticated,
     withCompanyContext,
+    requireInvoiceSameOrigin,
     async (request, response) => {
       try {
         if (!createInvoiceDraftSchema.safeParse(request.body ?? {}).success) {

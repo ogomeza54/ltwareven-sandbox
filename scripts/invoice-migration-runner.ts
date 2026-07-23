@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Client } from "pg";
@@ -6,6 +7,7 @@ import { assertBrownfieldBaseline } from "./invoice-migration-preflight";
 const migrations = [
   "0000_brownfield_baseline.sql",
   "0001_invoice_ledger_core.sql",
+  "0002_invoice_private_sources.sql",
 ] as const;
 
 function splitStatements(sql: string): string[] {

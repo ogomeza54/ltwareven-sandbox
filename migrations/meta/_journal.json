@@ -15,6 +15,13 @@
       "when": 1784764801000,
       "tag": "0001_invoice_ledger_core",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784764802000,
+      "tag": "0002_invoice_private_sources",
+      "breakpoints": true
     }
   ]
 }

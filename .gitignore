@@ -4,6 +4,7 @@ dist
 .env.*
 !.env.example
 .local-backups/
+.private/
 .DS_Store
 server/public
 vite.config.ts.*

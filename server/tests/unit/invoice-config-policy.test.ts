@@ -33,6 +33,14 @@ test("invoice pilot configuration has validated safe defaults", () => {
     pilotCurrency: "USD",
     workerMaxAttempts: 3,
     workerLeaseSeconds: 120,
+    storageBackend: "filesystem",
+    storageRoot: ".private/invoice-sources",
+    storageBucket: undefined,
+    allowedOrigin: undefined,
+    maxImagePixels: 40_000_000,
+    validationTimeoutMs: 15_000,
+    validationConcurrency: 2,
+    nodeEnvironment: "development",
   });
 });
 
@@ -45,11 +53,54 @@ test("invoice configuration fails closed and ignores remote database settings", 
       }),
     ZodError,
   );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        INVOICE_MAX_FILE_BYTES: String(10_485_761),
+      }),
+    ZodError,
+  );
   assert.equal(
     loadInvoiceConfig({
       REMOTE_DATABASE_URL: "postgresql://remote.invalid/production",
     }).maxSourcePages,
     10,
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        NODE_ENV: "production",
+        INVOICE_STORAGE_BACKEND: "filesystem",
+      }),
+    /Production invoice storage requires/,
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        NODE_ENV: "production",
+        INVOICE_STORAGE_BACKEND: "replit",
+        REPLIT_OBJECT_STORAGE_BUCKET: "private-invoices",
+      }),
+    /explicit allowed origin/,
+  );
+  assert.equal(
+    loadInvoiceConfig({
+      NODE_ENV: "production",
+      INVOICE_STORAGE_BACKEND: "replit",
+      REPLIT_OBJECT_STORAGE_BUCKET: "private-invoices",
+      INVOICE_ALLOWED_ORIGIN: "https://haulmaster.example",
+    }).storageBackend,
+    "replit",
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        NODE_ENV: "production",
+        INVOICE_STORAGE_BACKEND: "replit",
+        REPLIT_OBJECT_STORAGE_BUCKET: "private-invoices",
+        INVOICE_ALLOWED_ORIGIN: "http://haulmaster.example",
+      }),
+    /HTTPS/,
   );
 });
 

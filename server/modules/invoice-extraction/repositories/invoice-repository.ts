@@ -105,6 +105,8 @@ export class PostgresInvoiceRepository {
   constructor(
     private readonly database: InvoiceDatabase = applicationDatabase,
     private readonly maxAttempts = loadInvoiceConfig().workerMaxAttempts,
+    private readonly abandonedRetentionDays = loadInvoiceConfig()
+      .abandonedRetentionDays,
   ) {}
 
   async resolveFeatures(companyId: string): Promise<InvoiceFeatureResolution> {
@@ -131,13 +133,14 @@ export class PostgresInvoiceRepository {
       const created = await tx.execute(sql`
         insert into invoice_review_drafts (
           company_id, created_by_company_id, created_by_user_id,
-          updated_by_company_id, updated_by_user_id
+          updated_by_company_id, updated_by_user_id, retention_deadline
         ) values (
           ${context.actor.effectiveCompanyId},
           ${context.actor.actorCompanyId},
           ${context.actor.actorUserId},
           ${context.actor.actorCompanyId},
-          ${context.actor.actorUserId}
+          ${context.actor.actorUserId},
+          now() + (${this.abandonedRetentionDays} * interval '1 day')
         )
         returning id, status, revision, active_run_id,
                   created_at, updated_at, last_activity_at
@@ -156,7 +159,9 @@ export class PostgresInvoiceRepository {
              created_at, updated_at, last_activity_at
       from invoice_review_drafts
       where company_id = ${actor.effectiveCompanyId}
+        and created_by_user_id = ${actor.actorUserId}
       order by last_activity_at desc, id
+      limit 20
     `);
     return resultRows<DraftRow>(result).map(draftDto);
   }
@@ -258,6 +263,18 @@ export class PostgresInvoiceRepository {
         throw new InvoiceDomainError("INVOICE_DRAFT_REVISION_CONFLICT");
       }
       if (draft.status !== expectedStatus) {
+        throw new InvoiceDomainError("INVOICE_INVALID_STATE");
+      }
+      const deletionPending = resultRows<{ id: string }>(
+        await tx.execute(sql`
+          select id from invoice_source_assets
+          where company_id = ${context.actor.effectiveCompanyId}
+            and draft_id = ${draftId}::uuid
+            and lifecycle = 'attached' and delete_requested_at is not null
+          limit 1
+        `),
+      )[0];
+      if (deletionPending) {
         throw new InvoiceDomainError("INVOICE_INVALID_STATE");
       }
       const runNumberResult = await tx.execute(sql`

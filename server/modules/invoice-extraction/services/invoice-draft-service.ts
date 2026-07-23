@@ -6,6 +6,7 @@ import {
 } from "@shared/invoice-extraction/contracts";
 import { requireInvoiceCapability } from "../domain/policies";
 import { PostgresInvoiceRepository } from "../repositories/invoice-repository";
+import type { PostgresInvoiceDocumentRepository } from "../repositories/invoice-document-repository";
 
 export interface InvoiceDraftRepositoryPort {
   resolveFeatures(
@@ -24,7 +25,13 @@ export interface InvoiceDraftRepositoryPort {
 }
 
 export class InvoiceDraftService {
-  constructor(private readonly repository: InvoiceDraftRepositoryPort) {}
+  constructor(
+    private readonly repository: InvoiceDraftRepositoryPort,
+    private readonly documents?: Pick<
+      PostgresInvoiceDocumentRepository,
+      "getSource"
+    >,
+  ) {}
 
   async create(
     actor: InvoiceActorContext,
@@ -46,7 +53,12 @@ export class InvoiceDraftService {
 
   async list(actor: InvoiceActorContext): Promise<InvoiceDraftDto[]> {
     requireInvoiceCapability(actor, "process_draft");
-    return this.repository.listDrafts(actor);
+    const drafts = await this.repository.listDrafts(actor);
+    if (!this.documents) return drafts;
+    for (const draft of drafts) {
+      draft.source = await this.documents.getSource(actor, draft.id);
+    }
+    return drafts;
   }
 
   async get(
@@ -56,6 +68,9 @@ export class InvoiceDraftService {
     requireInvoiceCapability(actor, "process_draft");
     const draft = await this.repository.getDraft(actor, draftId);
     if (!draft) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+    if (this.documents) {
+      draft.source = await this.documents.getSource(actor, draftId);
+    }
     return draft;
   }
 }

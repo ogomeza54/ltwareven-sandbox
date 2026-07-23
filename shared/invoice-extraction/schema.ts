@@ -48,6 +48,10 @@ export const invoiceFeatureCapability = pgEnum("invoice_feature_capability", [
   "stock_confirmation",
   "engine_activation",
 ]);
+export const invoiceSourceAssetLifecycle = pgEnum(
+  "invoice_source_asset_lifecycle",
+  ["staging", "verified", "attached", "deleted"],
+);
 
 export const invoiceReviewDrafts = pgTable(
   "invoice_review_drafts",
@@ -325,6 +329,155 @@ export const invoiceAuditEvents = pgTable(
       columns: [table.actorCompanyId, table.actorUserId],
       foreignColumns: [users.companyId, users.id],
       name: "invoice_audit_events_actor_fk",
+    }),
+  ],
+);
+
+export const invoiceDocuments = pgTable(
+  "invoice_documents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    fingerprintSha256: varchar("fingerprint_sha256", { length: 64 }),
+    totalPages: integer("total_pages").default(0).notNull(),
+    retentionDeadline: timestamp("retention_deadline", { withTimezone: true })
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("invoice_documents_company_draft_id_unique").on(
+      table.companyId,
+      table.draftId,
+      table.id,
+    ),
+    unique("invoice_documents_company_draft_unique").on(
+      table.companyId,
+      table.draftId,
+    ),
+    check("invoice_documents_pages_nonnegative", sql`${table.totalPages} >= 0`),
+    check(
+      "invoice_documents_fingerprint_shape",
+      sql`${table.fingerprintSha256} is null or ${table.fingerprintSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "invoice_documents_company_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_documents_draft_fk",
+    }),
+  ],
+);
+
+export const invoiceSourceAssets = pgTable(
+  "invoice_source_assets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    lifecycle: invoiceSourceAssetLifecycle("lifecycle")
+      .default("staging")
+      .notNull(),
+    objectKey: text("object_key"),
+    displayName: varchar("display_name", { length: 120 }).notNull(),
+    detectedType: varchar("detected_type", { length: 32 }),
+    byteSize: integer("byte_size"),
+    sha256: varchar("sha256", { length: 64 }),
+    pageCount: integer("page_count"),
+    position: integer("position"),
+    holdAt: timestamp("hold_at", { withTimezone: true }),
+    deleteAttempts: integer("delete_attempts").default(0).notNull(),
+    deleteFailureCode: varchar("delete_failure_code", { length: 64 }),
+    deleteRequestedAt: timestamp("delete_requested_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("invoice_source_assets_company_id_id_unique").on(
+      table.companyId,
+      table.id,
+    ),
+    unique("invoice_source_assets_company_document_id_unique").on(
+      table.companyId,
+      table.documentId,
+      table.id,
+    ),
+    uniqueIndex("invoice_source_assets_attached_position_unique")
+      .on(table.companyId, table.documentId, table.position)
+      .where(sql`${table.lifecycle} = 'attached'`),
+    uniqueIndex("invoice_source_assets_document_checksum_unique")
+      .on(table.companyId, table.documentId, table.sha256)
+      .where(sql`${table.lifecycle} <> 'deleted' and ${table.sha256} is not null`),
+    index("invoice_source_assets_reconcile_idx").on(
+      table.lifecycle,
+      table.deleteRequestedAt,
+      table.updatedAt,
+    ),
+    check(
+      "invoice_source_assets_size_positive",
+      sql`${table.byteSize} is null or ${table.byteSize} > 0`,
+    ),
+    check(
+      "invoice_source_assets_pages_positive",
+      sql`${table.pageCount} is null or ${table.pageCount} > 0`,
+    ),
+    check(
+      "invoice_source_assets_position_positive",
+      sql`${table.position} is null or ${table.position} > 0`,
+    ),
+    check(
+      "invoice_source_assets_delete_attempts_nonnegative",
+      sql`${table.deleteAttempts} >= 0`,
+    ),
+    check(
+      "invoice_source_assets_sha_shape",
+      sql`${table.sha256} is null or ${table.sha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "invoice_source_assets_lifecycle_coherent",
+      sql`(
+        (${table.lifecycle} = 'staging' and ${table.position} is null and ${table.deletedAt} is null)
+        or
+        (${table.lifecycle} = 'verified' and ${table.objectKey} is not null and ${table.position} is null and ${table.deletedAt} is null)
+        or
+        (${table.lifecycle} = 'attached' and ${table.objectKey} is not null and ${table.detectedType} is not null and ${table.byteSize} is not null and ${table.sha256} is not null and ${table.pageCount} is not null and ${table.position} is not null and ${table.deletedAt} is null)
+        or
+        (${table.lifecycle} = 'deleted' and ${table.position} is null and ${table.deletedAt} is not null)
+      )`,
+    ),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "invoice_source_assets_company_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_source_assets_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId, table.documentId],
+      foreignColumns: [
+        invoiceDocuments.companyId,
+        invoiceDocuments.draftId,
+        invoiceDocuments.id,
+      ],
+      name: "invoice_source_assets_document_fk",
     }),
   ],
 );
