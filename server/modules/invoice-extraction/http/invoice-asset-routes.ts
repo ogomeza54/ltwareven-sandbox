@@ -30,6 +30,14 @@ type RequestWithState = Request & {
   invoiceQuarantineRoot?: string;
 };
 
+export const invoiceUploadShapeLimits = {
+  files: 1,
+  fields: 0,
+  // Busboy emits partsLimit when this threshold is reached, so two permits
+  // the single expected file part while files/fields enforce the exact shape.
+  parts: 2,
+} as const;
+
 const statusByCode: Readonly<Partial<Record<InvoiceDomainError["code"], number>>> = {
   INVOICE_INVALID_REQUEST: 400,
   INVOICE_FORBIDDEN: 403,
@@ -194,9 +202,7 @@ export function registerInvoiceAssetRoutes(
     }),
     limits: {
       fileSize: config.maxFileBytes,
-      files: 1,
-      fields: 0,
-      parts: 1,
+      ...invoiceUploadShapeLimits,
     },
   }).single("file");
 

@@ -1,12 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import express, { type Request, type Response } from "express";
+import multer from "multer";
 import {
   expectedInvoiceDraftRevision,
+  invoiceUploadShapeLimits,
   registerInvoiceAssetRoutes,
   requireInvoiceSameOrigin,
 } from "../../modules/invoice-extraction/http/invoice-asset-routes";
 import type { InvoiceAssetService } from "../../modules/invoice-extraction/services/invoice-asset-service";
+
+test("multipart parser accepts the single invoice file part", async () => {
+  const app = express();
+  app.post(
+    "/upload",
+    multer({
+      storage: multer.memoryStorage(),
+      limits: invoiceUploadShapeLimits,
+    }).single("file"),
+    (request, response) => {
+      response.json({ size: request.file?.size ?? 0 });
+    },
+  );
+  const server = await new Promise<import("node:http").Server>((resolve) => {
+    const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array(Buffer.from("%PDF-1.4\n%%EOF\n"))], {
+        type: "application/pdf",
+      }),
+      "invoice.pdf",
+    );
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/upload`,
+      { method: "POST", body: form },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { size: 15 });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
 
 test("asset mutations authenticate and resolve tenant before parsing multipart", () => {
   const app = express();
