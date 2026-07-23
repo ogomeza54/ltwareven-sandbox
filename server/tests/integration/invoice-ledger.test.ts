@@ -1669,6 +1669,13 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
     (await evaluation.comparisons({ ...actorB, role: "admin" }, evaluationSet.id)).length,
     0,
   );
+  await client.query(
+    `insert into company_invoice_feature_flags (
+       company_id, capability, enabled, updated_by_company_id, updated_by_user_id
+     ) values ($1, 'engine_activation', true, $1, $2)
+     on conflict (company_id, capability) do update set enabled = excluded.enabled`,
+    [companyA, userA],
+  );
   const firstActivation = await evaluation.activate(
     productActor,
     {
@@ -1733,8 +1740,8 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   );
   assert.equal(versionedRun.engineVersion, engineTwo);
   assert.equal(versionedRun.model, "mock-evaluation-model");
-  assert.throws(
-    () => evaluation.activate(actorA, {
+  await assert.rejects(
+    evaluation.activate(actorA, {
       engineVersion: engineOne,
       evaluationRunId: candidateEvaluation.id,
       expectedRevision: 2,

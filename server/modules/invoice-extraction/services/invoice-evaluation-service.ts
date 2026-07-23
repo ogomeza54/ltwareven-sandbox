@@ -7,10 +7,12 @@ import { canonicalPayloadHash } from "../domain/confirmation-intent";
 import { scoreInvoiceEvaluation } from "../domain/invoice-evaluation";
 import { requireInvoiceCapability } from "../domain/policies";
 import { PostgresInvoiceEvaluationRepository } from "../repositories/invoice-evaluation-repository";
+import { PostgresInvoiceRepository } from "../repositories/invoice-repository";
 
 export class InvoiceEvaluationService {
   constructor(
     private readonly repository = new PostgresInvoiceEvaluationRepository(),
+    private readonly invoices = new PostgresInvoiceRepository(),
   ) {}
 
   registerEngine(
@@ -90,7 +92,7 @@ export class InvoiceEvaluationService {
     return this.repository.comparisons(actor, setId);
   }
 
-  activate(
+  async activate(
     actor: InvoiceActorContext,
     input: {
       engineVersion: string;
@@ -101,6 +103,10 @@ export class InvoiceEvaluationService {
     requestId?: string,
   ) {
     requireInvoiceCapability(actor, "engine_activation");
+    const features = await this.invoices.resolveFeatures(actor.effectiveCompanyId);
+    if (!features.engineActivation) {
+      throw new InvoiceDomainError("INVOICE_FEATURE_DISABLED");
+    }
     return this.repository.activate(actor, { ...input, requestId });
   }
 }
