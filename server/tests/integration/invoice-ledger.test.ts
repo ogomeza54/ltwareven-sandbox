@@ -110,7 +110,7 @@ after(async () => {
   await client.query(
     `delete from invoice_review_drafts where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
-  );
+  ).catch(() => undefined);
   await client.query(
     `delete from inventory_intake_items where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
@@ -133,7 +133,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 11);
+  assert.equal(journal.rowCount, 12);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -146,6 +146,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0008_invoice_part_matching.sql",
     "0009_invoice_confirmation_intents.sql",
     "0010_invoice_confirmation_completion.sql",
+    "0011_invoice_feedback_history.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -194,7 +195,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 11);
+  assert.equal(journal.rows[0].count, 12);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1495,6 +1496,52 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(
     (await ledger.getDraft(actorA, draft.id))?.status,
     "confirmed",
+  );
+  const feedback = await client.query(
+    `select id, subject_type, decision
+       from invoice_feedback_events
+      where company_id = $1 and draft_id = $2
+      order by created_at, id`,
+    [companyA, draft.id],
+  );
+  assert.equal(feedback.rowCount, 13);
+  assert.ok(
+    feedback.rows.some(
+      (event) =>
+        event.subject_type === "document" && event.decision === "confirmed",
+    ),
+  );
+  assert.ok(
+    feedback.rows.some(
+      (event) => event.subject_type === "match" && event.decision === "added",
+    ),
+  );
+  await assert.rejects(
+    client.query(
+      `update invoice_feedback_events set decision = 'corrected' where id = $1`,
+      [feedback.rows[0].id],
+    ),
+    /append-only/,
+  );
+  const { InvoiceHistoryService } =
+    await import("../../modules/invoice-extraction/services/invoice-history-service");
+  const history = new InvoiceHistoryService();
+  const companyHistory = await history.list(actorA, {
+    status: "confirmed",
+    supplier: "Vendor",
+    limit: 20,
+    offset: 0,
+  });
+  assert.ok(companyHistory.some((entry) => entry.draftId === draft.id));
+  assert.equal(
+    (
+      await history.list(actorB, {
+        status: "confirmed",
+        limit: 20,
+        offset: 0,
+      })
+    ).some((entry) => entry.draftId === draft.id),
+    false,
   );
 
   const eventId = `evt_${randomUUID()}`;

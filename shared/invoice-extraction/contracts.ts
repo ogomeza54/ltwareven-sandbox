@@ -572,6 +572,29 @@ export type InvoiceConfirmationIntentDto = z.infer<
   typeof invoiceConfirmationIntentDtoSchema
 >;
 
+export const invoiceHistoryQuerySchema = z
+  .object({
+    status: invoiceDraftStatusSchema.optional(),
+    supplier: z.string().trim().max(160).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict();
+
+export const invoiceHistoryItemSchema = z.object({
+  draftId: z.string().uuid(),
+  status: invoiceDraftStatusSchema,
+  supplier: z.string().nullable(),
+  invoiceNumber: z.string().nullable(),
+  invoiceDate: z.string().nullable(),
+  updatedByUserId: z.string(),
+  updatedAt: z.string().datetime(),
+  engineVersion: z.string().nullable(),
+  resumable: z.boolean(),
+  intakeId: z.string().uuid().nullable(),
+});
+export type InvoiceHistoryItem = z.infer<typeof invoiceHistoryItemSchema>;
+
 export const updateInvoiceHeaderReviewSchema = z
   .object({
     revision: invoiceDraftRevisionSchema,

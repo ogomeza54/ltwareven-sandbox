@@ -4,6 +4,7 @@ import {
   InvoiceDomainError,
   createInvoiceConfirmationIntentSchema,
   invoiceDraftIdSchema,
+  invoiceHistoryQuerySchema,
   overrideInvoiceDuplicateSchema,
   rejectInvoiceReviewSchema,
   updateInvoiceHeaderReviewSchema,
@@ -19,6 +20,7 @@ import { InvoiceHeaderReviewService } from "../services/invoice-header-review-se
 import { InvoiceLineReviewService } from "../services/invoice-line-review-service";
 import { InvoicePartMatchService } from "../services/invoice-part-match-service";
 import { InvoiceConfirmationService } from "../services/invoice-confirmation-service";
+import { InvoiceHistoryService } from "../services/invoice-history-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
@@ -62,7 +64,26 @@ export function registerInvoiceReviewRoutes(
   lineService = new InvoiceLineReviewService(),
   matchService = new InvoicePartMatchService(),
   confirmationService = new InvoiceConfirmationService(),
+  historyService = new InvoiceHistoryService(),
 ): void {
+  app.get(
+    "/api/invoice-history",
+    isAuthenticated,
+    withCompanyContext,
+    async (request, response) => {
+      try {
+        const query = invoiceHistoryQuerySchema.safeParse(request.query);
+        if (!query.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.json(
+          await historyService.list(invoiceActorFromRequest(request), query.data),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
   app.get(
     "/api/invoice-drafts/:draftId/review",
     isAuthenticated,

@@ -227,6 +227,25 @@ export class PostgresInvoiceHeaderReviewRepository {
           ${JSON.stringify({ revision: expectedDraftRevision + 1 })}::jsonb
         )
       `);
+      await tx.execute(sql`
+        insert into invoice_feedback_events (
+          company_id, draft_id, run_id, engine_version, subject_type,
+          subject_path, decision, reason, supplier_normalized,
+          actor_company_id, actor_user_id
+        )
+        select header.company_id, header.draft_id, proposal.run_id,
+               run.engine_version, 'document', 'document', 'rejected',
+               ${reason}, lower(trim(coalesce(header.final_values ->> 'vendorName', ''))),
+               ${actor.actorCompanyId}, ${actor.actorUserId}
+        from invoice_review_headers header
+        join invoice_extraction_proposals proposal
+          on proposal.company_id = header.company_id
+         and proposal.id = header.proposal_id
+        join invoice_extraction_runs run
+          on run.company_id = proposal.company_id and run.id = proposal.run_id
+        where header.company_id = ${actor.effectiveCompanyId}
+          and header.draft_id = ${draftId}::uuid
+      `);
       const refreshed = await this.getWith(tx, actor, draftId);
       if (!refreshed) throw new InvoiceDomainError("INVOICE_INVALID_STATE");
       return refreshed;

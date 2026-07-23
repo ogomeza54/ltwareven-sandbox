@@ -4,6 +4,7 @@ import {
   InvoiceDomainError,
   invoiceConfirmationIntentDtoSchema,
   invoiceFinalHeaderSchema,
+  invoiceProposalSchema,
   type InvoiceActorContext,
   type InvoiceConfirmationIntentDto,
 } from "@shared/invoice-extraction/contracts";
@@ -21,6 +22,7 @@ import {
 import Decimal from "decimal.js";
 import { receiveInventoryWithinTransaction } from "../../inventory-receiving/postgres-inventory-intake-service";
 import type { InventoryReceivingCommand } from "../../inventory-receiving/types";
+import { loadInvoiceConfig } from "../config/invoice-config";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type TransactionExecutor = Parameters<
@@ -38,6 +40,15 @@ function rows<T>(result: unknown): T[] {
     return (result as Result<T>).rows;
   }
   return [];
+}
+
+function decimalTextEqual(left: string | null, right: string | null): boolean {
+  if (left === null || right === null) return left === right;
+  try {
+    return new Decimal(left).eq(right);
+  } catch {
+    return false;
+  }
 }
 
 interface IntentRow {
@@ -769,6 +780,185 @@ export class PostgresInvoiceConfirmationRepository {
           on conflict do nothing
         `);
       }
+      const feedbackContext = rows<{
+        proposal: unknown;
+        final_values: unknown;
+        run_id: string;
+        engine_version: string;
+      }>(
+        await tx.execute(sql`
+          select proposal.payload as proposal, header.final_values,
+                 run.id as run_id, run.engine_version
+          from invoice_review_headers header
+          join invoice_extraction_proposals proposal
+            on proposal.company_id = header.company_id
+           and proposal.id = header.proposal_id
+          join invoice_extraction_runs run
+            on run.company_id = proposal.company_id and run.id = proposal.run_id
+          where header.company_id = ${actor.effectiveCompanyId}
+            and header.draft_id = ${draftId}::uuid
+        `),
+      )[0];
+      const proposal = invoiceProposalSchema.parse(feedbackContext.proposal);
+      const finalHeader = invoiceFinalHeaderSchema.parse(
+        feedbackContext.final_values,
+      );
+      const supplierNormalized = summary.vendor.trim().toLowerCase();
+      const headerFields = [
+        "vendorName",
+        "invoiceNumber",
+        "invoiceDate",
+        "currency",
+        "subtotal",
+        "tax",
+        "freight",
+        "total",
+      ] as const;
+      for (const field of headerFields) {
+        const proposed =
+          proposal.header[field].normalized ?? proposal.header[field].observed;
+        const finalValue = finalHeader[field];
+        await tx.execute(sql`
+          insert into invoice_feedback_events (
+            company_id, draft_id, run_id, engine_version, subject_type,
+            subject_path, decision, proposal, final_value,
+            supplier_normalized, actor_company_id, actor_user_id
+          ) values (
+            ${actor.effectiveCompanyId}, ${draftId}::uuid,
+            ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
+            'header', ${`header.${field}`},
+            ${proposed === finalValue ? "accepted" : "corrected"},
+            ${JSON.stringify(proposed)}::jsonb, ${JSON.stringify(finalValue)}::jsonb,
+            ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
+          )
+        `);
+      }
+      const feedbackLines = rows<{
+        id: string;
+        source_line_index: number | null;
+        description: string | null;
+        vendor_part_number: string | null;
+        quantity: string | null;
+        unit_cost: string | null;
+        classification: string;
+        original_suggestion: unknown;
+        decision: "existing" | "new";
+        selected_part_id: string | null;
+        proposed_new_part: unknown;
+      }>(
+        await tx.execute(sql`
+          select line.id, line.source_line_index, line.description,
+                 line.vendor_part_number, line.quantity::text, line.unit_cost::text,
+                 line.classification, match.original_suggestion, match.decision,
+                 match.selected_part_id, match.proposed_new_part
+          from invoice_review_lines line
+          join invoice_line_matches match
+            on match.company_id = line.company_id and match.line_id = line.id
+          where line.company_id = ${actor.effectiveCompanyId}
+            and line.draft_id = ${draftId}::uuid
+          order by line.position
+        `),
+      );
+      for (const line of feedbackLines) {
+        const proposedLine =
+          line.source_line_index === null
+            ? null
+            : proposal.lines[line.source_line_index] ?? null;
+        const finalLine = {
+          description: line.description,
+          vendorPartNumber: line.vendor_part_number,
+          quantity: line.quantity,
+          unitCost: line.unit_cost,
+          classification: line.classification,
+        };
+        const normalizedProposal =
+          proposedLine === null
+            ? null
+            : {
+                description:
+                  proposedLine.description.normalized ??
+                  proposedLine.description.observed,
+                vendorPartNumber:
+                  proposedLine.vendorPartNumber.normalized ??
+                  proposedLine.vendorPartNumber.observed,
+                quantity:
+                  proposedLine.quantity.normalized ??
+                  proposedLine.quantity.observed,
+                unitCost:
+                  proposedLine.unitCost.normalized ??
+                  proposedLine.unitCost.observed,
+                classification: proposedLine.classification?.kind ?? null,
+              };
+        const lineAccepted =
+          normalizedProposal !== null &&
+          normalizedProposal.description === finalLine.description &&
+          normalizedProposal.vendorPartNumber === finalLine.vendorPartNumber &&
+          normalizedProposal.classification === finalLine.classification &&
+          decimalTextEqual(normalizedProposal.quantity, finalLine.quantity) &&
+          decimalTextEqual(normalizedProposal.unitCost, finalLine.unitCost);
+        await tx.execute(sql`
+          insert into invoice_feedback_events (
+            company_id, draft_id, run_id, engine_version, subject_type,
+            subject_path, decision, proposal, final_value,
+            supplier_normalized, actor_company_id, actor_user_id
+          ) values (
+            ${actor.effectiveCompanyId}, ${draftId}::uuid,
+            ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
+            'line', ${`lines.${line.id}`},
+            ${normalizedProposal === null
+              ? "added"
+              : lineAccepted
+                ? "accepted"
+                : "corrected"},
+            ${JSON.stringify(normalizedProposal)}::jsonb,
+            ${JSON.stringify(finalLine)}::jsonb,
+            ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
+          )
+        `);
+        const finalMatch =
+          line.decision === "existing"
+            ? { kind: "existing", partId: line.selected_part_id }
+            : { kind: "new", proposedPart: line.proposed_new_part };
+        const suggestedPartId =
+          line.original_suggestion &&
+          typeof line.original_suggestion === "object" &&
+          "partId" in line.original_suggestion
+            ? String(line.original_suggestion.partId)
+            : null;
+        await tx.execute(sql`
+          insert into invoice_feedback_events (
+            company_id, draft_id, run_id, engine_version, subject_type,
+            subject_path, decision, proposal, final_value,
+            supplier_normalized, actor_company_id, actor_user_id
+          ) values (
+            ${actor.effectiveCompanyId}, ${draftId}::uuid,
+            ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
+            'match', ${`matches.${line.id}`},
+            ${line.decision === "existing" &&
+              suggestedPartId === line.selected_part_id
+              ? "accepted"
+              : line.decision === "new"
+                ? "added"
+                : "corrected"},
+            ${JSON.stringify(line.original_suggestion)}::jsonb,
+            ${JSON.stringify(finalMatch)}::jsonb,
+            ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
+          )
+        `);
+      }
+      await tx.execute(sql`
+        insert into invoice_feedback_events (
+          company_id, draft_id, run_id, engine_version, subject_type,
+          subject_path, decision, final_value, supplier_normalized,
+          actor_company_id, actor_user_id
+        ) values (
+          ${actor.effectiveCompanyId}, ${draftId}::uuid,
+          ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
+          'document', 'document', 'confirmed',
+          ${JSON.stringify({ intakeId: intake.id })}::jsonb,
+          ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
+        )
+      `);
       const completedIntent = rows<IntentRow>(
         await tx.execute(sql`
           update invoice_confirmation_intents
@@ -787,6 +977,8 @@ export class PostgresInvoiceConfirmationRepository {
       await tx.execute(sql`
         update invoice_review_drafts
         set status = 'confirmed', revision = revision + 1,
+            retention_deadline =
+              now() + (${loadInvoiceConfig().confirmedRetentionDays} * interval '1 day'),
             updated_by_company_id = ${actor.actorCompanyId},
             updated_by_user_id = ${actor.actorUserId},
             updated_at = now(), last_activity_at = now()

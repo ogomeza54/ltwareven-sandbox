@@ -518,7 +518,13 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
             where created_at = 1784764803000
          ) as applied`,
       );
-      const expectedLedgerColumns = extractionRecorded.rows[0]?.applied
+      const feedbackRecorded = await client.query<{ applied: boolean }>(
+        `select exists (
+           select 1 from drizzle.__drizzle_migrations
+            where created_at = 1784764811000
+         ) as applied`,
+      );
+      const extractionLedgerColumns = extractionRecorded.rows[0]?.applied
         ? {
             ...requiredLedgerColumns,
             invoice_extraction_runs: [
@@ -532,6 +538,16 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
             ],
           }
         : requiredLedgerColumns;
+      const expectedLedgerColumns = feedbackRecorded.rows[0]?.applied
+        ? {
+            ...extractionLedgerColumns,
+            invoice_review_drafts: [
+              ...extractionLedgerColumns.invoice_review_drafts,
+              "retention_hold",
+              "purged_at",
+            ],
+          }
+        : extractionLedgerColumns;
       const ledgerColumnDrift: string[] = [];
       const ledgerColumns = await client.query<{
         table_name: string;

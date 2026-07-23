@@ -77,6 +77,8 @@ export const invoiceReviewDrafts = pgTable(
       .notNull(),
     abandonedAt: timestamp("abandoned_at", { withTimezone: true }),
     retentionDeadline: timestamp("retention_deadline", { withTimezone: true }),
+    retentionHold: boolean("retention_hold").default(false).notNull(),
+    purgedAt: timestamp("purged_at", { withTimezone: true }),
   },
   (table): PgTableExtraConfigValue[] => [
     unique("invoice_review_drafts_company_id_id_unique").on(
@@ -642,6 +644,60 @@ export const invoiceConfirmationIntents = pgTable(
       columns: [table.createdByCompanyId, table.createdByUserId],
       foreignColumns: [users.companyId, users.id],
       name: "invoice_confirmation_intents_creator_fk",
+    }),
+  ],
+);
+
+export const invoiceFeedbackEvents = pgTable(
+  "invoice_feedback_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    runId: uuid("run_id"),
+    engineVersion: varchar("engine_version", { length: 64 }),
+    subjectType: varchar("subject_type", { length: 24 }).notNull(),
+    subjectPath: text("subject_path").notNull(),
+    decision: varchar("decision", { length: 24 }).notNull(),
+    proposal: jsonb("proposal"),
+    finalValue: jsonb("final_value"),
+    reason: text("reason"),
+    supplierNormalized: text("supplier_normalized"),
+    actorCompanyId: varchar("actor_company_id").notNull(),
+    actorUserId: varchar("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_feedback_events_company_id_unique").on(table.companyId, table.id),
+    index("invoice_feedback_events_quality_idx").on(
+      table.companyId,
+      table.engineVersion,
+      table.subjectType,
+      table.decision,
+      table.createdAt,
+    ),
+    index("invoice_feedback_events_draft_idx").on(
+      table.companyId,
+      table.draftId,
+      table.createdAt,
+    ),
+    check(
+      "invoice_feedback_events_subject_valid",
+      sql`${table.subjectType} in ('document', 'header', 'line', 'match')`,
+    ),
+    check(
+      "invoice_feedback_events_decision_valid",
+      sql`${table.decision} in ('accepted', 'corrected', 'added', 'removed', 'unreviewed', 'rejected', 'confirmed')`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_feedback_events_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.actorCompanyId, table.actorUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_feedback_events_actor_fk",
     }),
   ],
 );
