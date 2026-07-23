@@ -34,6 +34,23 @@ try {
   if (preparation.status !== 0) {
     throw new Error("Unable to prepare the integration-test database");
   }
+  const migration = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "scripts/migrate-test-database.ts"],
+    {
+      env: {
+        ...process.env,
+        TEST_DATABASE_URL: testDatabaseUrl,
+        DATABASE_URL: testDatabaseUrl,
+        DATABASE_DRIVER: "node-postgres",
+      },
+      stdio: "inherit",
+    },
+  );
+  if (migration.error) throw migration.error;
+  if (migration.status !== 0) {
+    throw new Error("Unable to migrate the integration-test database");
+  }
 
   const result = spawnSync(
     process.execPath,

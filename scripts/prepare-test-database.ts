@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { requireExactLocalTestDatabase } from "./test-database-guard";
 
@@ -10,32 +10,15 @@ const client = new Client({ connectionString });
 
 try {
   await client.connect();
-  const exported = spawnSync(
-    "./node_modules/.bin/drizzle-kit",
-    ["export", "--config", "drizzle.config.ts"],
-    {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        DATABASE_URL: connectionString,
-        DATABASE_DRIVER: "node-postgres",
-      },
-    },
-  );
-  if (exported.error) {
-    throw exported.error;
-  }
-  if (exported.status !== 0) {
-    throw new Error(
-      `Unable to export the local test schema: ${exported.stderr?.trim() || "unknown drizzle-kit error"}`,
-    );
-  }
   await client.query(
-    "drop schema if exists public cascade; create schema public",
+    "drop schema if exists public cascade; drop schema if exists drizzle cascade; create schema public",
   );
-  await client.query(exported.stdout);
-  console.log("Rebuilt disposable schema in talavera_invoice_test");
+  const frozenBaseline = await readFile(
+    "migrations/fixtures/0000_brownfield_schema.sql",
+    "utf8",
+  );
+  await client.query(frozenBaseline);
+  console.log("Rebuilt frozen Brownfield schema in talavera_invoice_test");
 } finally {
   await client.end();
 }

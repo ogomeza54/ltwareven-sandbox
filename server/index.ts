@@ -2,13 +2,27 @@ import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { loadInvoiceConfig } from "./modules/invoice-extraction/config/invoice-config";
+import {
+  mayCaptureJsonResponse,
+  resolveRequestId,
+  safeApiLogPath,
+} from "./request-logging";
 
 const app = express();
+loadInvoiceConfig();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use((req, res, next) => {
+  const inbound = req.header("x-request-id");
+  const requestId = resolveRequestId(inbound);
+  (req as Request & { requestId: string }).requestId = requestId;
+  res.setHeader("x-request-id", requestId);
+  next();
+});
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static("uploads"));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -24,8 +38,13 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      const safePath = safeApiLogPath(path);
+      const id = (req as Request & { requestId?: string }).requestId;
+      let logLine = `${req.method} ${safePath} ${res.statusCode} in ${duration}ms`;
+      if (id) {
+        logLine += ` requestId=${id}`;
+      }
+      if (capturedJsonResponse && mayCaptureJsonResponse(path)) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 
@@ -64,12 +83,15 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+  const port = parseInt(process.env.PORT || "5000", 10);
+  server.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+    },
+  );
 })();

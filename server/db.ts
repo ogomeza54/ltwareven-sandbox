@@ -8,6 +8,9 @@ import { Pool as NodePostgresPool } from "pg";
 import { drizzle as drizzleNodePostgres } from "drizzle-orm/node-postgres";
 import ws from "ws";
 import * as schema from "@shared/schema";
+import * as invoiceSchema from "@shared/invoice-extraction/schema";
+
+const combinedSchema = { ...schema, ...invoiceSchema };
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -26,14 +29,14 @@ const pool = useNodePostgres
 // Both Drizzle PostgreSQL adapters expose the same query surface used by the
 // application. Keeping the public type stable avoids leaking environment
 // selection into every repository.
-export const db: NeonDatabase<typeof schema> = useNodePostgres
+export const db: NeonDatabase<typeof combinedSchema> = useNodePostgres
   ? (drizzleNodePostgres({
       client: pool as NodePostgresPool,
-      schema,
-    }) as unknown as NeonDatabase<typeof schema>)
+      schema: combinedSchema,
+    }) as unknown as NeonDatabase<typeof combinedSchema>)
   : drizzleNeon({
       client: pool as NeonPool,
-      schema,
+      schema: combinedSchema,
     });
 
 export async function closeDatabase(): Promise<void> {

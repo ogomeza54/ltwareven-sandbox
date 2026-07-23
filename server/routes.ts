@@ -15,6 +15,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { createInventoryIntakeHandler } from "./modules/inventory-receiving/inventory-intake-route";
+import { resolveUserId, withCompanyContext } from "./auth-context";
+import { registerInvoiceDraftRoutes } from "./modules/invoice-extraction/http/invoice-draft-routes";
 
 // Configure multer for file uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -39,39 +41,6 @@ const uploadInvoice = multer({
     cb(null, allowedTypes.includes(file.mimetype));
   }
 });
-
-// Resolve userId from either local session or Replit OIDC
-const resolveUserId = (req: any): string | undefined =>
-  req.session?.localUserId || req.user?.claims?.sub;
-
-// Middleware to get user's company context
-const withCompanyContext = async (req: any, res: any, next: any) => {
-  try {
-    const userId = resolveUserId(req);
-    const user = await storage.getUser(userId);
-    
-    if (!user) {
-      return res.status(401).json({ message: "User not found" });
-    }
-
-    let effectiveCompanyId = user.companyId;
-    // Super admins can temporarily view as another company via session override
-    if (user.role === "super_admin" && (req.session as any)?.superAdminActiveCompanyId) {
-      effectiveCompanyId = (req.session as any).superAdminActiveCompanyId;
-    }
-
-    req.userContext = {
-      userId: user.id,
-      companyId: effectiveCompanyId,
-      role: user.role
-    };
-    
-    next();
-  } catch (error) {
-    console.error("Error getting user context:", error);
-    res.status(500).json({ message: "Failed to get user context" });
-  }
-};
 
 /**
  * Load-balancing auto-assignment algorithm.
@@ -170,6 +139,7 @@ async function rebalanceWorkOrders(companyId: string): Promise<{ reassigned: num
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
+  registerInvoiceDraftRoutes(app);
 
   // Local auth routes
   app.post('/api/auth/local/login', async (req: any, res) => {

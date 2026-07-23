@@ -16,7 +16,11 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-local.ts",
     "db:test:create": "tsx scripts/create-test-database.ts",
-    "db:test:prepare": "tsx scripts/prepare-test-database.ts"
+    "db:test:prepare": "tsx scripts/prepare-test-database.ts",
+    "db:test:bootstrap-brownfield": "tsx scripts/prepare-test-database.ts",
+    "db:test:migrate": "tsx scripts/migrate-test-database.ts",
+    "db:migrate": "tsx scripts/migrate-database.ts",
+    "db:migrate:check": "drizzle-kit check --config drizzle.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

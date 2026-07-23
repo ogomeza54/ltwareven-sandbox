@@ -37,7 +37,9 @@ export const users = pgTable("users", {
   mustChangePassword: boolean("must_change_password").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("users_company_id_id_unique").on(table.companyId, table.id),
+]);
 
 // Mechanics / Technicians table
 export const mechanics = pgTable("mechanics", {
