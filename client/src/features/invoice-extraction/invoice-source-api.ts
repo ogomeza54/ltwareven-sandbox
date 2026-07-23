@@ -3,6 +3,7 @@ import type {
   InvoiceExtractionRunDto,
   InvoiceFinalHeader,
   InvoiceHeaderField,
+  InvoiceConfirmationIntentDto,
   InvoicePartCandidate,
   InvoicePublicAssetDto,
   InvoiceReviewWorkspaceDto,
@@ -271,6 +272,43 @@ export async function updateInvoiceLineMatches(
           revision: workspace.draftRevision,
           matches,
         }),
+      },
+    ),
+  );
+}
+
+export async function createInvoiceConfirmationIntent(
+  workspace: InvoiceReviewWorkspaceDto,
+  idempotencyKey: string,
+): Promise<InvoiceConfirmationIntentDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/confirmation-intents`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ revision: workspace.draftRevision }),
+      },
+    ),
+  );
+}
+
+export async function overrideInvoiceDuplicate(
+  intent: InvoiceConfirmationIntentDto,
+  reason: string,
+): Promise<InvoiceConfirmationIntentDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(intent.draftId)}/confirmation-intents/${encodeURIComponent(intent.id)}/override`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
       },
     ),
   );

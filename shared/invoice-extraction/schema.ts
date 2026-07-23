@@ -560,6 +560,89 @@ export const invoiceLineMatches = pgTable(
   ],
 );
 
+export const invoiceConfirmationIntents = pgTable(
+  "invoice_confirmation_intents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    draftRevision: integer("draft_revision").notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull(),
+    payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+    canonicalPayload: jsonb("canonical_payload").notNull(),
+    status: varchar("status", { length: 16 }).default("reserved").notNull(),
+    duplicateStatus: varchar("duplicate_status", { length: 16 })
+      .default("clear")
+      .notNull(),
+    duplicateSignals: jsonb("duplicate_signals").notNull().default([]),
+    overrideReason: text("override_reason"),
+    overrideByCompanyId: varchar("override_by_company_id"),
+    overrideByUserId: varchar("override_by_user_id"),
+    intakeId: varchar("intake_id"),
+    revision: integer("revision").default(0).notNull(),
+    createdByCompanyId: varchar("created_by_company_id").notNull(),
+    createdByUserId: varchar("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("invoice_confirmation_intents_company_id_unique").on(
+      table.companyId,
+      table.id,
+    ),
+    unique("invoice_confirmation_intents_idempotency_unique").on(
+      table.companyId,
+      table.idempotencyKey,
+    ),
+    uniqueIndex("invoice_confirmation_intents_active_draft_unique")
+      .on(table.companyId, table.draftId)
+      .where(sql`${table.status} = 'reserved'`),
+    index("invoice_confirmation_intents_duplicate_idx").on(
+      table.companyId,
+      table.duplicateStatus,
+      table.createdAt,
+    ),
+    check(
+      "invoice_confirmation_intents_revision_nonnegative",
+      sql`${table.revision} >= 0 and ${table.draftRevision} >= 0`,
+    ),
+    check(
+      "invoice_confirmation_intents_status_valid",
+      sql`${table.status} in ('reserved', 'completed', 'invalidated')`,
+    ),
+    check(
+      "invoice_confirmation_intents_duplicate_status_valid",
+      sql`${table.duplicateStatus} in ('clear', 'suspected', 'overridden')`,
+    ),
+    check(
+      "invoice_confirmation_intents_payload_object",
+      sql`jsonb_typeof(${table.canonicalPayload}) = 'object'
+          and jsonb_typeof(${table.duplicateSignals}) = 'array'`,
+    ),
+    check(
+      "invoice_confirmation_intents_override_coherent",
+      sql`(${table.duplicateStatus} <> 'overridden'
+            and ${table.overrideReason} is null
+            and ${table.overrideByCompanyId} is null
+            and ${table.overrideByUserId} is null)
+          or (${table.duplicateStatus} = 'overridden'
+            and length(trim(${table.overrideReason})) >= 3
+            and ${table.overrideByCompanyId} is not null
+            and ${table.overrideByUserId} is not null)`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_confirmation_intents_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.createdByCompanyId, table.createdByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_confirmation_intents_creator_fk",
+    }),
+  ],
+);
+
 export const invoiceProviderWebhookEvents = pgTable(
   "invoice_provider_webhook_events",
   {

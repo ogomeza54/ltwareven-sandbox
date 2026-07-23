@@ -59,6 +59,10 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from invoice_confirmation_intents where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
     `delete from invoice_line_matches where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   ).catch(() => undefined);
@@ -121,7 +125,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 9);
+  assert.equal(journal.rowCount, 10);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -132,6 +136,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0006_invoice_header_review_state.sql",
     "0007_invoice_line_review.sql",
     "0008_invoice_part_matching.sql",
+    "0009_invoice_confirmation_intents.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -180,7 +185,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 9);
+  assert.equal(journal.rows[0].count, 10);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1324,18 +1329,56 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(matched.lines[0].match.decision, "existing");
   assert.equal(matched.lines[0].match.selectedPart?.id, ownedPartId);
   assert.equal(matched.lines[0].match.originalSuggestion?.partId, ownedPartId);
-  const rejected = await reviews.reject(
+  await client.query(
+    `insert into company_invoice_feature_flags (
+       company_id, capability, enabled, updated_by_company_id, updated_by_user_id
+     ) values ($1, 'scan_extraction', true, $1, $2)`,
+    [companyA, userA],
+  );
+  const { InvoiceConfirmationService } =
+    await import("../../modules/invoice-extraction/services/invoice-confirmation-service");
+  const confirmations = new InvoiceConfirmationService();
+  const idempotencyKey = `invoice-confirm-${randomUUID()}`;
+  const intent = await confirmations.createIntent(
     actorA,
     draft.id,
     matched.draftRevision,
-    "Not a supplier invoice",
+    idempotencyKey,
     randomUUID(),
   );
-  assert.equal(rejected.decision, "rejected");
-  assert.equal(rejected.rejectionReason, "Not a supplier invoice");
+  assert.equal(intent.status, "reserved");
+  assert.equal(intent.duplicateStatus, "clear");
+  assert.equal(intent.summary.total, "100.00");
+  assert.equal(intent.summary.stockUnitDelta, "2");
+  assert.equal(intent.summary.lines[0].resolution.kind, "existing");
+  assert.match(intent.payloadHash, /^[0-9a-f]{64}$/);
+  assert.equal(
+    (
+      await confirmations.createIntent(
+        actorA,
+        draft.id,
+        matched.draftRevision,
+        idempotencyKey,
+      )
+    ).id,
+    intent.id,
+  );
+  await assert.rejects(
+    confirmations.createIntent(
+      actorA,
+      draft.id,
+      matched.draftRevision,
+      `invoice-confirm-${randomUUID()}`,
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "INVOICE_IDEMPOTENCY_CONFLICT",
+  );
   assert.equal(
     (await ledger.getDraft(actorA, draft.id))?.status,
-    "rejected",
+    "confirming",
   );
 
   const eventId = `evt_${randomUUID()}`;

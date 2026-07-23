@@ -64,6 +64,13 @@
       "when": 1784828578548,
       "tag": "0008_invoice_part_matching",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784828901723,
+      "tag": "0009_invoice_confirmation_intents",
+      "breakpoints": true
     }
   ]
 }

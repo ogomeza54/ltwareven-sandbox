@@ -151,6 +151,11 @@ export const invoiceErrorCodeSchema = z.enum([
   "INVOICE_WEBHOOK_INVALID",
   "INVOICE_NUMERIC_INVALID",
   "INVOICE_RECONCILIATION_REQUIRED",
+  "INVOICE_REVIEW_INCOMPLETE",
+  "INVOICE_DUPLICATE_SUSPECTED",
+  "INVOICE_IDEMPOTENCY_CONFLICT",
+  "INVOICE_CONFIRMATION_NOT_FOUND",
+  "INVOICE_CONFIRMATION_DISABLED",
 ]);
 export type InvoiceErrorCode = z.infer<typeof invoiceErrorCodeSchema>;
 
@@ -195,6 +200,16 @@ const safeMessages: Record<InvoiceErrorCode, string> = {
     "An invoice quantity or amount has an invalid value or precision.",
   INVOICE_RECONCILIATION_REQUIRED:
     "Correct the invoice totals before completing line review.",
+  INVOICE_REVIEW_INCOMPLETE:
+    "Complete the header, line, amount and part review before confirmation.",
+  INVOICE_DUPLICATE_SUSPECTED:
+    "This invoice may already have been received. An administrator must review it.",
+  INVOICE_IDEMPOTENCY_CONFLICT:
+    "This confirmation key was already used for different invoice data.",
+  INVOICE_CONFIRMATION_NOT_FOUND:
+    "The invoice confirmation could not be found.",
+  INVOICE_CONFIRMATION_DISABLED:
+    "Invoice stock confirmation is not enabled for this company.",
 };
 
 export class InvoiceDomainError extends Error {
@@ -480,6 +495,79 @@ export const updateInvoiceLineMatchesSchema = z
       .max(500),
   })
   .strict();
+
+export const createInvoiceConfirmationIntentSchema = z
+  .object({
+    revision: invoiceDraftRevisionSchema,
+  })
+  .strict();
+
+export const overrideInvoiceDuplicateSchema = z
+  .object({ reason: z.string().trim().min(3).max(500) })
+  .strict();
+
+export const invoiceConfirmationIntentDtoSchema = z.object({
+  id: z.string().uuid(),
+  draftId: z.string().uuid(),
+  draftRevision: z.number().int().nonnegative(),
+  idempotencyKey: z.string(),
+  payloadHash: z.string().regex(/^[0-9a-f]{64}$/),
+  status: z.enum(["reserved", "completed", "invalidated"]),
+  duplicateStatus: z.enum(["clear", "suspected", "overridden"]),
+  duplicateSignals: z.array(
+    z.object({
+      kind: z.enum(["source_fingerprint", "supplier_invoice_number"]),
+      intakeId: z.string().uuid(),
+    }),
+  ),
+  overrideReason: z.string().nullable(),
+  summary: z.object({
+    vendor: z.string(),
+    invoiceNumber: z.string().nullable(),
+    invoiceDate: z.string().nullable(),
+    currency: z.literal("USD"),
+    subtotal: z.string(),
+    tax: z.string(),
+    freight: z.string(),
+    total: z.string(),
+    lines: z.array(
+      z.object({
+        lineId: z.string().uuid(),
+        description: z.string(),
+        partNumber: z.string(),
+        itemType: z.enum(["inventory", "consumable"]),
+        quantity: z.string(),
+        unitCost: z.string(),
+        lineTotal: z.string(),
+        resolution: z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("existing"),
+            partId: z.string().uuid(),
+            partName: z.string(),
+          }),
+          z.object({
+            kind: z.literal("new"),
+            proposedPart: z.object({
+              name: z.string(),
+              partNumber: z.string(),
+              itemType: z.enum(["inventory", "consumable"]),
+              category: z.string().nullable(),
+              groupId: z.string().uuid().nullable(),
+              subgroupId: z.string().uuid().nullable(),
+            }),
+          }),
+        ]),
+      }),
+    ),
+    newPartCount: z.number().int().nonnegative(),
+    stockUnitDelta: z.string(),
+  }),
+  intakeId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type InvoiceConfirmationIntentDto = z.infer<
+  typeof invoiceConfirmationIntentDtoSchema
+>;
 
 export const updateInvoiceHeaderReviewSchema = z
   .object({

@@ -12,6 +12,7 @@ import {
 import type {
   InvoiceFinalHeader,
   InvoiceHeaderField,
+  InvoiceConfirmationIntentDto,
   InvoicePartCandidate,
   InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
@@ -20,12 +21,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   getInvoiceReview,
+  createInvoiceConfirmationIntent,
   getInvoicePartCandidates,
   privateInvoiceAssetUrl,
   rejectInvoiceReview,
   updateInvoiceHeaderReview,
   updateInvoiceLinesReview,
   updateInvoiceLineMatches,
+  overrideInvoiceDuplicate,
 } from "./invoice-source-api";
 
 interface CatalogGroup {
@@ -92,6 +95,10 @@ export function InvoiceReviewWorkspace({
     groupId: string;
     subgroupId: string;
   }>>({});
+  const [confirmationIntent, setConfirmationIntent] =
+    useState<InvoiceConfirmationIntentDto | null>(null);
+  const confirmationKey = useRef<string | null>(null);
+  const [duplicateReason, setDuplicateReason] = useState("");
 
   useEffect(() => {
     let current = true;
@@ -316,6 +323,23 @@ export function InvoiceReviewWorkspace({
       await onDraftChanged?.();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Part decision could not be saved.");
+    }
+  };
+
+  const prepareConfirmation = async (): Promise<void> => {
+    const current = workspaceRef.current;
+    if (!current) return;
+    confirmationKey.current ??= globalThis.crypto.randomUUID();
+    try {
+      setError(null);
+      const intent = await createInvoiceConfirmationIntent(
+        current,
+        confirmationKey.current,
+      );
+      setConfirmationIntent(intent);
+      await onDraftChanged?.();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Confirmation summary could not be prepared.");
     }
   };
 
@@ -839,6 +863,101 @@ export function InvoiceReviewWorkspace({
             </Button>
           ) : null}
         </div>
+
+        {workspace.decision === "approved" &&
+        workspace.reconciliation.decision === "approved" &&
+        workspace.lines.length > 0 &&
+        workspace.lines.every((line) => line.match.decision !== "unresolved") ? (
+          <div className="rounded-lg border border-amber-500/50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="font-medium">Final confirmation</h4>
+                <p className="text-xs text-muted-foreground">
+                  The server recalculates the summary and checks duplicates. This step does not update stock.
+                </p>
+              </div>
+              {!confirmationIntent ? (
+                <Button type="button" className="min-h-11" onClick={() => void prepareConfirmation()}>
+                  Prepare confirmation summary
+                </Button>
+              ) : null}
+            </div>
+            {confirmationIntent ? (
+              <div className="mt-3 space-y-3" aria-label="Invoice confirmation summary">
+                <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div><dt className="text-muted-foreground">Vendor</dt><dd>{confirmationIntent.summary.vendor}</dd></div>
+                  <div><dt className="text-muted-foreground">Invoice</dt><dd>{confirmationIntent.summary.invoiceNumber ?? "None"}</dd></div>
+                  <div><dt className="text-muted-foreground">Total</dt><dd>{confirmationIntent.summary.total} USD</dd></div>
+                  <div><dt className="text-muted-foreground">Stock units</dt><dd>+{confirmationIntent.summary.stockUnitDelta}</dd></div>
+                  <div><dt className="text-muted-foreground">Lines</dt><dd>{confirmationIntent.summary.lines.length}</dd></div>
+                  <div><dt className="text-muted-foreground">New parts</dt><dd>{confirmationIntent.summary.newPartCount}</dd></div>
+                </dl>
+                <ul className="space-y-1 text-sm">
+                  {confirmationIntent.summary.lines.map((line) => (
+                    <li key={line.lineId} className="rounded border border-border p-2">
+                      {line.quantity} × {line.description} · {line.lineTotal} USD ·{" "}
+                      {line.resolution.kind === "existing"
+                        ? `existing part ${line.resolution.partName}`
+                        : `new part ${line.resolution.proposedPart.name}`}
+                    </li>
+                  ))}
+                </ul>
+                {confirmationIntent.duplicateStatus === "suspected" ? (
+                  <div className="rounded border border-destructive p-2">
+                    <p className="text-sm text-destructive">
+                      Possible duplicate detected. Stock confirmation is blocked.
+                    </p>
+                    <ul className="mt-1 text-xs">
+                      {confirmationIntent.duplicateSignals.map((signal) => (
+                        <li key={`${signal.kind}-${signal.intakeId}`}>
+                          {signal.kind === "source_fingerprint"
+                            ? "Same source document"
+                            : "Same vendor and invoice number"}{" "}
+                          · intake {signal.intakeId}
+                        </li>
+                      ))}
+                    </ul>
+                    <Label htmlFor="invoice-duplicate-override">Administrator override reason</Label>
+                    <Input
+                      id="invoice-duplicate-override"
+                      value={duplicateReason}
+                      onChange={(event) => setDuplicateReason(event.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="mt-2 min-h-11"
+                      disabled={duplicateReason.trim().length < 3}
+                      onClick={async () => {
+                        try {
+                          setConfirmationIntent(
+                            await overrideInvoiceDuplicate(
+                              confirmationIntent,
+                              duplicateReason,
+                            ),
+                          );
+                        } catch (caught) {
+                          setError(caught instanceof Error ? caught.message : "Duplicate override failed.");
+                        }
+                      }}
+                    >
+                      Override duplicate block
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-green-500">
+                    {confirmationIntent.duplicateStatus === "overridden"
+                      ? "Duplicate reviewed and overridden by an administrator."
+                      : "No confirmed duplicate was found."}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Reserved intent {confirmationIntent.id} · hash {confirmationIntent.payloadHash.slice(0, 12)}…
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {!readOnly && workspace.decision !== "rejected" ? (

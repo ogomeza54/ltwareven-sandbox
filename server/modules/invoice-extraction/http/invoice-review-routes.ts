@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import {
   InvoiceDomainError,
+  createInvoiceConfirmationIntentSchema,
   invoiceDraftIdSchema,
+  overrideInvoiceDuplicateSchema,
   rejectInvoiceReviewSchema,
   updateInvoiceHeaderReviewSchema,
   updateInvoiceLineMatchesSchema,
@@ -16,6 +18,7 @@ import {
 import { InvoiceHeaderReviewService } from "../services/invoice-header-review-service";
 import { InvoiceLineReviewService } from "../services/invoice-line-review-service";
 import { InvoicePartMatchService } from "../services/invoice-part-match-service";
+import { InvoiceConfirmationService } from "../services/invoice-confirmation-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
@@ -31,6 +34,9 @@ function sendError(error: unknown, request: RequestWithId, response: Response): 
           : error.code === "INVOICE_DRAFT_REVISION_CONFLICT" ||
               error.code === "INVOICE_INVALID_STATE"
               || error.code === "INVOICE_RECONCILIATION_REQUIRED"
+              || error.code === "INVOICE_REVIEW_INCOMPLETE"
+              || error.code === "INVOICE_DUPLICATE_SUSPECTED"
+              || error.code === "INVOICE_IDEMPOTENCY_CONFLICT"
             ? 409
             : 400;
     response.status(status).json({
@@ -53,6 +59,7 @@ export function registerInvoiceReviewRoutes(
   service = new InvoiceHeaderReviewService(),
   lineService = new InvoiceLineReviewService(),
   matchService = new InvoicePartMatchService(),
+  confirmationService = new InvoiceConfirmationService(),
 ): void {
   app.get(
     "/api/invoice-drafts/:draftId/review",
@@ -197,6 +204,62 @@ export function registerInvoiceReviewRoutes(
             draftId.data,
             input.data.revision,
             input.data.matches,
+            (request as RequestWithId).requestId,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.post(
+    "/api/invoice-drafts/:draftId/confirmation-intents",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const input = createInvoiceConfirmationIntentSchema.safeParse(request.body);
+        const idempotencyKey = request.header("Idempotency-Key");
+        if (!draftId.success || !input.success || !idempotencyKey) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.status(201).json(
+          await confirmationService.createIntent(
+            invoiceActorFromRequest(request),
+            draftId.data,
+            input.data.revision,
+            idempotencyKey,
+            (request as RequestWithId).requestId,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+
+  app.post(
+    "/api/invoice-drafts/:draftId/confirmation-intents/:intentId/override",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        const intentId = invoiceDraftIdSchema.safeParse(request.params.intentId);
+        const input = overrideInvoiceDuplicateSchema.safeParse(request.body);
+        if (!draftId.success || !intentId.success || !input.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.json(
+          await confirmationService.overrideDuplicate(
+            invoiceActorFromRequest(request),
+            draftId.data,
+            intentId.data,
+            input.data.reason,
             (request as RequestWithId).requestId,
           ),
         );
