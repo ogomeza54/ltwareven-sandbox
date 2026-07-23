@@ -371,9 +371,18 @@ export class PostgresInvoiceExtractionRepository {
         )[0];
         if (!validLease?.ok) throw new InvoiceDomainError("INVOICE_LEASE_LOST");
       }
-      const run = rows<{ id: string; draft_id: string; status: string; base_draft_revision: number; schema_version: string }>(
+      const run = rows<{
+        id: string;
+        draft_id: string;
+        status: string;
+        base_draft_revision: number;
+        schema_version: string;
+        requested_by_company_id: string;
+        requested_by_user_id: string;
+      }>(
         await tx.execute(sql`
-          select id, draft_id, status, base_draft_revision, schema_version
+          select id, draft_id, status, base_draft_revision, schema_version,
+                 requested_by_company_id, requested_by_user_id
           from invoice_extraction_runs
           where company_id = ${companyId} and id = ${attempt.run_id}::uuid
           for update
@@ -401,7 +410,7 @@ export class PostgresInvoiceExtractionRepository {
       }
 
       const proposal: InvoiceProposal = invoiceProposalSchema.parse(result.proposal);
-      await tx.execute(sql`
+      const insertedProposal = rows<{ id: string }>(await tx.execute(sql`
         insert into invoice_extraction_proposals (
           company_id, draft_id, run_id, attempt_id, schema_version, payload
         ) values (
@@ -409,6 +418,32 @@ export class PostgresInvoiceExtractionRepository {
           ${attemptId}::uuid, ${run.schema_version}, ${JSON.stringify(proposal)}::jsonb
         )
         on conflict (company_id, run_id) do nothing
+        returning id
+      `))[0];
+      const proposalId =
+        insertedProposal?.id ??
+        rows<{ id: string }>(await tx.execute(sql`
+          select id from invoice_extraction_proposals
+          where company_id = ${companyId} and run_id = ${run.id}::uuid
+        `))[0].id;
+      const finalHeader = Object.fromEntries(
+        Object.entries(proposal.header).map(([key, value]) => [
+          key,
+          value.normalized ?? value.observed,
+        ]),
+      );
+      await tx.execute(sql`
+        insert into invoice_review_headers (
+          company_id, draft_id, proposal_id, final_values,
+          created_by_company_id, created_by_user_id,
+          updated_by_company_id, updated_by_user_id
+        ) values (
+          ${companyId}, ${run.draft_id}::uuid, ${proposalId}::uuid,
+          ${JSON.stringify(finalHeader)}::jsonb,
+          ${run.requested_by_company_id}, ${run.requested_by_user_id},
+          ${run.requested_by_company_id}, ${run.requested_by_user_id}
+        )
+        on conflict (company_id, draft_id) do nothing
       `);
       await tx.execute(sql`
         update invoice_provider_attempts

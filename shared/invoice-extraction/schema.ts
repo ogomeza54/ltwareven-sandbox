@@ -215,6 +215,11 @@ export const invoiceExtractionProposals = pgTable(
       table.companyId,
       table.id,
     ),
+    unique("invoice_extraction_proposals_company_draft_id_unique").on(
+      table.companyId,
+      table.draftId,
+      table.id,
+    ),
     unique("invoice_extraction_proposals_company_run_unique").on(
       table.companyId,
       table.runId,
@@ -240,6 +245,86 @@ export const invoiceExtractionProposals = pgTable(
         invoiceExtractionRuns.id,
       ],
       name: "invoice_extraction_proposals_run_fk",
+    }),
+  ],
+);
+
+export const invoiceReviewHeaders = pgTable(
+  "invoice_review_headers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    revision: integer("revision").default(0).notNull(),
+    decision: varchar("decision", { length: 16 }).default("draft").notNull(),
+    finalValues: jsonb("final_values").notNull(),
+    reviewedFields: jsonb("reviewed_fields").notNull().default([]),
+    rejectionReason: text("rejection_reason"),
+    createdByCompanyId: varchar("created_by_company_id").notNull(),
+    createdByUserId: varchar("created_by_user_id").notNull(),
+    updatedByCompanyId: varchar("updated_by_company_id").notNull(),
+    updatedByUserId: varchar("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("invoice_review_headers_company_id_unique").on(
+      table.companyId,
+      table.id,
+    ),
+    unique("invoice_review_headers_company_draft_unique").on(
+      table.companyId,
+      table.draftId,
+    ),
+    check(
+      "invoice_review_headers_revision_nonnegative",
+      sql`${table.revision} >= 0`,
+    ),
+    check(
+      "invoice_review_headers_decision_valid",
+      sql`${table.decision} in ('draft', 'approved', 'rejected')`,
+    ),
+    check(
+      "invoice_review_headers_final_values_object",
+      sql`jsonb_typeof(${table.finalValues}) = 'object'`,
+    ),
+    check(
+      "invoice_review_headers_reviewed_fields_array",
+      sql`jsonb_typeof(${table.reviewedFields}) = 'array'`,
+    ),
+    check(
+      "invoice_review_headers_rejection_reason_coherent",
+      sql`(${table.decision} <> 'rejected' and ${table.rejectionReason} is null)
+          or (${table.decision} = 'rejected' and length(trim(${table.rejectionReason})) >= 3)`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId],
+      foreignColumns: [invoiceReviewDrafts.companyId, invoiceReviewDrafts.id],
+      name: "invoice_review_headers_draft_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.draftId, table.proposalId],
+      foreignColumns: [
+        invoiceExtractionProposals.companyId,
+        invoiceExtractionProposals.draftId,
+        invoiceExtractionProposals.id,
+      ],
+      name: "invoice_review_headers_proposal_fk",
+    }),
+    foreignKey({
+      columns: [table.createdByCompanyId, table.createdByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_review_headers_creator_fk",
+    }),
+    foreignKey({
+      columns: [table.updatedByCompanyId, table.updatedByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_review_headers_updater_fk",
     }),
   ],
 );

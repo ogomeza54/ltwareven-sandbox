@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   invoiceProposalSchema,
+  rejectInvoiceReviewSchema,
   startInvoiceExtractionSchema,
+  updateInvoiceHeaderReviewSchema,
 } from "@shared/invoice-extraction/contracts";
 import { invoiceProposalJsonSchema } from "../../modules/invoice-extraction/providers/openai-invoice-provider";
 import {
@@ -59,6 +61,42 @@ test("start command rejects tenant and provider fields", () => {
       companyId: "attacker",
       model: "unapproved",
     }).success,
+    false,
+  );
+});
+
+test("review commands are revisioned, strict and require a rejection reason", () => {
+  const header = {
+    vendorName: "Vendor",
+    invoiceNumber: null,
+    invoiceDate: null,
+    currency: "USD",
+    subtotal: null,
+    tax: null,
+    freight: null,
+    total: null,
+  };
+  assert.equal(
+    updateInvoiceHeaderReviewSchema.safeParse({
+      revision: 3,
+      header,
+      reviewedFields: ["vendorName"],
+      decision: "draft",
+    }).success,
+    true,
+  );
+  assert.equal(
+    updateInvoiceHeaderReviewSchema.safeParse({
+      revision: 3,
+      header,
+      reviewedFields: [],
+      decision: "draft",
+      companyId: "foreign",
+    }).success,
+    false,
+  );
+  assert.equal(
+    rejectInvoiceReviewSchema.safeParse({ revision: 3, reason: "  " }).success,
     false,
   );
 });

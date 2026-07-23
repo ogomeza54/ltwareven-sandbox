@@ -1,7 +1,10 @@
 import type {
   InvoiceDraftDto,
   InvoiceExtractionRunDto,
+  InvoiceFinalHeader,
+  InvoiceHeaderField,
   InvoicePublicAssetDto,
+  InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
 
 export class InvoiceSourceApiError extends Error {
@@ -124,6 +127,60 @@ export async function getInvoiceExtractionRun(
     await fetch(`/api/invoice-extraction-runs/${encodeURIComponent(runId)}`, {
       credentials: "include",
     }),
+  );
+}
+
+export async function getInvoiceReview(
+  draftId: string,
+): Promise<InvoiceReviewWorkspaceDto> {
+  return responseJson(
+    await fetch(`/api/invoice-drafts/${encodeURIComponent(draftId)}/review`, {
+      credentials: "include",
+    }),
+  );
+}
+
+export async function updateInvoiceHeaderReview(
+  workspace: InvoiceReviewWorkspaceDto,
+  header: InvoiceFinalHeader,
+  reviewedFields: readonly InvoiceHeaderField[],
+  decision: "draft" | "approved" = "draft",
+): Promise<InvoiceReviewWorkspaceDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/review`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: workspace.draftRevision,
+          header,
+          reviewedFields,
+          decision,
+        }),
+      },
+    ),
+  );
+}
+
+export async function rejectInvoiceReview(
+  workspace: InvoiceReviewWorkspaceDto,
+  reason: string,
+): Promise<InvoiceReviewWorkspaceDto> {
+  return responseJson(
+    await fetch(
+      `/api/invoice-drafts/${encodeURIComponent(workspace.draftId)}/reject`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: workspace.draftRevision,
+          reason,
+        }),
+      },
+    ),
   );
 }
 

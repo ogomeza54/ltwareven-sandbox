@@ -10,9 +10,14 @@ const pngChecksum = createHash("sha256").update(png).digest("hex");
 
 interface MockState {
   revision: number;
-  draftStatus: "uploaded" | "needs_review";
+  draftStatus: "uploaded" | "needs_review" | "rejected";
   activeRunId: string | null;
   extractionPolls: number;
+  reviewSaves: number;
+  reviewDecision: "draft" | "approved" | "rejected";
+  reviewHeader: Record<string, string | null>;
+  reviewedFields: string[];
+  rejectionReason: string | null;
   uploadAttempts: number;
   failFirstUpload: boolean;
   intakeSubmissions: number;
@@ -68,6 +73,20 @@ async function mockApplication(
     draftStatus: "uploaded",
     activeRunId: null,
     extractionPolls: 0,
+    reviewSaves: 0,
+    reviewDecision: "draft",
+    reviewHeader: {
+      vendorName: "Test Vendor",
+      invoiceNumber: null,
+      invoiceDate: null,
+      currency: "USD",
+      subtotal: null,
+      tax: null,
+      freight: null,
+      total: null,
+    },
+    reviewedFields: [],
+    rejectionReason: null,
     uploadAttempts: 0,
     failFirstUpload,
     intakeSubmissions: 0,
@@ -123,6 +142,41 @@ async function mockApplication(
     }
     if (path === `/api/invoice-drafts/${draftId}`) {
       return json(route, draft(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/review` &&
+      request.method() === "GET"
+    ) {
+      return json(route, reviewWorkspace(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/review` &&
+      request.method() === "PATCH"
+    ) {
+      const body = request.postDataJSON() as {
+        revision: number;
+        header: Record<string, string | null>;
+        reviewedFields: string[];
+        decision: "draft" | "approved";
+      };
+      expect(body).not.toHaveProperty("companyId");
+      state.reviewHeader = body.header;
+      state.reviewedFields = body.reviewedFields;
+      state.reviewDecision = body.decision;
+      state.reviewSaves += 1;
+      state.revision += 1;
+      return json(route, reviewWorkspace(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/reject` &&
+      request.method() === "POST"
+    ) {
+      const body = request.postDataJSON() as { reason: string };
+      state.reviewDecision = "rejected";
+      state.rejectionReason = body.reason;
+      state.draftStatus = "rejected";
+      state.revision += 1;
+      return json(route, reviewWorkspace(state));
     }
     if (
       path === `/api/invoice-drafts/${draftId}/extraction-runs` &&
@@ -291,6 +345,32 @@ function extractionRun(
         : null,
     createdAt: "2026-07-23T12:00:00.000Z",
     completedAt: status === "completed" ? "2026-07-23T12:00:02.000Z" : null,
+  };
+}
+
+function reviewWorkspace(state: MockState) {
+  const completed = extractionRun(state, "completed");
+  const totalReviewed = state.reviewedFields.includes("total");
+  return {
+    draftId,
+    draftRevision: state.revision,
+    reviewRevision: state.reviewSaves,
+    decision: state.reviewDecision,
+    rejectionReason: state.rejectionReason,
+    proposedHeader: completed.proposal?.header,
+    finalHeader: state.reviewHeader,
+    reviewedFields: state.reviewedFields,
+    issues: totalReviewed
+      ? []
+      : [
+          {
+            path: "header.total",
+            reason: "missing",
+            message: "Invoice total needs review.",
+          },
+        ],
+    source: draft(state).source,
+    updatedAt: "2026-07-23T12:00:02.000Z",
   };
 }
 
@@ -506,6 +586,17 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(
     page.getByText(/1 line items proposed for review/),
   ).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole("region", { name: "Invoice review workspace" })).toBeVisible();
+  await expect(page.getByText(/AI proposed: Test Vendor/)).toBeVisible();
+  const vendor = page.getByLabel("Vendor / Supplier", { exact: true });
+  await vendor.fill("Corrected Vendor");
+  await vendor.blur();
+  await expect.poll(() => state.reviewSaves).toBeGreaterThan(0);
+  expect(state.reviewHeader.vendorName).toBe("Corrected Vendor");
+  await page.getByLabel("Reject reason").fill("Document is not a supplier invoice");
+  await page.getByRole("button", { name: "Reject invoice" }).click();
+  await expect(page.getByText("Rejected: Document is not a supplier invoice")).toBeVisible();
+  expect(state.reviewDecision).toBe("rejected");
   expect(state.intakeSubmissions).toBe(0);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
 });

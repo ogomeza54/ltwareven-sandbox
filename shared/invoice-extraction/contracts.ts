@@ -285,6 +285,76 @@ export type InvoiceExtractionRunDto = z.infer<
   typeof invoiceExtractionRunDtoSchema
 >;
 
+export const invoiceReviewDecisionSchema = z.enum([
+  "draft",
+  "approved",
+  "rejected",
+]);
+export const invoiceFinalHeaderSchema = z
+  .object({
+    vendorName: z.string().trim().max(240).nullable(),
+    invoiceNumber: z.string().trim().max(120).nullable(),
+    invoiceDate: z.string().trim().max(40).nullable(),
+    currency: z.string().trim().max(8).nullable(),
+    subtotal: z.string().trim().max(40).nullable(),
+    tax: z.string().trim().max(40).nullable(),
+    freight: z.string().trim().max(40).nullable(),
+    total: z.string().trim().max(40).nullable(),
+  })
+  .strict();
+export type InvoiceFinalHeader = z.infer<typeof invoiceFinalHeaderSchema>;
+export const invoiceHeaderFieldSchema = z.enum([
+  "vendorName",
+  "invoiceNumber",
+  "invoiceDate",
+  "currency",
+  "subtotal",
+  "tax",
+  "freight",
+  "total",
+]);
+export type InvoiceHeaderField = z.infer<typeof invoiceHeaderFieldSchema>;
+
+export const invoiceReviewIssueSchema = z.object({
+  path: z.string(),
+  reason: z.enum(["missing", "ambiguous", "low_confidence", "inconsistent"]),
+  message: z.string(),
+});
+export type InvoiceReviewIssue = z.infer<typeof invoiceReviewIssueSchema>;
+
+export const invoiceReviewWorkspaceDtoSchema = z.object({
+  draftId: z.string().uuid(),
+  draftRevision: z.number().int().nonnegative(),
+  reviewRevision: z.number().int().nonnegative(),
+  decision: invoiceReviewDecisionSchema,
+  rejectionReason: z.string().nullable(),
+  proposedHeader: invoiceProposalSchema.shape.header,
+  finalHeader: invoiceFinalHeaderSchema,
+  reviewedFields: z.array(invoiceHeaderFieldSchema),
+  issues: z.array(invoiceReviewIssueSchema),
+  source: invoiceSourceDtoSchema,
+  updatedAt: z.string().datetime(),
+});
+export type InvoiceReviewWorkspaceDto = z.infer<
+  typeof invoiceReviewWorkspaceDtoSchema
+>;
+
+export const updateInvoiceHeaderReviewSchema = z
+  .object({
+    revision: invoiceDraftRevisionSchema,
+    header: invoiceFinalHeaderSchema,
+    reviewedFields: z.array(invoiceHeaderFieldSchema),
+    decision: z.enum(["draft", "approved"]),
+  })
+  .strict();
+
+export const rejectInvoiceReviewSchema = z
+  .object({
+    revision: invoiceDraftRevisionSchema,
+    reason: z.string().trim().min(3).max(500),
+  })
+  .strict();
+
 export interface InvoiceFeatureResolution {
   manualReceiving: true;
   scanExtraction: boolean;

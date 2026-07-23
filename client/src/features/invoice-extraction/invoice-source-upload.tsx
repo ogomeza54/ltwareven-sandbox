@@ -25,6 +25,7 @@ import {
 } from "./invoice-source-api";
 import type { InvoiceExtractionRunDto } from "@shared/invoice-extraction/contracts";
 import { useInvoiceSources } from "./use-invoice-sources";
+import { InvoiceReviewWorkspace } from "./invoice-review-workspace";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -264,6 +265,13 @@ export function InvoiceSourceUpload({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {draft && ["needs_review", "rejected"].includes(draft.status) ? (
+        <InvoiceReviewWorkspace
+          draftId={draft.id}
+          readOnly={draft.status === "rejected"}
+          onDraftChanged={refresh}
+        />
       ) : null}
 
       <div className="flex flex-wrap gap-2">

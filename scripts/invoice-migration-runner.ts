@@ -10,6 +10,8 @@ const migrations = [
   "0002_invoice_private_sources.sql",
   "0003_invoice_extraction_proposals.sql",
   "0004_invoice_attempt_ownership.sql",
+  "0005_invoice_header_review.sql",
+  "0006_invoice_header_review_state.sql",
 ] as const;
 
 function splitStatements(sql: string): string[] {
