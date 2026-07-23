@@ -595,6 +595,98 @@ export const invoiceHistoryItemSchema = z.object({
 });
 export type InvoiceHistoryItem = z.infer<typeof invoiceHistoryItemSchema>;
 
+export const invoiceQualitySubjectSchema = z.enum([
+  "document",
+  "header",
+  "line",
+  "match",
+]);
+export const invoiceQualityDecisionSchema = z.enum([
+  "accepted",
+  "corrected",
+  "added",
+  "removed",
+  "unreviewed",
+  "rejected",
+  "confirmed",
+]);
+export const invoiceQualityQuerySchema = z
+  .object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    supplier: z.string().trim().max(160).optional(),
+    subjectType: invoiceQualitySubjectSchema.optional(),
+    decision: invoiceQualityDecisionSchema.optional(),
+    engineVersion: z.string().trim().max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      !value.from ||
+      !value.to ||
+      new Date(value.from).getTime() <= new Date(value.to).getTime(),
+    { message: "from must be earlier than or equal to to" },
+  );
+export type InvoiceQualityQuery = z.infer<typeof invoiceQualityQuerySchema>;
+
+const invoiceQualityBreakdownSchema = z.object({
+  key: z.string(),
+  count: z.number().int().nonnegative(),
+  denominator: z.number().int().nonnegative(),
+  rate: z.number().min(0).max(1).nullable(),
+});
+export const invoiceQualityDashboardSchema = z.object({
+  window: z.object({
+    from: z.string().datetime().nullable(),
+    to: z.string().datetime().nullable(),
+  }),
+  totals: z.object({
+    documents: z.number().int().nonnegative(),
+    runs: z.number().int().nonnegative(),
+    failedRuns: z.number().int().nonnegative(),
+    feedbackEvents: z.number().int().nonnegative(),
+    reviewedEvents: z.number().int().nonnegative(),
+    correctedEvents: z.number().int().nonnegative(),
+    acceptedEvents: z.number().int().nonnegative(),
+    correctionRate: z.number().min(0).max(1).nullable(),
+    acceptanceRate: z.number().min(0).max(1).nullable(),
+    averageReviewSeconds: z.number().nonnegative().nullable(),
+    lowSample: z.boolean(),
+    sampleFloor: z.number().int().positive(),
+  }),
+  byDecision: z.array(invoiceQualityBreakdownSchema),
+  bySubject: z.array(invoiceQualityBreakdownSchema),
+  engines: z.array(
+    z.object({
+      engineVersion: z.string(),
+      runs: z.number().int().nonnegative(),
+      failedRuns: z.number().int().nonnegative(),
+      retryAttempts: z.number().int().nonnegative(),
+      pages: z.number().int().nonnegative(),
+      reviewedEvents: z.number().int().nonnegative(),
+      correctedEvents: z.number().int().nonnegative(),
+      correctionRate: z.number().min(0).max(1).nullable(),
+    }),
+  ),
+  cases: z.array(
+    z.object({
+      draftId: z.string().uuid(),
+      status: invoiceDraftStatusSchema,
+      supplier: z.string().nullable(),
+      engineVersion: z.string().nullable(),
+      feedbackEvents: z.number().int().nonnegative(),
+      correctedEvents: z.number().int().nonnegative(),
+      reviewSeconds: z.number().nonnegative().nullable(),
+      updatedAt: z.string().datetime(),
+    }),
+  ),
+});
+export type InvoiceQualityDashboard = z.infer<
+  typeof invoiceQualityDashboardSchema
+>;
+
 export const updateInvoiceHeaderReviewSchema = z
   .object({
     revision: invoiceDraftRevisionSchema,

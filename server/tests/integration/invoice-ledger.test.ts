@@ -1543,6 +1543,38 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
     ).some((entry) => entry.draftId === draft.id),
     false,
   );
+  const { InvoiceQualityService } =
+    await import("../../modules/invoice-extraction/services/invoice-quality-service");
+  const quality = new InvoiceQualityService();
+  const dashboard = await quality.dashboard(actorA, {
+    limit: 20,
+    offset: 0,
+  });
+  assert.equal(dashboard.totals.feedbackEvents, 13);
+  assert.ok(dashboard.totals.reviewedEvents > 0);
+  assert.equal(dashboard.totals.lowSample, true);
+  assert.ok(dashboard.cases.some((entry) => entry.draftId === draft.id));
+  assert.equal(
+    JSON.stringify(dashboard).includes('"proposal"') ||
+      JSON.stringify(dashboard).includes('"finalValue"'),
+    false,
+  );
+  await assert.rejects(
+    quality.dashboard(actorB, { limit: 20, offset: 0 }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "INVOICE_FORBIDDEN",
+  );
+  const otherTenantDashboard = await quality.dashboard(
+    { ...actorB, role: "admin" },
+    { limit: 20, offset: 0 },
+  );
+  assert.equal(otherTenantDashboard.totals.feedbackEvents, 0);
+  assert.equal(
+    otherTenantDashboard.cases.some((entry) => entry.draftId === draft.id),
+    false,
+  );
 
   const eventId = `evt_${randomUUID()}`;
   assert.equal(

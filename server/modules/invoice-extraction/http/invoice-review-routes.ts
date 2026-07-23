@@ -5,6 +5,7 @@ import {
   createInvoiceConfirmationIntentSchema,
   invoiceDraftIdSchema,
   invoiceHistoryQuerySchema,
+  invoiceQualityQuerySchema,
   overrideInvoiceDuplicateSchema,
   rejectInvoiceReviewSchema,
   updateInvoiceHeaderReviewSchema,
@@ -21,6 +22,7 @@ import { InvoiceLineReviewService } from "../services/invoice-line-review-servic
 import { InvoicePartMatchService } from "../services/invoice-part-match-service";
 import { InvoiceConfirmationService } from "../services/invoice-confirmation-service";
 import { InvoiceHistoryService } from "../services/invoice-history-service";
+import { InvoiceQualityService } from "../services/invoice-quality-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
@@ -65,7 +67,29 @@ export function registerInvoiceReviewRoutes(
   matchService = new InvoicePartMatchService(),
   confirmationService = new InvoiceConfirmationService(),
   historyService = new InvoiceHistoryService(),
+  qualityService = new InvoiceQualityService(),
 ): void {
+  app.get(
+    "/api/invoice-quality",
+    isAuthenticated,
+    withCompanyContext,
+    async (request, response) => {
+      try {
+        const query = invoiceQualityQuerySchema.safeParse(request.query);
+        if (!query.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
+        response.json(
+          await qualityService.dashboard(
+            invoiceActorFromRequest(request),
+            query.data,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
   app.get(
     "/api/invoice-history",
     isAuthenticated,
