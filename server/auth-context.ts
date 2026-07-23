@@ -49,9 +49,15 @@ export const withCompanyContext: RequestHandler = async (
       companyId: effectiveCompanyId,
       actorCompanyId: user.companyId,
       role: user.role,
-      // Product administration is a separate trusted capability. No existing
-      // customer role silently receives it in this story.
-      isProductAdministrator: false,
+      // Product administration is a separate, explicit deployment allow-list.
+      // A customer role alone never grants engine activation.
+      isProductAdministrator:
+        user.role === "super_admin" &&
+        (process.env.INVOICE_PRODUCT_ADMIN_USER_IDS ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .includes(user.id),
     };
     next();
   } catch (error) {

@@ -51,6 +51,22 @@ before(async () => {
 });
 
 after(async () => {
+  await client.query(
+    `delete from invoice_engine_activations where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
+    `delete from invoice_evaluation_runs where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
+    `delete from invoice_evaluation_examples where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
+    `delete from invoice_evaluation_sets where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
   await client
     .query("delete from invoice_audit_events where false")
     .catch(() => undefined);
@@ -133,7 +149,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 12);
+  assert.equal(journal.rowCount, 13);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -147,6 +163,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0009_invoice_confirmation_intents.sql",
     "0010_invoice_confirmation_completion.sql",
     "0011_invoice_feedback_history.sql",
+    "0012_invoice_engine_evaluation.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -195,7 +212,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 12);
+  assert.equal(journal.rows[0].count, 13);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1574,6 +1591,166 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(
     otherTenantDashboard.cases.some((entry) => entry.draftId === draft.id),
     false,
+  );
+  const { InvoiceEvaluationService } =
+    await import("../../modules/invoice-extraction/services/invoice-evaluation-service");
+  const evaluation = new InvoiceEvaluationService();
+  const productActor = { ...actorA, isProductAdministrator: true };
+  const engineOne = `invoice-candidate-${randomUUID().slice(0, 8)}`;
+  const engineTwo = `invoice-rollback-${randomUUID().slice(0, 8)}`;
+  for (const version of [engineOne, engineTwo]) {
+    await evaluation.registerEngine(productActor, {
+      version,
+      model: "mock-evaluation-model",
+      schemaVersion: "invoice-proposal-v1",
+      providerConfig: { fixtureMode: true },
+      activationEligible: true,
+      eligibilityReason: "Explicitly approved for local pilot validation",
+    });
+  }
+  const evaluationDocument = {
+    header: {
+      vendorName: "Synthetic Vendor",
+      invoiceNumber: "SYN-001",
+      invoiceDate: "2026-07-23",
+      currency: "USD",
+      subtotal: "10.00",
+      tax: "0.00",
+      freight: "0.00",
+      total: "10.00",
+    },
+    lines: [
+      {
+        description: "Synthetic part",
+        vendorPartNumber: "SYN-PART",
+        quantity: "1",
+        unitCost: "10.00",
+      },
+    ],
+  };
+  const evaluationSet = await evaluation.createSet(productActor, {
+    name: `Synthetic pilot ${randomUUID().slice(0, 8)}`,
+    version: 1,
+    source: "synthetic",
+    consentRecorded: false,
+    examples: [
+      {
+        fixtureKey: "synthetic-tuning-1",
+        split: "tuning",
+        expected: evaluationDocument,
+        inputMetadata: { pageCount: 1, synthetic: true },
+      },
+      {
+        fixtureKey: "synthetic-test-1",
+        split: "test",
+        expected: evaluationDocument,
+        inputMetadata: { pageCount: 1, synthetic: true },
+      },
+    ],
+  });
+  const runEvaluation = (engineVersion: string) =>
+    evaluation.run(productActor, {
+      setId: evaluationSet.id,
+      engineVersion,
+      predictions: [
+        { fixtureKey: "synthetic-tuning-1", prediction: evaluationDocument },
+        { fixtureKey: "synthetic-test-1", prediction: evaluationDocument },
+      ],
+    });
+  const candidateEvaluation = await runEvaluation(engineOne);
+  const rollbackEvaluation = await runEvaluation(engineTwo);
+  assert.equal(candidateEvaluation.metrics.documentsExact.rate, 1);
+  assert.equal(candidateEvaluation.metrics.insufficientForThreshold, true);
+  assert.equal(
+    (await evaluation.comparisons(actorA, evaluationSet.id)).length,
+    2,
+  );
+  assert.equal(
+    (await evaluation.comparisons({ ...actorB, role: "admin" }, evaluationSet.id)).length,
+    0,
+  );
+  const firstActivation = await evaluation.activate(
+    productActor,
+    {
+      engineVersion: engineOne,
+      evaluationRunId: candidateEvaluation.id,
+      expectedRevision: 0,
+      reason: "Activate candidate for local pilot verification",
+    },
+    randomUUID(),
+  );
+  assert.equal(firstActivation.revision, 1);
+  const rollbackActivation = await evaluation.activate(
+    productActor,
+    {
+      engineVersion: engineTwo,
+      evaluationRunId: rollbackEvaluation.id,
+      expectedRevision: 1,
+      reason: "Rollback to the previously qualified local version",
+    },
+    randomUUID(),
+  );
+  assert.equal(rollbackActivation.revision, 2);
+  assert.equal(rollbackActivation.engineVersion, engineTwo);
+  const versionedDraft = await ledger.createDraft({
+    actor: actorA,
+    correlationId: randomUUID(),
+  });
+  const versionedSource = await documents.reserve(
+    { actor: actorA, correlationId: randomUUID() },
+    versionedDraft.id,
+    versionedDraft.revision,
+    "versioned-synthetic.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await documents.markVerified(
+    actorA,
+    versionedDraft.id,
+    versionedSource.documentId,
+    versionedSource.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 100,
+      sha256: "e".repeat(64),
+      pageCount: 1,
+    },
+  );
+  const versionedUploaded = await documents.attach(
+    { actor: actorA, correlationId: randomUUID() },
+    versionedDraft.id,
+    versionedSource.documentId,
+    versionedSource.assetId,
+    versionedDraft.revision,
+    10,
+  );
+  const versionedRun = await extractions.start(
+    actorA,
+    versionedDraft.id,
+    versionedUploaded.revision,
+    randomUUID(),
+    loadInvoiceConfig({ NODE_ENV: "test" }),
+  );
+  assert.equal(versionedRun.engineVersion, engineTwo);
+  assert.equal(versionedRun.model, "mock-evaluation-model");
+  assert.throws(
+    () => evaluation.activate(actorA, {
+      engineVersion: engineOne,
+      evaluationRunId: candidateEvaluation.id,
+      expectedRevision: 2,
+      reason: "Customer admins cannot activate engines",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "INVOICE_FORBIDDEN",
+  );
+  await assert.rejects(
+    client.query(
+      `update invoice_evaluation_runs set status = 'failed' where id = $1`,
+      [candidateEvaluation.id],
+    ),
+    /immutable/,
   );
 
   const eventId = `evt_${randomUUID()}`;

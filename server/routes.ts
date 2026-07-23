@@ -20,6 +20,7 @@ import { registerInvoiceDraftRoutes } from "./modules/invoice-extraction/http/in
 import { registerInvoiceAssetRoutes } from "./modules/invoice-extraction/http/invoice-asset-routes";
 import { registerInvoiceExtractionRoutes } from "./modules/invoice-extraction/http/invoice-extraction-routes";
 import { registerInvoiceReviewRoutes } from "./modules/invoice-extraction/http/invoice-review-routes";
+import { registerInvoiceEvaluationRoutes } from "./modules/invoice-extraction/http/invoice-evaluation-routes";
 
 // Configure multer for file uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -146,6 +147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerInvoiceAssetRoutes(app);
   registerInvoiceExtractionRoutes(app);
   registerInvoiceReviewRoutes(app);
+  registerInvoiceEvaluationRoutes(app);
 
   // Local auth routes
   app.post('/api/auth/local/login', async (req: any, res) => {

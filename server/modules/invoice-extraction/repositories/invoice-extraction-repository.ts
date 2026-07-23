@@ -146,6 +146,21 @@ export class PostgresInvoiceExtractionRepository {
             and draft_id = ${draftId}::uuid
         `),
       )[0];
+      const activeEngine = rows<{
+        version: string;
+        model: string;
+        schema_version: string;
+        provider_config: Record<string, unknown>;
+      }>(await tx.execute(sql`
+        select engine.version, engine.model, engine.schema_version,
+               engine.provider_config
+        from invoice_engine_activations activation
+        join invoice_engine_versions engine
+          on engine.version = activation.engine_version
+        where activation.company_id = ${actor.effectiveCompanyId}
+          and activation.capability = 'scan_extraction'
+        limit 1
+      `))[0];
       const correlationId = randomUUID();
       const created = rows<{ id: string }>(
         await tx.execute(sql`
@@ -157,9 +172,15 @@ export class PostgresInvoiceExtractionRepository {
           ) values (
             ${actor.effectiveCompanyId}, ${draftId}::uuid, ${Number(number.value)},
             ${expectedRevision}, ${actor.actorCompanyId}, ${actor.actorUserId},
-            ${correlationId}::uuid, ${config.engineVersion}, ${config.openaiModel},
-            ${config.proposalSchemaVersion}, ${config.executionMode},
-            ${config.storeResponse}, ${JSON.stringify({ sdk: "openai", sdkVersion: "6.48.0" })}::jsonb
+            ${correlationId}::uuid, ${activeEngine?.version ?? config.engineVersion},
+            ${activeEngine?.model ?? config.openaiModel},
+            ${activeEngine?.schema_version ?? config.proposalSchemaVersion},
+            ${config.executionMode}, ${config.storeResponse},
+            ${JSON.stringify({
+              sdk: "openai",
+              sdkVersion: "6.48.0",
+              ...(activeEngine?.provider_config ?? {}),
+            })}::jsonb
           )
           returning id
         `),

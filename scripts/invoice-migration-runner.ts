@@ -17,6 +17,7 @@ const migrations = [
   "0009_invoice_confirmation_intents.sql",
   "0010_invoice_confirmation_completion.sql",
   "0011_invoice_feedback_history.sql",
+  "0012_invoice_engine_evaluation.sql",
 ] as const;
 
 function splitStatements(sql: string): string[] {

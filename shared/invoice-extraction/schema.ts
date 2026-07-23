@@ -702,6 +702,214 @@ export const invoiceFeedbackEvents = pgTable(
   ],
 );
 
+export const invoiceEngineVersions = pgTable(
+  "invoice_engine_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    version: varchar("version", { length: 64 }).notNull(),
+    model: varchar("model", { length: 120 }).notNull(),
+    schemaVersion: varchar("schema_version", { length: 64 }).notNull(),
+    providerConfig: jsonb("provider_config").notNull().default({}),
+    activationEligible: boolean("activation_eligible").default(false).notNull(),
+    eligibilityReason: text("eligibility_reason"),
+    createdByCompanyId: varchar("created_by_company_id").notNull(),
+    createdByUserId: varchar("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_engine_versions_version_unique").on(table.version),
+    check(
+      "invoice_engine_versions_config_object",
+      sql`jsonb_typeof(${table.providerConfig}) = 'object'`,
+    ),
+    check(
+      "invoice_engine_versions_eligibility_coherent",
+      sql`(${table.activationEligible} = false)
+          or (${table.activationEligible} = true and length(trim(${table.eligibilityReason})) >= 3)`,
+    ),
+    foreignKey({
+      columns: [table.createdByCompanyId, table.createdByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_engine_versions_creator_fk",
+    }),
+  ],
+);
+
+export const invoiceEvaluationSets = pgTable(
+  "invoice_evaluation_sets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    version: integer("version").default(1).notNull(),
+    source: varchar("source", { length: 32 }).notNull(),
+    consentRecorded: boolean("consent_recorded").default(false).notNull(),
+    snapshotHash: varchar("snapshot_hash", { length: 64 }).notNull(),
+    createdByCompanyId: varchar("created_by_company_id").notNull(),
+    createdByUserId: varchar("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_evaluation_sets_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_evaluation_sets_company_name_version_unique").on(
+      table.companyId,
+      table.name,
+      table.version,
+    ),
+    check(
+      "invoice_evaluation_sets_source_valid",
+      sql`${table.source} in ('synthetic', 'authorized_feedback')`,
+    ),
+    check(
+      "invoice_evaluation_sets_snapshot_hash_shape",
+      sql`${table.snapshotHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "invoice_evaluation_sets_consent_coherent",
+      sql`${table.source} = 'synthetic' or ${table.consentRecorded} = true`,
+    ),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "invoice_evaluation_sets_company_fk",
+    }),
+    foreignKey({
+      columns: [table.createdByCompanyId, table.createdByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_evaluation_sets_creator_fk",
+    }),
+  ],
+);
+
+export const invoiceEvaluationExamples = pgTable(
+  "invoice_evaluation_examples",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    setId: uuid("set_id").notNull(),
+    split: varchar("split", { length: 16 }).notNull(),
+    fixtureKey: varchar("fixture_key", { length: 160 }).notNull(),
+    expected: jsonb("expected").notNull(),
+    inputMetadata: jsonb("input_metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_evaluation_examples_company_id_unique").on(table.companyId, table.id),
+    unique("invoice_evaluation_examples_set_fixture_unique").on(
+      table.companyId,
+      table.setId,
+      table.fixtureKey,
+    ),
+    check("invoice_evaluation_examples_split_valid", sql`${table.split} in ('tuning', 'test')`),
+    check(
+      "invoice_evaluation_examples_payload_objects",
+      sql`jsonb_typeof(${table.expected}) = 'object'
+          and jsonb_typeof(${table.inputMetadata}) = 'object'`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.setId],
+      foreignColumns: [invoiceEvaluationSets.companyId, invoiceEvaluationSets.id],
+      name: "invoice_evaluation_examples_set_fk",
+    }),
+  ],
+);
+
+export const invoiceEvaluationRuns = pgTable(
+  "invoice_evaluation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    setId: uuid("set_id").notNull(),
+    engineVersion: varchar("engine_version", { length: 64 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    configHash: varchar("config_hash", { length: 64 }).notNull(),
+    metrics: jsonb("metrics").notNull(),
+    predictionsHash: varchar("predictions_hash", { length: 64 }).notNull(),
+    createdByCompanyId: varchar("created_by_company_id").notNull(),
+    createdByUserId: varchar("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("invoice_evaluation_runs_company_id_unique").on(table.companyId, table.id),
+    index("invoice_evaluation_runs_comparison_idx").on(
+      table.companyId,
+      table.setId,
+      table.engineVersion,
+      table.createdAt,
+    ),
+    check("invoice_evaluation_runs_status_valid", sql`${table.status} in ('completed', 'failed')`),
+    check(
+      "invoice_evaluation_runs_hash_shape",
+      sql`${table.configHash} ~ '^[0-9a-f]{64}$'
+          and ${table.predictionsHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("invoice_evaluation_runs_metrics_object", sql`jsonb_typeof(${table.metrics}) = 'object'`),
+    foreignKey({
+      columns: [table.companyId, table.setId],
+      foreignColumns: [invoiceEvaluationSets.companyId, invoiceEvaluationSets.id],
+      name: "invoice_evaluation_runs_set_fk",
+    }),
+    foreignKey({
+      columns: [table.engineVersion],
+      foreignColumns: [invoiceEngineVersions.version],
+      name: "invoice_evaluation_runs_engine_fk",
+    }),
+    foreignKey({
+      columns: [table.createdByCompanyId, table.createdByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_evaluation_runs_creator_fk",
+    }),
+  ],
+);
+
+export const invoiceEngineActivations = pgTable(
+  "invoice_engine_activations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    capability: varchar("capability", { length: 32 }).notNull(),
+    engineVersion: varchar("engine_version", { length: 64 }).notNull(),
+    evaluationRunId: uuid("evaluation_run_id").notNull(),
+    revision: integer("revision").default(1).notNull(),
+    reason: text("reason").notNull(),
+    activatedByCompanyId: varchar("activated_by_company_id").notNull(),
+    activatedByUserId: varchar("activated_by_user_id").notNull(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("invoice_engine_activations_company_capability_unique").on(
+      table.companyId,
+      table.capability,
+    ),
+    check(
+      "invoice_engine_activations_capability_valid",
+      sql`${table.capability} = 'scan_extraction'`,
+    ),
+    check("invoice_engine_activations_revision_positive", sql`${table.revision} > 0`),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "invoice_engine_activations_company_fk",
+    }),
+    foreignKey({
+      columns: [table.engineVersion],
+      foreignColumns: [invoiceEngineVersions.version],
+      name: "invoice_engine_activations_engine_fk",
+    }),
+    foreignKey({
+      columns: [table.companyId, table.evaluationRunId],
+      foreignColumns: [invoiceEvaluationRuns.companyId, invoiceEvaluationRuns.id],
+      name: "invoice_engine_activations_evaluation_fk",
+    }),
+    foreignKey({
+      columns: [table.activatedByCompanyId, table.activatedByUserId],
+      foreignColumns: [users.companyId, users.id],
+      name: "invoice_engine_activations_actor_fk",
+    }),
+  ],
+);
+
 export const invoiceProviderWebhookEvents = pgTable(
   "invoice_provider_webhook_events",
   {

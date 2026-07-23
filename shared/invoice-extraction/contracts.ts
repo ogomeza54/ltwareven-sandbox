@@ -687,6 +687,146 @@ export type InvoiceQualityDashboard = z.infer<
   typeof invoiceQualityDashboardSchema
 >;
 
+const evaluationHeaderSchema = z
+  .object({
+    vendorName: z.string().nullable(),
+    invoiceNumber: z.string().nullable(),
+    invoiceDate: z.string().nullable(),
+    currency: z.string().nullable(),
+    subtotal: z.string().nullable(),
+    tax: z.string().nullable(),
+    freight: z.string().nullable(),
+    total: z.string().nullable(),
+  })
+  .strict();
+const evaluationLineSchema = z
+  .object({
+    description: z.string().nullable(),
+    vendorPartNumber: z.string().nullable(),
+    quantity: z.string().nullable(),
+    unitCost: z.string().nullable(),
+  })
+  .strict();
+export const invoiceEvaluationDocumentSchema = z
+  .object({
+    header: evaluationHeaderSchema,
+    lines: z.array(evaluationLineSchema).max(500),
+  })
+  .strict();
+export type InvoiceEvaluationDocument = z.infer<
+  typeof invoiceEvaluationDocumentSchema
+>;
+export const registerInvoiceEngineSchema = z
+  .object({
+    version: z.string().trim().min(1).max(64),
+    model: z.string().trim().min(1).max(120),
+    schemaVersion: z.literal("invoice-proposal-v1"),
+    providerConfig: z.record(z.unknown()).default({}),
+    activationEligible: z.boolean().default(false),
+    eligibilityReason: z.string().trim().min(3).max(500).nullable().default(null),
+  })
+  .strict()
+  .refine(
+    (value) => !value.activationEligible || value.eligibilityReason !== null,
+    { message: "Eligible engines require an approval reason" },
+  );
+export const createInvoiceEvaluationSetSchema = z
+  .object({
+    name: z.string().trim().min(1).max(160),
+    version: z.number().int().positive(),
+    source: z.enum(["synthetic", "authorized_feedback"]),
+    consentRecorded: z.boolean(),
+    examples: z
+      .array(
+        z
+          .object({
+            fixtureKey: z.string().trim().min(1).max(160),
+            split: z.enum(["tuning", "test"]),
+            expected: invoiceEvaluationDocumentSchema,
+            inputMetadata: z
+              .object({
+                pageCount: z.number().int().positive().max(10),
+                synthetic: z.boolean(),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict()
+  .refine(
+    (value) => value.source === "synthetic" || value.consentRecorded,
+    { message: "Authorized feedback requires recorded consent" },
+  )
+  .refine(
+    (value) =>
+      value.source !== "synthetic" ||
+      value.examples.every((example) => example.inputMetadata.synthetic),
+    { message: "Synthetic sets may contain synthetic examples only" },
+  );
+export const runInvoiceEvaluationSchema = z
+  .object({
+    setId: z.string().uuid(),
+    engineVersion: z.string().trim().min(1).max(64),
+    predictions: z
+      .array(
+        z
+          .object({
+            fixtureKey: z.string().trim().min(1).max(160),
+            prediction: invoiceEvaluationDocumentSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict();
+export const activateInvoiceEngineSchema = z
+  .object({
+    engineVersion: z.string().trim().min(1).max(64),
+    evaluationRunId: z.string().uuid(),
+    expectedRevision: z.number().int().nonnegative(),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .strict();
+export const invoiceEvaluationMetricsSchema = z.object({
+  examples: z.number().int().positive(),
+  headerFields: z.object({
+    correct: z.number().int().nonnegative(),
+    total: z.number().int().positive(),
+    accuracy: z.number().min(0).max(1),
+  }),
+  lines: z.object({
+    exact: z.number().int().nonnegative(),
+    expected: z.number().int().nonnegative(),
+    predicted: z.number().int().nonnegative(),
+    precision: z.number().min(0).max(1).nullable(),
+    recall: z.number().min(0).max(1).nullable(),
+  }),
+  documentsExact: z.object({
+    correct: z.number().int().nonnegative(),
+    total: z.number().int().positive(),
+    rate: z.number().min(0).max(1),
+  }),
+  suppliers: z.object({
+    correct: z.number().int().nonnegative(),
+    total: z.number().int().positive(),
+    accuracy: z.number().min(0).max(1),
+  }),
+  criticalRegressions: z.array(
+    z.object({
+      fixtureKey: z.string(),
+      field: z.enum(["vendorName", "invoiceNumber", "total"]),
+    }),
+  ),
+  insufficientForThreshold: z.literal(true),
+});
+export type InvoiceEvaluationMetrics = z.infer<
+  typeof invoiceEvaluationMetricsSchema
+>;
+
 export const updateInvoiceHeaderReviewSchema = z
   .object({
     revision: invoiceDraftRevisionSchema,
