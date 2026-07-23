@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [deliveryFee, setDeliveryFee] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [items, setItems] = useState<LineItem[]>([newLineItem()]);
+  const vendorInputRef = useRef<HTMLInputElement>(null);
+  const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -214,6 +216,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   };
 
   const handleClose = () => {
+    if (invoiceSourceBusy) {
+      toast({
+        title: "Invoice upload in progress",
+        description: "Wait for the source document operation to finish before closing.",
+        variant: "destructive",
+      });
+      return;
+    }
     onOpenChange(false);
     resetForm();
   };
@@ -290,9 +300,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) handleClose();
+      }}
+    >
+      <DialogContent className="flex h-screen w-screen max-w-none flex-col gap-0 overflow-hidden border-0 p-0 motion-reduce:duration-0 supports-[height:100dvh]:h-[100dvh] [&>button]:min-h-11 [&>button]:min-w-11 sm:h-[90vh] sm:w-[calc(100vw-2rem)] sm:max-w-5xl sm:rounded-lg sm:border">
+        <DialogHeader className="shrink-0 border-b bg-background px-4 py-4 pr-14 sm:px-6">
           <DialogTitle className="flex items-center gap-2 text-foreground">
             <PackagePlus className="h-5 w-5 text-amber-500" />
             Receive Inventory
@@ -302,11 +317,25 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 pt-2">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+          <InvoiceSourceUpload
+            open={open}
+            onBusyChange={setInvoiceSourceBusy}
+            onEnterManual={() => {
+              vendorInputRef.current?.scrollIntoView({
+                block: "center",
+                behavior: "auto",
+              });
+              vendorInputRef.current?.focus();
+            }}
+          />
+
           {/* Vendor — only field needed before entering items */}
           <div className="max-w-sm space-y-1.5">
-            <Label className="text-foreground font-medium">Vendor / Supplier *</Label>
+            <Label htmlFor="receive-inventory-vendor" className="text-foreground font-medium">Vendor / Supplier *</Label>
             <Input
+              ref={vendorInputRef}
+              id="receive-inventory-vendor"
               placeholder="e.g., FleetParts Wholesale"
               value={vendor}
               onChange={e => setVendor(e.target.value)}
@@ -318,7 +347,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-foreground">Line Items</h3>
-              <Button type="button" size="sm" variant="outline" onClick={addItem}>
+              <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={addItem}>
                 <Plus className="h-4 w-4 mr-1" /> Add Item
               </Button>
             </div>
@@ -326,9 +355,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               Select a category and subgroup to scope the item search. Search to link to an existing part, or type a new name to auto-create it on save.
             </p>
 
-            <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
+            <div className="rounded-lg border">
+              <table className="block w-full text-sm md:table">
+                <thead className="hidden bg-muted/50 md:table-header-group">
                   <tr>
                     <th className="text-left px-2 py-2 text-foreground font-medium w-6" title="Linked to catalog part" />
                     <th className="text-left px-3 py-2 text-foreground font-medium w-52">Type & Category</th>
@@ -341,7 +370,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     <th className="w-8" />
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="block space-y-3 p-3 md:table-row-group md:space-y-0 md:p-0">
                   {items.map((item) => {
                     const filteredParts = getFilteredParts(item);
                     const catalogSuggestions = getCatalogSuggestions(item);
@@ -349,9 +378,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     const showDropdown = searchFocus === item.id && (filteredParts.length > 0 || catalogSuggestions.length > 0);
 
                     return (
-                      <tr key={item.id} className="hover:bg-muted/20 align-top">
+                      <tr key={item.id} className="block rounded-lg border border-border p-3 align-top hover:bg-muted/20 md:table-row md:rounded-none md:border-0 md:p-0">
                         {/* Link status icon */}
-                        <td className="px-2 pt-3">
+                        <td className="mb-2 flex items-center gap-2 md:table-cell md:px-2 md:pt-3">
+                          <span className="font-medium md:hidden">Catalog status</span>
                           {item.partId ? (
                             <span title="Linked to existing catalog part">
                               <Link2 className="h-3.5 w-3.5 text-green-500" />
@@ -368,13 +398,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Type toggle + Group + Subgroup stacked */}
-                        <td className="px-3 py-2 space-y-1.5">
+                        <td className="block space-y-1.5 py-2 md:table-cell md:px-3">
+                          <span className="font-medium md:hidden">Type &amp; Category</span>
                           {/* Type toggle */}
                           <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "inventory" })}
-                              className={`flex-1 px-1.5 py-1 transition-colors ${
+                              aria-pressed={item.itemType === "inventory"}
+                              className={`min-h-11 flex-1 px-1.5 py-1 transition-colors ${
                                 item.itemType === "inventory"
                                   ? "bg-blue-600 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -385,7 +417,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "consumable" })}
-                              className={`flex-1 px-1.5 py-1 transition-colors border-l border-border ${
+                              aria-pressed={item.itemType === "consumable"}
+                              className={`min-h-11 flex-1 px-1.5 py-1 transition-colors border-l border-border ${
                                 item.itemType === "consumable"
                                   ? "bg-amber-500 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -399,7 +432,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           <select
                             value={item.groupId || ""}
                             onChange={e => updateItem(item.id, { groupId: e.target.value || undefined })}
-                            className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                            aria-label="Item category"
+                            className="min-h-11 w-full rounded border border-border bg-muted/30 px-2 py-1 text-xs text-foreground outline-none focus:border-amber-500/60"
                           >
                             <option value="">— Category —</option>
                             {(catalogTree as any[]).map((g: any) => (
@@ -412,7 +446,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             <select
                               value={item.subgroupId || ""}
                               onChange={e => updateItem(item.id, { subgroupId: e.target.value || undefined })}
-                              className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                              aria-label="Item subgroup"
+                              className="min-h-11 w-full rounded border border-border bg-muted/30 px-2 py-1 text-xs text-foreground outline-none focus:border-amber-500/60"
                             >
                               <option value="">— Subgroup —</option>
                               {subgroups.map((sg: any) => (
@@ -423,12 +458,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Part name search */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Part / Item</span>
                           <div className="relative">
                             <div className="flex items-center gap-1">
                               <Search className="h-3 w-3 text-foreground/50 flex-shrink-0" />
                               <input
-                                className="flex-1 bg-transparent outline-none text-foreground placeholder:text-foreground/50 min-w-0"
+                                aria-label="Part or item name"
+                                className="min-h-11 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-foreground/50"
                                 placeholder={item.subgroupId ? "Search within subgroup..." : "Search or type part name..."}
                                 value={partSearch[item.id] ?? item.partNameSnapshot}
                                 onChange={e => {
@@ -439,13 +476,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 onBlur={() => setTimeout(() => setSearchFocus(null), 150)}
                               />
                               {item.partId && (
-                                <button onClick={() => clearPart(item.id)} className="text-foreground/40 hover:text-foreground flex-shrink-0">
+                                <button type="button" aria-label="Clear linked part" onClick={() => clearPart(item.id)} className="min-h-11 min-w-11 flex-shrink-0 text-foreground/40 hover:text-foreground">
                                   <X className="h-3 w-3" />
                                 </button>
                               )}
                             </div>
                             {showDropdown && (
-                              <div className="absolute left-0 top-full z-50 w-80 bg-popover border border-border rounded-md shadow-lg mt-1">
+                              <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg md:w-80">
                                 {/* Existing parts */}
                                 {filteredParts.length > 0 && (
                                   <>
@@ -457,7 +494,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                     {filteredParts.map((part: any) => (
                                       <button
                                         key={part.id}
-                                        className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
+                                        type="button"
+                                        className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
                                         onMouseDown={() => selectPart(item.id, part)}
                                       >
                                         <span className="font-medium">{part.name}</span>
@@ -477,7 +515,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                       .map((ci: any) => (
                                         <button
                                           key={ci.id}
-                                          className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
+                                          type="button"
+                                          className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
                                           onMouseDown={() => selectCatalogItem(item.id, ci)}
                                         >
                                           <span>{ci.name}</span>
@@ -493,9 +532,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Part number */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Part number</span>
                           <input
-                            className="w-full bg-transparent outline-none text-foreground placeholder:text-foreground/50"
+                            aria-label="Part number"
+                            className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none placeholder:text-foreground/50 md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             placeholder="Part #"
                             value={item.partNumberSnapshot}
                             onChange={e => updateItem(item.id, { partNumberSnapshot: e.target.value })}
@@ -503,25 +544,29 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Qty */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Quantity</span>
                           <input
                             type="number"
                             min="1"
-                            className="w-full bg-transparent outline-none text-foreground"
+                            aria-label="Quantity"
+                            className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             value={item.qty}
                             onChange={e => updateItem(item.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
                           />
                         </td>
 
                         {/* Lot Price + per-unit derived display */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Lot price</span>
                           <div className="flex items-center gap-1">
                             <span className="text-foreground/60">$</span>
                             <input
                               type="number"
                               min="0"
                               step="0.01"
-                              className="w-full bg-transparent outline-none text-foreground"
+                              aria-label="Lot price"
+                              className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none md:min-h-0 md:rounded-none md:border-0 md:px-0"
                               placeholder="0.00"
                               value={item.lotPrice}
                               onChange={e => updateItem(item.id, { lotPrice: e.target.value })}
@@ -535,12 +580,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Line Total */}
-                        <td className="px-3 py-2 pt-3 text-right font-medium text-foreground">
-                          ${parseFloat(item.lineTotal || "0").toFixed(2)}
+                        <td className="flex justify-between py-2 font-medium text-foreground md:table-cell md:px-3 md:pt-3 md:text-right">
+                          <span className="md:hidden">Line Total</span>
+                          <span>${parseFloat(item.lineTotal || "0").toFixed(2)}</span>
                         </td>
 
                         {/* Landed Cost */}
-                        <td className="px-3 py-2 pt-3 text-right">
+                        <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
+                          <span className="font-medium text-amber-500 md:hidden">Landed</span>
                           {item.partNameSnapshot.trim() ? (
                             <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
                               ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
@@ -551,9 +598,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Delete */}
-                        <td className="px-2 py-2 pt-3">
+                        <td className="flex justify-end py-2 md:table-cell md:px-2 md:pt-3">
                           {items.length > 1 && (
-                            <button onClick={() => removeItem(item.id)} className="text-foreground/40 hover:text-red-500">
+                            <button type="button" aria-label="Remove line item" onClick={() => removeItem(item.id)} className="min-h-11 min-w-11 text-foreground/40 hover:text-red-500">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           )}
@@ -598,10 +645,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </div>
             </div>
 
-            <InvoiceSourceUpload open={open} />
-
             <div className="border-t border-border/50 pt-3">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3 max-w-sm ml-auto">
+            <div className="ml-auto grid max-w-sm grid-cols-[minmax(0,1fr)_minmax(6rem,auto)] gap-x-4 gap-y-3 sm:gap-x-8">
               <div className="text-foreground font-medium text-right">Parts Subtotal</div>
               <div className="text-foreground text-right font-semibold">${subtotal.toFixed(2)}</div>
 
@@ -667,16 +712,20 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-4 border-t">
-          <Button variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-6 sm:pb-4">
+          <Button variant="outline" className="min-h-11" onClick={handleClose} disabled={createMutation.isPending || invoiceSourceBusy}>
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMutation.isPending}
-            className="bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+            disabled={createMutation.isPending || invoiceSourceBusy}
+            className="min-h-11 bg-amber-500 font-semibold text-white hover:bg-amber-600"
           >
-            {createMutation.isPending ? "Saving..." : "Receive & Update Stock"}
+            {createMutation.isPending
+              ? "Saving..."
+              : invoiceSourceBusy
+                ? "Saving invoice source…"
+                : "Receive & Update Stock"}
           </Button>
         </div>
       </DialogContent>

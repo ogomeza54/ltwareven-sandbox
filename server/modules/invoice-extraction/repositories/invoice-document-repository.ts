@@ -69,6 +69,7 @@ function publicAsset(row: InternalAssetRow): InvoicePublicAssetDto {
   const base = {
     id: row.id,
     displayName: row.display_name,
+    checksumSha256: row.sha256,
     createdAt: iso(row.created_at),
   };
   if (row.lifecycle !== "attached") {
@@ -383,6 +384,7 @@ export class PostgresInvoiceDocumentRepository {
     assetId: string,
     expectedRevision: number,
     maxPages: number,
+    replacementAssetId?: string,
   ): Promise<InvoiceDraftDto> {
     return this.database.transaction(async (tx) => {
       const draft = rows<DraftMutationRow>(
@@ -431,18 +433,57 @@ export class PostgresInvoiceDocumentRepository {
         `),
       )[0];
       if (!document || !asset) throw new InvoiceDomainError("INVOICE_ASSET_NOT_FOUND");
-      if (document.total_pages + asset.page_count > maxPages) {
+      const replacement = replacementAssetId
+        ? rows<{ id: string; page_count: number; position: number; hold_at: Date | null }>(
+            await tx.execute(sql`
+              select id, page_count, position, hold_at
+              from invoice_source_assets
+              where company_id = ${context.actor.effectiveCompanyId}
+                and draft_id = ${draftId}::uuid
+                and document_id = ${documentId}::uuid
+                and id = ${replacementAssetId}::uuid
+                and lifecycle = 'attached'
+              for update
+            `),
+          )[0]
+        : null;
+      if (replacementAssetId && !replacement) {
+        throw new InvoiceDomainError("INVOICE_ASSET_NOT_FOUND");
+      }
+      if (replacement?.hold_at) {
+        throw new InvoiceDomainError("INVOICE_ASSET_HELD");
+      }
+      if (
+        document.total_pages -
+          (replacement?.page_count ?? 0) +
+          asset.page_count >
+        maxPages
+      ) {
         throw new InvoiceDomainError("INVOICE_PAGE_LIMIT");
       }
-      const position = rows<{ position: number }>(
+      const position =
+        replacement?.position ??
+        rows<{ position: number }>(
+          await tx.execute(sql`
+            select coalesce(max(position), 0) + 1 as position
+            from invoice_source_assets
+            where company_id = ${context.actor.effectiveCompanyId}
+              and document_id = ${documentId}::uuid
+              and lifecycle = 'attached'
+          `),
+        )[0].position;
+      if (replacement) {
         await tx.execute(sql`
-          select coalesce(max(position), 0) + 1 as position
-          from invoice_source_assets
+          update invoice_source_assets
+          set lifecycle = 'deleted', position = null,
+              deleted_at = now(), updated_at = now()
           where company_id = ${context.actor.effectiveCompanyId}
+            and draft_id = ${draftId}::uuid
             and document_id = ${documentId}::uuid
+            and id = ${replacement.id}::uuid
             and lifecycle = 'attached'
-        `),
-      )[0].position;
+        `);
+      }
       await tx.execute(sql`
         update invoice_source_assets
         set lifecycle = 'attached', position = ${Number(position)}, updated_at = now()
@@ -466,6 +507,9 @@ export class PostgresInvoiceDocumentRepository {
         `),
       )[0];
       await this.audit(tx, context, "asset.uploaded", assetId);
+      if (replacement) {
+        await this.audit(tx, context, "asset.replaced", replacement.id);
+      }
       return publicDraft(
         updated,
         await this.getSourceWith(tx, context.actor.effectiveCompanyId, draftId),
@@ -831,7 +875,7 @@ export class PostgresInvoiceDocumentRepository {
       documentId: string;
       assetId: string;
       objectKey: string;
-      lifecycle: "staging" | "verified" | "attached";
+      lifecycle: "staging" | "verified" | "attached" | "deleted";
       draftRevision: number;
     }>
   > {
@@ -841,7 +885,7 @@ export class PostgresInvoiceDocumentRepository {
       document_id: string;
       id: string;
       object_key: string;
-      lifecycle: "staging" | "verified" | "attached";
+      lifecycle: "staging" | "verified" | "attached" | "deleted";
       draft_revision: number;
     }>(
       await this.database.execute(sql`
@@ -867,6 +911,10 @@ export class PostgresInvoiceDocumentRepository {
               asset.lifecycle = 'attached'
               and asset.delete_failure_code is not null
             )
+            or (
+              asset.lifecycle = 'deleted'
+              and asset.object_key is not null
+            )
           )
         order by asset.updated_at, asset.id
         limit 100
@@ -880,6 +928,21 @@ export class PostgresInvoiceDocumentRepository {
       lifecycle: row.lifecycle,
       draftRevision: row.draft_revision,
     }));
+  }
+
+  async clearDeletedObjectKey(
+    actor: InvoiceActorContext,
+    draftId: string,
+    assetId: string,
+  ): Promise<void> {
+    await this.database.execute(sql`
+      update invoice_source_assets
+      set object_key = null, updated_at = now()
+      where company_id = ${actor.effectiveCompanyId}
+        and draft_id = ${draftId}::uuid
+        and id = ${assetId}::uuid
+        and lifecycle = 'deleted'
+    `);
   }
 
   async abandonReconciliationCandidate(candidate: {

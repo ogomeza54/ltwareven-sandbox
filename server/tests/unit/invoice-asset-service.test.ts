@@ -72,12 +72,143 @@ function baseDocuments(): InvoiceDocumentRepositoryPort {
     async reorder() {
       return draft;
     },
+    async clearDeletedObjectKey() {},
     async listReconciliationCandidates() {
       return [];
     },
     async abandonReconciliationCandidate() {},
   };
 }
+
+test("asset replacement tombstones before retiring old private storage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "invoice-service-test-"));
+  const filename = join(root, "quarantine");
+  await writeFile(filename, "12345678");
+  const events: string[] = [];
+  const documents = baseDocuments();
+  documents.getAssetForRead = async () => ({
+    objectKey: "private/old",
+    detectedType: "image/png",
+    displayName: "old.png",
+  });
+  documents.attach = async (
+    _context,
+    _draftId,
+    _documentId,
+    _assetId,
+    _revision,
+    _maxPages,
+    replacementAssetId,
+  ) => {
+    assert.equal(
+      replacementAssetId,
+      "00000000-0000-4000-8000-000000000099",
+    );
+    events.push("attach");
+    return draft;
+  };
+  documents.clearDeletedObjectKey = async () => {
+    events.push("clear-key");
+  };
+  const storage: PrivateStoragePort = {
+    async putFromFile() {
+      events.push("store-new");
+    },
+    async openStream() {
+      throw new Error("not used");
+    },
+    async delete(key) {
+      assert.equal(key, "private/old");
+      events.push("delete-old");
+    },
+    async exists() {
+      return true;
+    },
+  };
+  const service = new InvoiceAssetService(
+    documents,
+    drafts,
+    storage,
+    validator,
+    loadInvoiceConfig({ NODE_ENV: "test" }),
+  );
+
+  await service.upload({
+    actor,
+    draftId: draft.id,
+    expectedRevision: 0,
+    filename,
+    displayName: "replacement.png",
+    replacementAssetId: "00000000-0000-4000-8000-000000000099",
+  });
+
+  assert.deepEqual(events, [
+    "store-new",
+    "attach",
+    "delete-old",
+    "clear-key",
+  ]);
+});
+
+test("asset replacement refuses a concurrent duplicate without retiring the original", async () => {
+  const root = await mkdtemp(join(tmpdir(), "invoice-service-test-"));
+  const filename = join(root, "quarantine");
+  await writeFile(filename, "12345678");
+  let attached = false;
+  const documents = baseDocuments();
+  documents.getAssetForRead = async () => ({
+    objectKey: "private/original",
+    detectedType: "image/png",
+    displayName: "original.png",
+  });
+  documents.findDuplicate = async () => ({
+    id: "00000000-0000-4000-8000-000000000088",
+    displayName: "concurrent.png",
+    checksumSha256: "a".repeat(64),
+    detectedType: "image/png",
+    byteSize: 8,
+    pageCount: 1,
+    position: 2,
+    state: "Saved",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  documents.attach = async () => {
+    attached = true;
+    return draft;
+  };
+  const storage: PrivateStoragePort = {
+    async putFromFile() {},
+    async openStream() {
+      throw new Error("not used");
+    },
+    async delete() {},
+    async exists() {
+      return false;
+    },
+  };
+  const service = new InvoiceAssetService(
+    documents,
+    drafts,
+    storage,
+    validator,
+    loadInvoiceConfig({ NODE_ENV: "test" }),
+  );
+
+  await assert.rejects(
+    service.upload({
+      actor,
+      draftId: draft.id,
+      expectedRevision: 0,
+      filename,
+      displayName: "replacement.png",
+      replacementAssetId: "00000000-0000-4000-8000-000000000099",
+    }),
+    (error) =>
+      error instanceof InvoiceDomainError &&
+      error.code === "INVOICE_DUPLICATE_SOURCE",
+  );
+  assert.equal(attached, false);
+});
 
 const drafts: InvoiceAssetDraftRepositoryPort = {
   async resolveFeatures() {

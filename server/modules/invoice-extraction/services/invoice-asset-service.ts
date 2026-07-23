@@ -32,6 +32,7 @@ export type InvoiceDocumentRepositoryPort = Pick<
   | "markDeleteFailure"
   | "finalizeDelete"
   | "reorder"
+  | "clearDeletedObjectKey"
   | "listReconciliationCandidates"
   | "abandonReconciliationCandidate"
 >;
@@ -64,6 +65,7 @@ export class InvoiceAssetService {
     expectedRevision: number;
     filename: string;
     displayName: string;
+    replacementAssetId?: string;
     requestId?: string;
   }): Promise<InvoiceDraftDto> {
     await this.authorize(input.actor);
@@ -80,6 +82,16 @@ export class InvoiceAssetService {
       correlationId: randomUUID(),
       requestId: input.requestId,
     };
+    const replacedAsset = input.replacementAssetId
+      ? await this.documents.getAssetForRead(
+          input.actor,
+          input.draftId,
+          input.replacementAssetId,
+        )
+      : null;
+    if (input.replacementAssetId && !replacedAsset) {
+      throw new InvoiceDomainError("INVOICE_ASSET_NOT_FOUND");
+    }
     const reservation = await this.documents.reserve(
       context,
       input.draftId,
@@ -102,6 +114,12 @@ export class InvoiceAssetService {
           reservation.documentId,
           reservation.assetId,
         );
+        if (
+          input.replacementAssetId &&
+          duplicate.id !== input.replacementAssetId
+        ) {
+          throw new InvoiceDomainError("INVOICE_DUPLICATE_SOURCE");
+        }
         const current = await this.drafts.getDraft(input.actor, input.draftId);
         if (!current) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
         current.source = await this.documents.getSource(
@@ -139,14 +157,28 @@ export class InvoiceAssetService {
         throw error;
       }
       try {
-        return await this.documents.attach(
+        const attached = await this.documents.attach(
           context,
           input.draftId,
           reservation.documentId,
           reservation.assetId,
           input.expectedRevision,
           this.config.maxSourcePages,
+          input.replacementAssetId,
         );
+        if (replacedAsset && input.replacementAssetId) {
+          try {
+            await this.storage.delete(replacedAsset.objectKey);
+            await this.documents.clearDeletedObjectKey(
+              input.actor,
+              input.draftId,
+              input.replacementAssetId,
+            );
+          } catch {
+            // The tombstoned row retains its opaque key for reconciliation.
+          }
+        }
+        return attached;
       } catch (error) {
         try {
           await this.storage.delete(objectKey);
@@ -316,6 +348,13 @@ export class InvoiceAssetService {
             assetId: candidate.assetId,
             expectedRevision: candidate.draftRevision,
           });
+        } else if (candidate.lifecycle === "deleted") {
+          await this.storage.delete(candidate.objectKey);
+          await this.documents.clearDeletedObjectKey(
+            actor,
+            candidate.draftId,
+            candidate.assetId,
+          );
         } else {
           await this.storage.delete(candidate.objectKey);
           await this.documents.abandonReconciliationCandidate({

@@ -9,6 +9,8 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+test-results/
+playwright-report/
 
 # BMAD Method — local installation, skills, and generated artifacts
 _bmad/

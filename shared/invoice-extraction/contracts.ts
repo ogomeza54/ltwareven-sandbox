@@ -94,6 +94,7 @@ const invoiceDetectedTypeSchema = z.enum([
 const invoicePublicAssetBaseSchema = z.object({
   id: z.string().uuid(),
   displayName: z.string().min(1).max(120),
+  checksumSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
   createdAt: z.string().datetime(),
 });
 export const invoicePublicAssetSchema = z.discriminatedUnion("state", [

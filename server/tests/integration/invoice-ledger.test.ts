@@ -449,6 +449,103 @@ test("private source lifecycle preserves tenant, page, order and fingerprint inv
   );
 });
 
+test("private source replacement is atomic at the page limit", async () => {
+  const { PostgresInvoiceRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-repository");
+  const { PostgresInvoiceDocumentRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-document-repository");
+  const ledger = new PostgresInvoiceRepository();
+  const sources = new PostgresInvoiceDocumentRepository();
+  const context = {
+    actor: actorA,
+    correlationId: randomUUID(),
+    requestId: randomUUID(),
+  };
+  const draft = await ledger.createDraft(context);
+  const original = await sources.reserve(
+    context,
+    draft.id,
+    draft.revision,
+    "ten-pages.pdf",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    original.documentId,
+    original.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "application/pdf",
+      byteSize: 100,
+      sha256: "d".repeat(64),
+      pageCount: 10,
+    },
+  );
+  const full = await sources.attach(
+    context,
+    draft.id,
+    original.documentId,
+    original.assetId,
+    draft.revision,
+    10,
+  );
+  const replacement = await sources.reserve(
+    context,
+    draft.id,
+    full.revision,
+    "replacement.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await sources.markVerified(
+    actorA,
+    draft.id,
+    replacement.documentId,
+    replacement.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 50,
+      sha256: "e".repeat(64),
+      pageCount: 1,
+    },
+  );
+
+  const replaced = await sources.attach(
+    context,
+    draft.id,
+    replacement.documentId,
+    replacement.assetId,
+    full.revision,
+    10,
+    original.assetId,
+  );
+
+  assert.equal(replaced.revision, full.revision + 1);
+  assert.equal(replaced.source?.totalPages, 1);
+  assert.deepEqual(
+    replaced.source?.assets.map((asset) => [
+      asset.id,
+      asset.position,
+      asset.checksumSha256,
+    ]),
+    [[replacement.assetId, 1, "e".repeat(64)]],
+  );
+  const lifecycle = await client.query<{
+    lifecycle: string;
+    position: number | null;
+    deleted_at: Date | null;
+  }>(
+    `select lifecycle, position, deleted_at
+       from invoice_source_assets
+      where company_id = $1 and id = $2`,
+    [companyA, original.assetId],
+  );
+  assert.equal(lifecycle.rows[0].lifecycle, "deleted");
+  assert.equal(lifecycle.rows[0].position, null);
+  assert.ok(lifecycle.rows[0].deleted_at);
+});
+
 test("journal adoption rejects an incomplete ledger fingerprint", async () => {
   const { assertBrownfieldBaseline } =
     await import("../../../scripts/invoice-migration-preflight");

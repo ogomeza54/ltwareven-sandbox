@@ -13,6 +13,39 @@ export class InvoiceSourceApiError extends Error {
   }
 }
 
+export class SerializedInvoiceMutationQueue {
+  private tail: Promise<void> = Promise.resolve();
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.tail;
+    let release: () => void = () => undefined;
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
+export function movedInvoiceAssetIds(
+  assets: readonly InvoicePublicAssetDto[],
+  assetId: string,
+  direction: -1 | 1,
+): string[] | null {
+  const ordered = [...assets].sort(
+    (left, right) => (left.position ?? 0) - (right.position ?? 0),
+  );
+  const index = ordered.findIndex((asset) => asset.id === assetId);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= ordered.length) return null;
+  [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+  return ordered.map((asset) => asset.id);
+}
+
 export function safeInvoiceDisplayName(value: string): string {
   const leaf = value.replaceAll("\\", "/").split("/").pop() ?? "";
   const safe = leaf
@@ -22,6 +55,17 @@ export function safeInvoiceDisplayName(value: string): string {
     .trim()
     .slice(0, 120);
   return safe || "invoice-source";
+}
+
+export async function invoiceFileChecksum(file: File): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Browser checksum support is unavailable.");
+  }
+  const bytes = await file.arrayBuffer();
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 async function responseJson<T>(response: Response): Promise<T> {
@@ -80,6 +124,7 @@ export async function getInvoiceDraft(draftId: string): Promise<InvoiceDraftDto>
 export async function uploadInvoiceSource(
   draft: InvoiceDraftDto,
   file: File,
+  replacementAssetId?: string,
 ): Promise<InvoiceDraftDto> {
   const body = new FormData();
   body.append("file", file);
@@ -87,7 +132,12 @@ export async function uploadInvoiceSource(
     await fetch(`/api/invoice-drafts/${draft.id}/assets`, {
       method: "POST",
       credentials: "include",
-      headers: { "If-Match": `"${draft.revision}"` },
+      headers: {
+        "If-Match": `"${draft.revision}"`,
+        ...(replacementAssetId
+          ? { "X-Replaces-Invoice-Asset": replacementAssetId }
+          : {}),
+      },
       body,
     }),
   );
@@ -104,4 +154,28 @@ export async function deleteInvoiceSource(
       headers: { "If-Match": `"${draft.revision}"` },
     }),
   );
+}
+
+export async function reorderInvoiceSources(
+  draft: InvoiceDraftDto,
+  assetIds: readonly string[],
+): Promise<InvoiceDraftDto> {
+  return responseJson(
+    await fetch(`/api/invoice-drafts/${draft.id}/assets/order`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "If-Match": `"${draft.revision}"`,
+      },
+      body: JSON.stringify({ assetIds }),
+    }),
+  );
+}
+
+export function privateInvoiceAssetUrl(
+  draftId: string,
+  assetId: string,
+): string {
+  return `/api/invoice-drafts/${encodeURIComponent(draftId)}/assets/${encodeURIComponent(assetId)}`;
 }

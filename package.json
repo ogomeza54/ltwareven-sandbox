@@ -10,6 +10,7 @@
     "check": "tsc",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "tsx --test server/tests/unit/*.test.ts",
+    "test:e2e": "playwright test",
     "test:integration": "tsx scripts/run-integration-tests.ts",
     "test:app-storage": "tsx server/tests/opt-in/replit-storage.contract.ts",
     "db:up": "docker compose up -d postgres",
@@ -107,6 +108,7 @@
     "zustand": "^5.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@replit/vite-plugin-cartographer": "^0.2.8",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
     "@tailwindcss/typography": "^0.5.15",

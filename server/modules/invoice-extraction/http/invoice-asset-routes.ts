@@ -211,12 +211,22 @@ export function registerInvoiceAssetRoutes(
         const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
         if (!draftId.success) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
         if (!request.file) throw new InvoiceDomainError("INVOICE_FILE_REQUIRED");
+        const replacementHeader = request.header("x-replaces-invoice-asset");
+        const replacementAssetId = replacementHeader
+          ? invoiceAssetIdSchema.safeParse(replacementHeader)
+          : null;
+        if (replacementHeader && !replacementAssetId?.success) {
+          throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+        }
         const result = await assetService.upload({
           actor: invoiceActorFromRequest(request),
           draftId: draftId.data,
           expectedRevision: expectedInvoiceDraftRevision(request),
           filename: request.file.path,
           displayName: request.file.originalname,
+          replacementAssetId: replacementAssetId?.success
+            ? replacementAssetId.data
+            : undefined,
           requestId: requestId(request),
         });
         response.status(202).json(result);
