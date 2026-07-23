@@ -33,6 +33,16 @@ test("invoice pilot configuration has validated safe defaults", () => {
     pilotCurrency: "USD",
     workerMaxAttempts: 3,
     workerLeaseSeconds: 120,
+    workerPollSeconds: 15,
+    provider: "openai",
+    openaiApiKey: undefined,
+    openaiWebhookSecret: undefined,
+    openaiModel: "gpt-5.6-terra",
+    engineVersion: "invoice-v1",
+    proposalSchemaVersion: "invoice-proposal-v1",
+    executionMode: "background",
+    storeResponse: true,
+    privacyProfile: "standard",
     storageBackend: "filesystem",
     storageRoot: ".private/invoice-sources",
     storageBucket: undefined,
@@ -52,6 +62,30 @@ test("invoice configuration fails closed and ignores remote database settings", 
         REMOTE_DATABASE_URL: "postgresql://remote.invalid/production",
       }),
     ZodError,
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        INVOICE_OPENAI_EXECUTION_MODE: "background",
+        INVOICE_OPENAI_STORE_RESPONSE: "false",
+      }),
+    /requires stored provider responses/,
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        INVOICE_OPENAI_EXECUTION_MODE: "background",
+        INVOICE_OPENAI_PRIVACY_PROFILE: "zdr",
+      }),
+    /cannot claim a ZDR/,
+  );
+  assert.equal(
+    loadInvoiceConfig({
+      INVOICE_OPENAI_EXECUTION_MODE: "synchronous",
+      INVOICE_OPENAI_STORE_RESPONSE: "false",
+      INVOICE_OPENAI_PRIVACY_PROFILE: "zdr",
+    }).storeResponse,
+    false,
   );
   assert.throws(
     () =>

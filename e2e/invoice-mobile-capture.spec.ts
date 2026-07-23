@@ -10,6 +10,9 @@ const pngChecksum = createHash("sha256").update(png).digest("hex");
 
 interface MockState {
   revision: number;
+  draftStatus: "uploaded" | "needs_review";
+  activeRunId: string | null;
+  extractionPolls: number;
   uploadAttempts: number;
   failFirstUpload: boolean;
   intakeSubmissions: number;
@@ -30,9 +33,9 @@ function draft(state: MockState) {
   const timestamp = "2026-07-23T12:00:00.000Z";
   return {
     id: draftId,
-    status: "uploaded",
+    status: state.draftStatus,
     revision: state.revision,
-    activeRunId: null,
+    activeRunId: state.activeRunId,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastActivityAt: timestamp,
@@ -62,6 +65,9 @@ async function mockApplication(
   let deleteAborted = false;
   const state: MockState = {
     revision: 2,
+    draftStatus: "uploaded",
+    activeRunId: null,
+    extractionPolls: 0,
     uploadAttempts: 0,
     failFirstUpload,
     intakeSubmissions: 0,
@@ -117,6 +123,23 @@ async function mockApplication(
     }
     if (path === `/api/invoice-drafts/${draftId}`) {
       return json(route, draft(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/extraction-runs` &&
+      request.method() === "POST"
+    ) {
+      state.activeRunId = "00000000-0000-4000-8000-000000000010";
+      state.revision += 1;
+      return json(route, extractionRun(state, "queued"), 202);
+    }
+    if (path === "/api/invoice-extraction-runs/00000000-0000-4000-8000-000000000010") {
+      state.extractionPolls += 1;
+      if (state.extractionPolls >= 2) {
+        state.draftStatus = "needs_review";
+        state.revision += 1;
+        return json(route, extractionRun(state, "completed"));
+      }
+      return json(route, extractionRun(state, "processing"));
     }
     if (
       path === `/api/invoice-drafts/${draftId}/assets` &&
@@ -213,6 +236,62 @@ async function mockApplication(
     return json(route, []);
   });
   return state;
+}
+
+function extractionRun(
+  state: MockState,
+  status: "queued" | "processing" | "completed",
+) {
+  const value = {
+    observed: null,
+    normalized: null,
+    confidence: null,
+    sourceAssetId: null,
+    sourcePage: null,
+  };
+  return {
+    id: "00000000-0000-4000-8000-000000000010",
+    draftId,
+    runNumber: 1,
+    status,
+    revision: status === "completed" ? 2 : 1,
+    attemptStatus: status === "completed" ? "completed" : "submitted",
+    failureCode: null,
+    engineVersion: "invoice-v1",
+    model: "gpt-5.6-terra",
+    schemaVersion: "invoice-proposal-v1",
+    executionMode: "background",
+    storeResponse: true,
+    proposal:
+      status === "completed"
+        ? {
+            schemaVersion: "invoice-proposal-v1",
+            header: {
+              vendorName: { ...value, observed: "Test Vendor", normalized: "Test Vendor" },
+              invoiceNumber: value,
+              invoiceDate: value,
+              currency: { ...value, observed: "USD", normalized: "USD" },
+              subtotal: value,
+              tax: value,
+              freight: value,
+              total: value,
+            },
+            lines: [
+              {
+                description: { ...value, observed: "Brake pad", normalized: "Brake pad" },
+                vendorPartNumber: value,
+                quantity: { ...value, observed: "2", normalized: "2" },
+                unitCost: value,
+                lineTotal: value,
+                classification: { kind: "inventory", confidence: null },
+              },
+            ],
+            uncertainties: [],
+          }
+        : null,
+    createdAt: "2026-07-23T12:00:00.000Z",
+    completedAt: status === "completed" ? "2026-07-23T12:00:02.000Z" : null,
+  };
 }
 
 async function openReceiveInventory(page: Page) {
@@ -415,4 +494,18 @@ test("manual receiving remains submit-capable without invoice capture", async ({
   await page.getByRole("button", { name: "Receive & Update Stock" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   expect(state.intakeSubmissions).toBe(1);
+});
+
+test("AI extraction is polled and stops at a human review result without stock writes", async ({
+  page,
+}) => {
+  const state = await mockApplication(page);
+  await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await expect(page.getByText(/Status: queued|Status: processing/)).toBeVisible();
+  await expect(
+    page.getByText(/1 line items proposed for review/),
+  ).toBeVisible({ timeout: 8_000 });
+  expect(state.intakeSubmissions).toBe(0);
+  await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
 });

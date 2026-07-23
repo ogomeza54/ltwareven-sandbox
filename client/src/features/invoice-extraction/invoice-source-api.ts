@@ -1,5 +1,6 @@
 import type {
   InvoiceDraftDto,
+  InvoiceExtractionRunDto,
   InvoicePublicAssetDto,
 } from "@shared/invoice-extraction/contracts";
 
@@ -94,13 +95,35 @@ export function selectResumableInvoiceDraft(
 ): InvoiceDraftDto | null {
   const candidates = drafts.filter(
     (candidate) =>
-      ["draft", "uploaded"].includes(candidate.status) &&
-      !candidate.activeRunId,
+      ["draft", "uploaded", "needs_review"].includes(candidate.status),
   );
   return (
     candidates.find((candidate) => candidate.source?.assets.length) ??
     candidates[0] ??
     null
+  );
+}
+
+export async function startInvoiceExtraction(
+  draft: InvoiceDraftDto,
+): Promise<InvoiceExtractionRunDto> {
+  return responseJson(
+    await fetch(`/api/invoice-drafts/${draft.id}/extraction-runs`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: draft.revision }),
+    }),
+  );
+}
+
+export async function getInvoiceExtractionRun(
+  runId: string,
+): Promise<InvoiceExtractionRunDto> {
+  return responseJson(
+    await fetch(`/api/invoice-extraction-runs/${encodeURIComponent(runId)}`, {
+      credentials: "include",
+    }),
   );
 }
 

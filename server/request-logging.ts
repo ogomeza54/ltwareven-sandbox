@@ -12,7 +12,11 @@ export function mayCaptureJsonResponse(path: string): boolean {
 }
 
 export function safeApiLogPath(path: string): string {
-  return path.startsWith("/api/invoice-drafts/")
-    ? "/api/invoice-drafts/:draftId"
-    : path;
+  if (path.startsWith("/api/invoice-drafts/")) {
+    return "/api/invoice-drafts/:draftId";
+  }
+  if (path.startsWith("/api/invoice-extraction-runs/")) {
+    return "/api/invoice-extraction-runs/:runId";
+  }
+  return path;
 }

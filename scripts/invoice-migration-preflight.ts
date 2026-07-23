@@ -512,6 +512,26 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
       );
     }
     if (recorded.rows[0]?.applied) {
+      const extractionRecorded = await client.query<{ applied: boolean }>(
+        `select exists (
+           select 1 from drizzle.__drizzle_migrations
+            where created_at = 1784764803000
+         ) as applied`,
+      );
+      const expectedLedgerColumns = extractionRecorded.rows[0]?.applied
+        ? {
+            ...requiredLedgerColumns,
+            invoice_extraction_runs: [
+              ...requiredLedgerColumns.invoice_extraction_runs,
+              "engine_version",
+              "model",
+              "schema_version",
+              "execution_mode",
+              "store_response",
+              "provider_config",
+            ],
+          }
+        : requiredLedgerColumns;
       const ledgerColumnDrift: string[] = [];
       const ledgerColumns = await client.query<{
         table_name: string;
@@ -523,7 +543,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
            from information_schema.columns
           where table_schema = 'public'
             and table_name = any($1::text[])`,
-        [Object.keys(requiredLedgerColumns)],
+        [Object.keys(expectedLedgerColumns)],
       );
       const observedLedgerColumns = new Map<string, Set<string>>();
       const observedLedgerShapes = new Map<
@@ -553,7 +573,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
         }
       }
       for (const [table, expectedColumns] of Object.entries(
-        requiredLedgerColumns,
+        expectedLedgerColumns,
       )) {
         const observed = observedLedgerColumns.get(table) ?? new Set<string>();
         const expected = new Set(expectedColumns);

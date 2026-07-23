@@ -298,6 +298,14 @@ export function useInvoiceSources(open: boolean) {
       }
     }, false);
 
+  const refresh = async (): Promise<InvoiceDraftDto | null> => {
+    const current = draftRef.current;
+    if (!current) return null;
+    const refreshed = await getInvoiceDraft(current.id);
+    updateDraft(refreshed);
+    return refreshed;
+  };
+
   return {
     draft,
     assets: draft?.source?.assets ?? [],
@@ -317,5 +325,6 @@ export function useInvoiceSources(open: boolean) {
     upload,
     remove,
     move,
+    refresh,
   };
 }

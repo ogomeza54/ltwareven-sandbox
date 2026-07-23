@@ -18,6 +18,7 @@ import { createInventoryIntakeHandler } from "./modules/inventory-receiving/inve
 import { resolveUserId, withCompanyContext } from "./auth-context";
 import { registerInvoiceDraftRoutes } from "./modules/invoice-extraction/http/invoice-draft-routes";
 import { registerInvoiceAssetRoutes } from "./modules/invoice-extraction/http/invoice-asset-routes";
+import { registerInvoiceExtractionRoutes } from "./modules/invoice-extraction/http/invoice-extraction-routes";
 
 // Configure multer for file uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -142,6 +143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   registerInvoiceDraftRoutes(app);
   registerInvoiceAssetRoutes(app);
+  registerInvoiceExtractionRoutes(app);
 
   // Local auth routes
   app.post('/api/auth/local/login', async (req: any, res) => {

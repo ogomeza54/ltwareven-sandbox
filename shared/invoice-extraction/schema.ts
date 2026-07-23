@@ -130,6 +130,12 @@ export const invoiceExtractionRuns = pgTable(
     requestedByCompanyId: varchar("requested_by_company_id").notNull(),
     requestedByUserId: varchar("requested_by_user_id").notNull(),
     correlationId: uuid("correlation_id").notNull(),
+    engineVersion: varchar("engine_version", { length: 64 }).notNull().default("invoice-v1"),
+    model: varchar("model", { length: 120 }).notNull().default("gpt-5.6-terra"),
+    schemaVersion: varchar("schema_version", { length: 64 }).notNull().default("invoice-proposal-v1"),
+    executionMode: varchar("execution_mode", { length: 16 }).notNull().default("background"),
+    storeResponse: boolean("store_response").notNull().default(true),
+    providerConfig: jsonb("provider_config").notNull().default({}),
     failureCode: text("failure_code"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -164,6 +170,14 @@ export const invoiceExtractionRuns = pgTable(
       "invoice_extraction_runs_base_revision_nonnegative",
       sql`${table.baseDraftRevision} >= 0`,
     ),
+    check(
+      "invoice_extraction_runs_execution_mode_valid",
+      sql`${table.executionMode} in ('background', 'synchronous')`,
+    ),
+    check(
+      "invoice_extraction_runs_provider_config_object",
+      sql`jsonb_typeof(${table.providerConfig}) = 'object'`,
+    ),
     foreignKey({
       columns: [table.companyId],
       foreignColumns: [companies.id],
@@ -179,6 +193,79 @@ export const invoiceExtractionRuns = pgTable(
       foreignColumns: [users.companyId, users.id],
       name: "invoice_extraction_runs_requester_fk",
     }),
+  ],
+);
+
+export const invoiceExtractionProposals = pgTable(
+  "invoice_extraction_proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    companyId: varchar("company_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    attemptId: uuid("attempt_id").notNull(),
+    schemaVersion: varchar("schema_version", { length: 64 }).notNull(),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("invoice_extraction_proposals_company_id_unique").on(
+      table.companyId,
+      table.id,
+    ),
+    unique("invoice_extraction_proposals_company_run_unique").on(
+      table.companyId,
+      table.runId,
+    ),
+    unique("invoice_extraction_proposals_company_attempt_unique").on(
+      table.companyId,
+      table.attemptId,
+    ),
+    index("invoice_extraction_proposals_company_draft_idx").on(
+      table.companyId,
+      table.draftId,
+      table.createdAt,
+    ),
+    check(
+      "invoice_extraction_proposals_payload_object",
+      sql`jsonb_typeof(${table.payload}) = 'object'`,
+    ),
+    foreignKey({
+      columns: [table.companyId, table.draftId, table.runId],
+      foreignColumns: [
+        invoiceExtractionRuns.companyId,
+        invoiceExtractionRuns.draftId,
+        invoiceExtractionRuns.id,
+      ],
+      name: "invoice_extraction_proposals_run_fk",
+    }),
+  ],
+);
+
+export const invoiceProviderWebhookEvents = pgTable(
+  "invoice_provider_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    providerEventId: text("provider_event_id").notNull(),
+    providerResponseId: text("provider_response_id").notNull(),
+    eventType: text("event_type").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("invoice_provider_webhook_events_provider_event_unique").on(
+      table.provider,
+      table.providerEventId,
+    ),
+    index("invoice_provider_webhook_events_response_idx").on(
+      table.provider,
+      table.providerResponseId,
+    ),
   ],
 );
 
@@ -207,6 +294,11 @@ export const invoiceProviderAttempts = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => [
+    unique("invoice_provider_attempts_company_run_id_unique").on(
+      table.companyId,
+      table.runId,
+      table.id,
+    ),
     unique("invoice_provider_attempts_company_run_ordinal_unique").on(
       table.companyId,
       table.runId,

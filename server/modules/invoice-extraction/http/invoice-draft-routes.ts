@@ -17,7 +17,7 @@ import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
 
-const statusByCode: Readonly<Record<InvoiceDomainError["code"], number>> = {
+const statusByCode: Readonly<Partial<Record<InvoiceDomainError["code"], number>>> = {
   INVOICE_INVALID_REQUEST: 400,
   INVOICE_FORBIDDEN: 403,
   INVOICE_FEATURE_DISABLED: 403,
@@ -51,7 +51,7 @@ function sendInvoiceError(
 ): void {
   const id = requestId(req);
   if (error instanceof InvoiceDomainError) {
-    res.status(statusByCode[error.code]).json({
+    res.status(statusByCode[error.code] ?? 500).json({
       code: error.code,
       message: error.message,
       requestId: id,

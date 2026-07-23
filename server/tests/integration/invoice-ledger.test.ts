@@ -59,6 +59,10 @@ after(async () => {
     [[companyA, companyB]],
   );
   await client.query(
+    `delete from invoice_extraction_proposals where company_id = any($1::varchar[])`,
+    [[companyA, companyB]],
+  ).catch(() => undefined);
+  await client.query(
     `delete from invoice_provider_attempts where company_id = any($1::varchar[])`,
     [[companyA, companyB]],
   );
@@ -93,11 +97,13 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 3);
+  assert.equal(journal.rowCount, 5);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
     "0002_invoice_private_sources.sql",
+    "0003_invoice_extraction_proposals.sql",
+    "0004_invoice_attempt_ownership.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -146,7 +152,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 3);
+  assert.equal(journal.rows[0].count, 5);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -995,6 +1001,130 @@ test("two concurrent claimers yield one lease and expired DB-time leases are rec
       error !== null &&
       "code" in error &&
       (error as { code: string }).code === "INVOICE_PROVIDER_RESPONSE_CONFLICT",
+  );
+});
+
+test("durable extraction publishes only a tenant-owned current proposal", async () => {
+  const { PostgresInvoiceRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-repository");
+  const { PostgresInvoiceDocumentRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-document-repository");
+  const { PostgresInvoiceExtractionRepository } =
+    await import("../../modules/invoice-extraction/repositories/invoice-extraction-repository");
+  const { loadInvoiceConfig } =
+    await import("../../modules/invoice-extraction/config/invoice-config");
+  const ledger = new PostgresInvoiceRepository();
+  const documents = new PostgresInvoiceDocumentRepository();
+  const extractions = new PostgresInvoiceExtractionRepository();
+  const context = { actor: actorA, correlationId: randomUUID() };
+  const draft = await ledger.createDraft(context);
+  const source = await documents.reserve(
+    context,
+    draft.id,
+    draft.revision,
+    "invoice.png",
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+  );
+  await documents.markVerified(
+    actorA,
+    draft.id,
+    source.documentId,
+    source.assetId,
+    `invoice-sources/${randomUUID()}/${randomUUID()}`,
+    {
+      detectedType: "image/png",
+      byteSize: 100,
+      sha256: "d".repeat(64),
+      pageCount: 1,
+    },
+  );
+  const uploaded = await documents.attach(
+    context,
+    draft.id,
+    source.documentId,
+    source.assetId,
+    draft.revision,
+    10,
+  );
+  const run = await extractions.start(
+    actorA,
+    draft.id,
+    uploaded.revision,
+    randomUUID(),
+    loadInvoiceConfig({
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "mock-only",
+    }),
+  );
+  assert.equal(run.status, "queued");
+  assert.equal(run.model, "gpt-5.6-terra");
+  assert.equal(await extractions.get(actorB, run.id), null);
+
+  const claimed = await extractions.claimNext("worker-a", 120);
+  assert.equal(claimed?.runId, run.id);
+  assert.ok(claimed);
+  const responseId = `resp_${randomUUID()}`;
+  await extractions.markSubmitted(claimed, responseId, 1);
+  await client.query(
+    `update invoice_provider_attempts
+        set available_at = now() - interval '1 second'
+      where id = $1`,
+    [claimed.id],
+  );
+  const reclaimed = await extractions.claimNext("worker-b", 120);
+  assert.equal(reclaimed?.providerResponseId, responseId);
+  assert.ok(reclaimed);
+  const empty = {
+    observed: null,
+    normalized: null,
+    confidence: null,
+    sourceAssetId: null,
+    sourcePage: null,
+  };
+  await extractions.settleClaim(reclaimed, {
+    status: "completed",
+    responseId,
+    proposal: {
+      schemaVersion: "invoice-proposal-v1",
+      header: {
+        vendorName: { ...empty, observed: "Vendor", normalized: "Vendor" },
+        invoiceNumber: empty,
+        invoiceDate: empty,
+        currency: { ...empty, observed: "USD", normalized: "USD" },
+        subtotal: empty,
+        tax: empty,
+        freight: empty,
+        total: empty,
+      },
+      lines: [],
+      uncertainties: [
+        { path: "header.total", reason: "missing", message: "Not visible" },
+      ],
+    },
+  });
+  const completed = await extractions.get(actorA, run.id);
+  assert.equal(completed?.status, "completed");
+  assert.equal(completed?.proposal?.header.vendorName.normalized, "Vendor");
+  const currentDraft = await ledger.getDraft(actorA, draft.id);
+  assert.equal(currentDraft?.status, "needs_review");
+
+  const eventId = `evt_${randomUUID()}`;
+  assert.equal(
+    await extractions.recordWebhook(eventId, "response.completed", responseId),
+    true,
+  );
+  assert.equal(
+    await extractions.recordWebhook(eventId, "response.completed", responseId),
+    false,
+  );
+  await assert.rejects(
+    client.query(
+      `update invoice_extraction_proposals
+          set payload = '{}'::jsonb
+        where company_id = $1 and run_id = $2`,
+      [companyA, run.id],
+    ),
+    /immutable/,
   );
 });
 

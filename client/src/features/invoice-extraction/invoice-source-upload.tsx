@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Trash2,
   Upload,
+  WandSparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -17,7 +18,12 @@ import {
   replacePendingCapture,
 } from "./capture-quality";
 import { InvoiceCapturePreview } from "./invoice-capture-preview";
-import { privateInvoiceAssetUrl } from "./invoice-source-api";
+import {
+  getInvoiceExtractionRun,
+  privateInvoiceAssetUrl,
+  startInvoiceExtraction,
+} from "./invoice-source-api";
+import type { InvoiceExtractionRunDto } from "@shared/invoice-extraction/contracts";
 import { useInvoiceSources } from "./use-invoice-sources";
 
 function formatBytes(bytes: number): string {
@@ -49,7 +55,11 @@ export function InvoiceSourceUpload({
     upload,
     remove,
     move,
+    refresh,
   } = useInvoiceSources(open);
+  const [extraction, setExtraction] = useState<InvoiceExtractionRunDto | null>(null);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [startingExtraction, setStartingExtraction] = useState(false);
   const [pending, setPendingState] = useState<PendingInvoiceCapture | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [uploadFailed, setUploadFailed] = useState(false);
@@ -65,7 +75,11 @@ export function InvoiceSourceUpload({
     0,
   );
   const atLimit = totalPages >= 10;
-  const blocked = (atLimit && !replacementAsset) || busy;
+  const extractionBusy =
+    startingExtraction ||
+    extraction?.status === "queued" ||
+    extraction?.status === "processing";
+  const blocked = (atLimit && !replacementAsset) || busy || extractionBusy;
 
   const setPending = (next: PendingInvoiceCapture | null): void => {
     pendingRef.current = replacePendingCapture(pendingRef.current, next);
@@ -90,7 +104,49 @@ export function InvoiceSourceUpload({
     setUploadFailed(false);
     setLocalError(null);
     setPending(null);
+    setExtraction(null);
+    setExtractionError(null);
   }, [companyId]);
+
+  useEffect(() => {
+    if (!draft?.activeRunId || extraction?.id === draft.activeRunId) return;
+    void getInvoiceExtractionRun(draft.activeRunId)
+      .then(setExtraction)
+      .catch(() => setExtractionError("The extraction status could not be restored."));
+  }, [draft?.activeRunId, extraction?.id]);
+
+  useEffect(() => {
+    if (!open || !extraction || !["queued", "processing"].includes(extraction.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getInvoiceExtractionRun(extraction.id)
+        .then(async (next) => {
+          setExtraction(next);
+          if (["completed", "failed", "canceled"].includes(next.status)) {
+            await refresh().catch(() => null);
+          }
+        })
+        .catch(() => setExtractionError("Extraction status is temporarily unavailable."));
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [extraction?.id, extraction?.status, open]);
+
+  const analyze = async (): Promise<void> => {
+    if (!draft || assets.length === 0) return;
+    setStartingExtraction(true);
+    setExtractionError(null);
+    try {
+      setExtraction(await startInvoiceExtraction(draft));
+      await refresh().catch(() => null);
+    } catch (caught) {
+      setExtractionError(
+        caught instanceof Error ? caught.message : "Invoice analysis could not be started.",
+      );
+    } finally {
+      setStartingExtraction(false);
+    }
+  };
 
   const selectFile = async (
     file: File | undefined,
@@ -168,6 +224,47 @@ export function InvoiceSourceUpload({
         Optional. JPEG, PNG, HEIC/HEIF or PDF; 10 MiB per file; up to 10
         ordered pages/photos. The original is uploaded only after your review.
       </p>
+      {assets.length > 0 ? (
+        <div className="rounded border border-border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">AI-assisted invoice reading</p>
+              <p className="text-xs text-muted-foreground">
+                The result is always reviewed before any stock update.
+              </p>
+            </div>
+            <Button
+              type="button"
+              className="min-h-12"
+              disabled={busy || extractionBusy || draft?.status === "needs_review"}
+              onClick={() => void analyze()}
+            >
+              <WandSparkles className="mr-2 h-4 w-4" aria-hidden="true" />
+              {extractionBusy
+                ? "Analyzing…"
+                : extraction?.status === "failed"
+                  ? "Retry analysis"
+                  : "Analyze invoice"}
+            </Button>
+          </div>
+          {extraction ? (
+            <p className="mt-2 text-sm" role="status">
+              Status: {extraction.status}
+              {extraction.status === "completed" && extraction.proposal
+                ? ` · ${extraction.proposal.lines.length} line items proposed for review`
+                : ""}
+              {extraction.status === "failed"
+                ? " · No inventory was changed. You can retry or enter the invoice manually."
+                : ""}
+            </p>
+          ) : null}
+          {extractionError ? (
+            <p className="mt-2 text-sm text-destructive" role="alert">
+              {extractionError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <label

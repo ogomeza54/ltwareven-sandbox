@@ -146,6 +146,12 @@ test("invoice HTTP responses are excluded from body logging", () => {
     "/api/invoice-drafts/:draftId",
   );
   assert.equal(mayCaptureJsonResponse("/api/inventory"), true);
+  assert.equal(
+    safeApiLogPath(
+      "/api/invoice-extraction-runs/91d99f8a-18dd-4b1e-87d-01a772c88df6",
+    ),
+    "/api/invoice-extraction-runs/:runId",
+  );
 });
 
 test("request IDs remain UUID-safe for audit persistence", () => {

@@ -30,7 +30,7 @@ type RequestWithState = Request & {
   invoiceQuarantineRoot?: string;
 };
 
-const statusByCode: Readonly<Record<InvoiceDomainError["code"], number>> = {
+const statusByCode: Readonly<Partial<Record<InvoiceDomainError["code"], number>>> = {
   INVOICE_INVALID_REQUEST: 400,
   INVOICE_FORBIDDEN: 403,
   INVOICE_FEATURE_DISABLED: 403,
@@ -71,7 +71,7 @@ function sendError(error: unknown, request: RequestWithState, response: Response
     return;
   }
   if (error instanceof InvoiceDomainError) {
-    response.status(statusByCode[error.code]).json({
+    response.status(statusByCode[error.code] ?? 500).json({
       code: error.code,
       message: error.message,
       requestId: id,

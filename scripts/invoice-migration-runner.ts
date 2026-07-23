@@ -8,6 +8,8 @@ const migrations = [
   "0000_brownfield_baseline.sql",
   "0001_invoice_ledger_core.sql",
   "0002_invoice_private_sources.sql",
+  "0003_invoice_extraction_proposals.sql",
+  "0004_invoice_attempt_ownership.sql",
 ] as const;
 
 function splitStatements(sql: string): string[] {

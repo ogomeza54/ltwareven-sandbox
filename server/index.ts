@@ -3,6 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { loadInvoiceConfig } from "./modules/invoice-extraction/config/invoice-config";
+import { startInvoiceExtractionWorker } from "./modules/invoice-extraction/services/invoice-extraction-service";
 import {
   mayCaptureJsonResponse,
   resolveRequestId,
@@ -11,7 +12,16 @@ import {
 
 const app = express();
 loadInvoiceConfig();
-app.use(express.json());
+app.use(express.json({
+  verify: (request, _response, buffer) => {
+    if (
+      (request as Request).originalUrl ===
+      "/api/invoice-extraction/webhooks/openai"
+    ) {
+      (request as Request & { rawBody?: string }).rawBody = buffer.toString("utf8");
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
   const inbound = req.header("x-request-id");
@@ -61,6 +71,7 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+  startInvoiceExtractionWorker();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

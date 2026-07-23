@@ -22,6 +22,20 @@
       "when": 1784764802000,
       "tag": "0002_invoice_private_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784826923034,
+      "tag": "0003_invoice_extraction_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784826985799,
+      "tag": "0004_invoice_attempt_ownership",
+      "breakpoints": true
     }
   ]
 }

@@ -77,6 +77,7 @@ export const createInvoiceDraftSchema = z.object({}).strict();
 export const invoiceDraftIdSchema = z.string().uuid();
 export const invoiceAssetIdSchema = z.string().uuid();
 export const invoiceDraftRevisionSchema = z.coerce.number().int().nonnegative();
+export const invoiceRunIdSchema = z.string().uuid();
 export const invoiceAssetOrderSchema = z
   .object({
     assetIds: z.array(z.string().uuid()).max(10),
@@ -144,6 +145,10 @@ export const invoiceErrorCodeSchema = z.enum([
   "INVOICE_STORAGE_UNAVAILABLE",
   "INVOICE_ASSET_HELD",
   "INVOICE_DUPLICATE_SOURCE",
+  "INVOICE_SOURCE_REQUIRED",
+  "INVOICE_PROVIDER_UNAVAILABLE",
+  "INVOICE_PROVIDER_INVALID_OUTPUT",
+  "INVOICE_WEBHOOK_INVALID",
 ]);
 export type InvoiceErrorCode = z.infer<typeof invoiceErrorCodeSchema>;
 
@@ -178,6 +183,12 @@ const safeMessages: Record<InvoiceErrorCode, string> = {
     "This invoice source is retained and cannot be deleted.",
   INVOICE_DUPLICATE_SOURCE:
     "This invoice source upload is already being processed.",
+  INVOICE_SOURCE_REQUIRED: "Add an invoice image or PDF before starting extraction.",
+  INVOICE_PROVIDER_UNAVAILABLE:
+    "Invoice extraction is temporarily unavailable. Try again later.",
+  INVOICE_PROVIDER_INVALID_OUTPUT:
+    "The invoice could not be read reliably. Review it manually or try again.",
+  INVOICE_WEBHOOK_INVALID: "The provider callback could not be verified.",
 };
 
 export class InvoiceDomainError extends Error {
@@ -203,6 +214,76 @@ export const invoiceDraftDtoSchema = z.object({
   source: invoiceSourceDtoSchema.nullable().optional(),
 });
 export type InvoiceDraftDto = z.infer<typeof invoiceDraftDtoSchema>;
+
+const nullableObservedString = z.object({
+  observed: z.string().nullable(),
+  normalized: z.string().nullable(),
+  confidence: z.number().min(0).max(1).nullable(),
+  sourceAssetId: z.string().uuid().nullable(),
+  sourcePage: z.number().int().positive().nullable(),
+});
+
+const invoiceUncertaintySchema = z.object({
+  path: z.string().min(1).max(160),
+  reason: z.enum(["missing", "ambiguous", "low_confidence", "inconsistent"]),
+  message: z.string().min(1).max(300),
+});
+
+export const invoiceProposalSchema = z.object({
+  schemaVersion: z.literal("invoice-proposal-v1"),
+  header: z.object({
+    vendorName: nullableObservedString,
+    invoiceNumber: nullableObservedString,
+    invoiceDate: nullableObservedString,
+    currency: nullableObservedString,
+    subtotal: nullableObservedString,
+    tax: nullableObservedString,
+    freight: nullableObservedString,
+    total: nullableObservedString,
+  }),
+  lines: z.array(
+    z.object({
+      description: nullableObservedString,
+      vendorPartNumber: nullableObservedString,
+      quantity: nullableObservedString,
+      unitCost: nullableObservedString,
+      lineTotal: nullableObservedString,
+      classification: z
+        .object({
+          kind: z.enum(["inventory", "consumable", "unknown"]),
+          confidence: z.number().min(0).max(1).nullable(),
+        })
+        .nullable(),
+    }),
+  ).max(500),
+  uncertainties: z.array(invoiceUncertaintySchema).max(1000),
+});
+export type InvoiceProposal = z.infer<typeof invoiceProposalSchema>;
+
+export const startInvoiceExtractionSchema = z
+  .object({ revision: invoiceDraftRevisionSchema })
+  .strict();
+
+export const invoiceExtractionRunDtoSchema = z.object({
+  id: z.string().uuid(),
+  draftId: z.string().uuid(),
+  runNumber: z.number().int().positive(),
+  status: invoiceRunStatusSchema,
+  revision: z.number().int().nonnegative(),
+  attemptStatus: invoiceAttemptStatusSchema.nullable(),
+  failureCode: z.string().nullable(),
+  engineVersion: z.string(),
+  model: z.string(),
+  schemaVersion: z.string(),
+  executionMode: z.enum(["background", "synchronous"]),
+  storeResponse: z.boolean(),
+  proposal: invoiceProposalSchema.nullable(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+});
+export type InvoiceExtractionRunDto = z.infer<
+  typeof invoiceExtractionRunDtoSchema
+>;
 
 export interface InvoiceFeatureResolution {
   manualReceiving: true;

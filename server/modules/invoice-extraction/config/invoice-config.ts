@@ -2,6 +2,18 @@ import { z } from "zod";
 
 const positiveInteger = (fallback: number) =>
   z.coerce.number().int().positive().default(fallback);
+const environmentBoolean = (fallback: boolean) =>
+  z.preprocess(
+    (value) =>
+      value === undefined
+        ? fallback
+        : value === true || value === "true"
+          ? true
+          : value === false || value === "false"
+            ? false
+            : value,
+    z.boolean(),
+  );
 
 const invoiceConfigSchema = z.object({
   maxFileBytes: positiveInteger(10_485_760).pipe(
@@ -15,6 +27,16 @@ const invoiceConfigSchema = z.object({
   pilotCurrency: z.literal("USD").default("USD"),
   workerMaxAttempts: positiveInteger(3).pipe(z.number().max(10)),
   workerLeaseSeconds: positiveInteger(120).pipe(z.number().max(3600)),
+  workerPollSeconds: positiveInteger(15).pipe(z.number().max(300)),
+  provider: z.literal("openai").default("openai"),
+  openaiApiKey: z.string().min(1).optional(),
+  openaiWebhookSecret: z.string().min(1).optional(),
+  openaiModel: z.string().min(1).default("gpt-5.6-terra"),
+  engineVersion: z.string().min(1).default("invoice-v1"),
+  proposalSchemaVersion: z.literal("invoice-proposal-v1").default("invoice-proposal-v1"),
+  executionMode: z.enum(["background", "synchronous"]).default("background"),
+  storeResponse: environmentBoolean(true),
+  privacyProfile: z.enum(["standard", "zdr"]).default("standard"),
   storageBackend: z.enum(["filesystem", "replit"]).default("filesystem"),
   storageRoot: z.string().min(1).default(".private/invoice-sources"),
   storageBucket: z.string().min(1).optional(),
@@ -45,6 +67,16 @@ export function loadInvoiceConfig(
     pilotCurrency: environment.INVOICE_PILOT_CURRENCY,
     workerMaxAttempts: environment.INVOICE_WORKER_MAX_ATTEMPTS,
     workerLeaseSeconds: environment.INVOICE_WORKER_LEASE_SECONDS,
+    workerPollSeconds: environment.INVOICE_WORKER_POLL_SECONDS,
+    provider: environment.INVOICE_EXTRACTION_PROVIDER,
+    openaiApiKey: environment.OPENAI_API_KEY,
+    openaiWebhookSecret: environment.OPENAI_WEBHOOK_SECRET,
+    openaiModel: environment.INVOICE_OPENAI_MODEL,
+    engineVersion: environment.INVOICE_ENGINE_VERSION,
+    proposalSchemaVersion: environment.INVOICE_PROPOSAL_SCHEMA_VERSION,
+    executionMode: environment.INVOICE_OPENAI_EXECUTION_MODE,
+    storeResponse: environment.INVOICE_OPENAI_STORE_RESPONSE,
+    privacyProfile: environment.INVOICE_OPENAI_PRIVACY_PROFILE,
     storageBackend: environment.INVOICE_STORAGE_BACKEND,
     storageRoot: environment.INVOICE_STORAGE_ROOT,
     storageBucket: environment.REPLIT_OBJECT_STORAGE_BUCKET,
@@ -54,6 +86,19 @@ export function loadInvoiceConfig(
     validationConcurrency: environment.INVOICE_VALIDATION_CONCURRENCY,
     nodeEnvironment: environment.NODE_ENV,
   });
+  if (config.executionMode === "background" && !config.storeResponse) {
+    throw new Error("Background invoice extraction requires stored provider responses.");
+  }
+  if (config.privacyProfile === "zdr" && config.executionMode === "background") {
+    throw new Error("Background invoice extraction cannot claim a ZDR privacy profile.");
+  }
+  if (
+    config.nodeEnvironment === "production" &&
+    config.openaiApiKey &&
+    !config.openaiWebhookSecret
+  ) {
+    throw new Error("Production OpenAI extraction requires a webhook secret.");
+  }
   if (
     config.nodeEnvironment === "production" &&
     (config.storageBackend !== "replit" ||
