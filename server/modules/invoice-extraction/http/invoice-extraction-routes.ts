@@ -14,6 +14,7 @@ import {
 import {
   getInvoiceExtractionService,
   type InvoiceExtractionService,
+  wakeInvoiceExtractionWorker,
 } from "../services/invoice-extraction-service";
 import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
 
@@ -73,6 +74,7 @@ export function registerInvoiceExtractionRoutes(
           (request as RequestWithRaw).requestId,
         );
         response.status(202).json(run);
+        wakeInvoiceExtractionWorker();
       } catch (error) {
         sendError(error, request, response);
       }

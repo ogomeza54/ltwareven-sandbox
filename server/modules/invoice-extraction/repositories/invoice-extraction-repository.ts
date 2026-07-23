@@ -262,22 +262,38 @@ export class PostgresInvoiceExtractionRepository {
         order by attempt.available_at, attempt.created_at, attempt.id
         for update skip locked
         limit 1
+      ), claimed as (
+        update invoice_provider_attempts attempt
+        set status = case when attempt.status = 'queued'
+                          then 'processing'::invoice_attempt_status
+                          else attempt.status end,
+            revision = attempt.revision + 1,
+            lease_owner = ${workerId}, lease_token = ${leaseToken}::uuid,
+            lease_expires_at = now() + (${leaseSeconds} * interval '1 second'),
+            heartbeat_at = now()
+        from eligible
+        where attempt.id = eligible.id
+        returning attempt.id, attempt.company_id, attempt.run_id,
+                  attempt.status, attempt.lease_token,
+                  attempt.provider_response_id
+      ), started as (
+        update invoice_extraction_runs run
+        set status = 'processing', revision = revision + 1,
+            started_at = coalesce(started_at, now())
+        from claimed
+        where run.company_id = claimed.company_id
+          and run.id = claimed.run_id
+          and run.status = 'queued'
+        returning run.id
       )
-      update invoice_provider_attempts attempt
-      set status = case when attempt.status = 'queued'
-                        then 'processing'::invoice_attempt_status
-                        else attempt.status end,
-          revision = attempt.revision + 1,
-          lease_owner = ${workerId}, lease_token = ${leaseToken}::uuid,
-          lease_expires_at = now() + (${leaseSeconds} * interval '1 second'),
-          heartbeat_at = now()
-      from eligible, invoice_extraction_runs run
-      where attempt.id = eligible.id
-        and run.company_id = attempt.company_id and run.id = attempt.run_id
-      returning attempt.id, attempt.company_id, attempt.run_id,
-                run.draft_id, attempt.status, attempt.lease_token,
-                attempt.provider_response_id, run.model, run.execution_mode,
-                run.store_response
+      select claimed.id, claimed.company_id, claimed.run_id,
+             run.draft_id, claimed.status, claimed.lease_token,
+             claimed.provider_response_id, run.model, run.execution_mode,
+             run.store_response
+      from claimed
+      join invoice_extraction_runs run
+        on run.company_id = claimed.company_id and run.id = claimed.run_id
+      left join started on started.id = run.id
     `);
     const row = rows<{
       id: string; company_id: string; run_id: string; draft_id: string;

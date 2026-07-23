@@ -178,6 +178,7 @@ export class InvoiceExtractionService {
 }
 
 let singleton: InvoiceExtractionService | undefined;
+let wakeWorker: (() => void) | undefined;
 
 export function getInvoiceExtractionService(): InvoiceExtractionService {
   if (!singleton) {
@@ -210,6 +211,15 @@ export function startInvoiceExtractionWorker(): () => void {
   };
   const timer = setInterval(() => void tick(), config.workerPollSeconds * 1000);
   timer.unref();
-  void tick();
-  return () => clearInterval(timer);
+  const wake = () => void tick();
+  wakeWorker = wake;
+  wake();
+  return () => {
+    clearInterval(timer);
+    if (wakeWorker === wake) wakeWorker = undefined;
+  };
+}
+
+export function wakeInvoiceExtractionWorker(): void {
+  wakeWorker?.();
 }

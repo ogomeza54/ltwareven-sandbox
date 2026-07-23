@@ -1123,6 +1123,9 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   const claimed = await extractions.claimNext("worker-a", 120);
   assert.equal(claimed?.runId, run.id);
   assert.ok(claimed);
+  const processing = await extractions.get(actorA, run.id);
+  assert.equal(processing?.status, "processing");
+  assert.equal(processing?.attemptStatus, "processing");
   const responseId = `resp_${randomUUID()}`;
   await extractions.markSubmitted(claimed, responseId, 1);
   await client.query(
