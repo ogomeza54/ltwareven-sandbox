@@ -1,0 +1,21 @@
+name: ltwareven
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: talavera
+      POSTGRES_USER: talavera
+      POSTGRES_PASSWORD: talavera
+    ports:
+      - "5432:5432"
+    volumes:
+      - talavera-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U talavera -d talavera"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  talavera-postgres-data:
