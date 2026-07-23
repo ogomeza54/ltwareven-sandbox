@@ -24,14 +24,6 @@ const requiredColumns: Readonly<Record<string, readonly string[]>> = {
     "quickbooks_id",
     "qb_transaction_type",
   ],
-  company_integrations: [
-    "id",
-    "company_id",
-    "provider",
-    "qb_transaction_type",
-    "qb_debit_account",
-    "qb_credit_account",
-  ],
 };
 
 const requiredColumnShapes: Readonly<
@@ -60,11 +52,6 @@ const requiredColumnShapes: Readonly<
     id: { type: "character varying", nullable: false },
     company_id: { type: "character varying", nullable: false },
     inventory_intake_id: { type: "character varying", nullable: false },
-  },
-  company_integrations: {
-    id: { type: "character varying", nullable: false },
-    company_id: { type: "character varying", nullable: false },
-    provider: { type: "text", nullable: false },
   },
 };
 

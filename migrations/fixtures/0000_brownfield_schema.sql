@@ -15,6 +15,9 @@ CREATE TABLE "companies" (
 	"updated_at" timestamp DEFAULT now()
 );
 
+-- Test-only compatibility object for the existing manual receiving regression
+-- suite. It is not required by the invoice migration preflight and is not
+-- created by any delivery migration.
 CREATE TABLE "company_integrations" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"company_id" varchar NOT NULL,

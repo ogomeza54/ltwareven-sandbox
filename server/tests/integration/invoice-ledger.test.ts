@@ -155,6 +155,18 @@ test("journal adoption rejects an incomplete ledger fingerprint", async () => {
   }
 });
 
+test("optional accounting integration table is outside the invoice baseline", async () => {
+  const { assertBrownfieldBaseline } =
+    await import("../../../scripts/invoice-migration-preflight");
+  await client.query("begin");
+  try {
+    await client.query("drop table company_integrations cascade");
+    await assert.doesNotReject(assertBrownfieldBaseline(client));
+  } finally {
+    await client.query("rollback");
+  }
+});
+
 test("missing flags resolve false while manual receiving remains true", async () => {
   const { PostgresInvoiceRepository } =
     await import("../../modules/invoice-extraction/repositories/invoice-repository");
