@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  analyzeInvoiceFile,
   analyzeCapturePixels,
   MAX_CAPTURE_ANALYSIS_PIXELS,
   readRasterDimensions,
@@ -77,6 +78,19 @@ test("quality analysis is bounded and unavailable remains non-blocking", () => {
     1,
   );
   assert.equal(result.status, "unavailable");
+});
+
+test("PDF quality guidance expects the rendered local preview", async () => {
+  const result = await analyzeInvoiceFile(
+    new File([new Uint8Array([37, 80, 68, 70])], "invoice.pdf", {
+      type: "application/pdf",
+    }),
+  );
+  assert.deepEqual(result, {
+    status: "unavailable",
+    reason:
+      "Automatic image-quality checks are not available for PDF files. Review the rendered page before upload.",
+  });
 });
 
 test("image dimensions are read from bounded PNG headers before decoding", () => {

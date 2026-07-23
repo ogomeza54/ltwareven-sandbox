@@ -1,5 +1,7 @@
-import { forwardRef } from "react";
-import { AlertTriangle, CheckCircle2, FileText } from "lucide-react";
+import { forwardRef, useEffect, useRef, useState } from "react";
+import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { AlertTriangle, CheckCircle2, FileText, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PendingInvoiceCapture } from "./capture-quality";
 
@@ -18,6 +20,103 @@ interface InvoiceCapturePreviewProps {
   onUse: () => void;
 }
 
+function LocalPdfPreview({ file }: { file: File }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [pageCount, setPageCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let document: PDFDocumentProxy | null = null;
+    let renderTask: RenderTask | null = null;
+
+    const render = async () => {
+      setStatus("loading");
+      setPageCount(null);
+      try {
+        const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist");
+        GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const loadingTask = getDocument({
+          data: new Uint8Array(await file.arrayBuffer()),
+          disableEval: true,
+          isEvalSupported: false,
+          useWorkerFetch: false,
+          stopAtErrors: true,
+        });
+        document = await loadingTask.promise;
+        if (disposed) return;
+        const page = await document.getPage(1);
+        const natural = page.getViewport({ scale: 1 });
+        const scale = Math.min(2, 640 / natural.width);
+        const viewport = page.getViewport({ scale });
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+        const target = canvas.current;
+        if (!target || disposed) return;
+        target.width = Math.floor(viewport.width * outputScale);
+        target.height = Math.floor(viewport.height * outputScale);
+        target.style.width = `${Math.floor(viewport.width)}px`;
+        target.style.height = `${Math.floor(viewport.height)}px`;
+        const context = target.getContext("2d", { alpha: false });
+        if (!context) throw new Error("Canvas rendering is unavailable");
+        renderTask = page.render({
+          canvas: target,
+          canvasContext: context,
+          viewport,
+          transform:
+            outputScale === 1
+              ? undefined
+              : [outputScale, 0, 0, outputScale, 0, 0],
+        });
+        await renderTask.promise;
+        if (!disposed) {
+          setPageCount(document.numPages);
+          setStatus("ready");
+        }
+        page.cleanup();
+      } catch {
+        if (!disposed) setStatus("failed");
+      }
+    };
+
+    void render();
+    return () => {
+      disposed = true;
+      renderTask?.cancel();
+      void document?.destroy();
+    };
+  }, [file]);
+
+  return (
+    <div className="relative flex h-full min-h-44 w-full items-center justify-center overflow-hidden bg-slate-950/40">
+      {status === "loading" ? (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
+          Rendering PDF preview…
+        </div>
+      ) : null}
+      <canvas
+        ref={canvas}
+        role="img"
+        aria-label="Local preview of the first PDF page"
+        className={`max-h-72 max-w-full object-contain shadow-lg ${
+          status === "ready" ? "block" : "hidden"
+        }`}
+      />
+      {status === "ready" && pageCount ? (
+        <span className="absolute bottom-2 right-2 rounded bg-slate-950/85 px-2 py-1 text-xs text-slate-100">
+          Page 1 of {pageCount}
+        </span>
+      ) : null}
+      {status === "failed" ? (
+        <div className="flex flex-col items-center gap-2 px-3 text-center text-sm text-muted-foreground">
+          <FileText className="h-12 w-12" aria-hidden="true" />
+          <span>The PDF preview could not be rendered locally.</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export const InvoiceCapturePreview = forwardRef<
   HTMLDivElement,
   InvoiceCapturePreviewProps
@@ -32,6 +131,9 @@ export const InvoiceCapturePreview = forwardRef<
   const previewable =
     quality.status === "available" ||
     ["image/jpeg", "image/png"].includes(capture.file.type);
+  const isPdf =
+    capture.file.type === "application/pdf" ||
+    /\.pdf$/i.test(capture.file.name);
 
   return (
     <div
@@ -40,9 +142,17 @@ export const InvoiceCapturePreview = forwardRef<
       className="space-y-3 rounded-lg border border-border p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label="Selected invoice document review"
     >
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,12rem)_1fr]">
+      <div
+        className={`grid gap-3 ${
+          isPdf
+            ? "sm:grid-cols-[minmax(18rem,40%)_1fr]"
+            : "sm:grid-cols-[minmax(0,12rem)_1fr]"
+        }`}
+      >
         <div className="flex min-h-32 items-center justify-center overflow-hidden rounded bg-muted">
-          {previewable ? (
+          {isPdf ? (
+            <LocalPdfPreview file={capture.file} />
+          ) : previewable ? (
             <img
               src={capture.objectUrl}
               alt="Local preview of selected invoice"

@@ -179,7 +179,14 @@ export function analyzeCapturePixels(
 export async function analyzeInvoiceFile(
   file: File,
 ): Promise<CaptureQualityResult> {
-  if (file.type === "application/pdf" || /hei[cf]$/i.test(file.name)) {
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    return {
+      status: "unavailable",
+      reason:
+        "Automatic image-quality checks are not available for PDF files. Review the rendered page before upload.",
+    };
+  }
+  if (/hei[cf]$/i.test(file.name)) {
     return {
       status: "unavailable",
       reason:
