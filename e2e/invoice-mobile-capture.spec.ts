@@ -1001,6 +1001,12 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await expect(
     page.getByLabel("Invoice confirmation summary"),
   ).toContainText("100.00 USD");
+  await expect(
+    page.getByText(
+      "Summary ready. Review these values, then confirm to update stock.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByLabel("Invoice confirmation summary")).toBeInViewport();
   await page.getByRole("button", { name: "Confirm & update stock" }).click();
   await expect.poll(() => state.stockConfirmations).toBe(1);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();

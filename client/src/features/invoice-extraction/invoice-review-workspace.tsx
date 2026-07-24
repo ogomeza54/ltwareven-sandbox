@@ -103,6 +103,10 @@ export function InvoiceReviewWorkspace({
   }>>({});
   const [confirmationIntent, setConfirmationIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
+  const [preparingConfirmation, setPreparingConfirmation] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(
+    null,
+  );
   const confirmationKey = useRef<string | null>(null);
   const [duplicateReason, setDuplicateReason] = useState("");
 
@@ -347,6 +351,8 @@ export function InvoiceReviewWorkspace({
     const current = workspaceRef.current;
     if (!current) return;
     confirmationKey.current ??= globalThis.crypto.randomUUID();
+    setPreparingConfirmation(true);
+    setConfirmationError(null);
     try {
       setError(null);
       const intent = await createInvoiceConfirmationIntent(
@@ -354,9 +360,25 @@ export function InvoiceReviewWorkspace({
         confirmationKey.current,
       );
       setConfirmationIntent(intent);
+      setWorkflowNotice(
+        "Confirmation summary is ready. Review it before updating stock.",
+      );
       await onDraftChanged?.();
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() =>
+          document
+            .getElementById("invoice-confirmation-summary")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+        ),
+      );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Confirmation summary could not be prepared.");
+      setConfirmationError(
+        caught instanceof Error
+          ? caught.message
+          : "Confirmation summary could not be prepared.",
+      );
+    } finally {
+      setPreparingConfirmation(false);
     }
   };
 
@@ -1055,13 +1077,40 @@ export function InvoiceReviewWorkspace({
                 </p>
               </div>
               {!confirmationIntent ? (
-                <Button type="button" className="min-h-11" onClick={() => void prepareConfirmation()}>
-                  Prepare confirmation summary
+                <Button
+                  type="button"
+                  className="min-h-11"
+                  disabled={preparingConfirmation}
+                  onClick={() => void prepareConfirmation()}
+                >
+                  {preparingConfirmation
+                    ? "Preparing summary…"
+                    : "Prepare confirmation summary"}
                 </Button>
               ) : null}
             </div>
+            {confirmationError ? (
+              <p
+                role="alert"
+                className="mt-3 rounded border border-destructive p-2 text-sm text-destructive"
+              >
+                {confirmationError}
+              </p>
+            ) : null}
             {confirmationIntent ? (
-              <div className="mt-3 space-y-3" aria-label="Invoice confirmation summary">
+              <div
+                id="invoice-confirmation-summary"
+                className="mt-3 space-y-3"
+                aria-label="Invoice confirmation summary"
+                tabIndex={-1}
+              >
+                <p
+                  role="status"
+                  className="rounded border border-green-500/50 bg-green-500/5 p-2 text-sm text-green-500"
+                >
+                  Summary ready. Review these values, then confirm to update
+                  stock.
+                </p>
                 <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                   <div><dt className="text-muted-foreground">Vendor</dt><dd>{confirmationIntent.summary.vendor}</dd></div>
                   <div><dt className="text-muted-foreground">Invoice</dt><dd>{confirmationIntent.summary.invoiceNumber ?? "None"}</dd></div>
