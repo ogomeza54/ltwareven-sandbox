@@ -53,6 +53,13 @@ function repository(
     async getDraft(_context, id) {
       return id === draft.id ? draft : null;
     },
+    async transitionDraft(_context, id, revision, status, nextStatus) {
+      assert.equal(id, draft.id);
+      assert.equal(revision, draft.revision);
+      assert.equal(status, draft.status);
+      assert.equal(nextStatus, "canceled");
+      return { ...draft, status: nextStatus, revision: revision + 1 };
+    },
   };
 }
 
@@ -110,6 +117,35 @@ test("draft listing includes saved source metadata for deterministic resume", as
     },
   );
   assert.deepEqual((await service.list(actor))[0].source, source);
+});
+
+test("draft cancellation closes review without deleting its audit record", async () => {
+  const reviewDraft: InvoiceDraftDto = {
+    ...draft,
+    status: "needs_review",
+    revision: 4,
+  };
+  const service = new InvoiceDraftService({
+    ...repository({
+      manualReceiving: true,
+      scanExtraction: true,
+      stockConfirmation: false,
+      engineActivation: false,
+    }),
+    async getDraft() {
+      return reviewDraft;
+    },
+    async transitionDraft(_context, id, revision, status, nextStatus) {
+      assert.equal(id, reviewDraft.id);
+      assert.equal(revision, 4);
+      assert.equal(status, "needs_review");
+      assert.equal(nextStatus, "canceled");
+      return { ...reviewDraft, status: "canceled", revision: 5 };
+    },
+  });
+  const canceled = await service.cancel(actor, reviewDraft.id, 4);
+  assert.equal(canceled.status, "canceled");
+  assert.equal(canceled.revision, 5);
 });
 
 test("draft list and read enforce processing RBAC", async () => {

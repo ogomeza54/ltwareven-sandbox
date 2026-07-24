@@ -395,6 +395,18 @@ export async function deleteInvoiceSource(
   );
 }
 
+export async function cancelInvoiceDraft(
+  draft: InvoiceDraftDto,
+): Promise<InvoiceDraftDto> {
+  return responseJson(
+    await fetch(`/api/invoice-drafts/${draft.id}/cancel`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "If-Match": `"${draft.revision}"` },
+    }),
+  );
+}
+
 export async function reorderInvoiceSources(
   draft: InvoiceDraftDto,
   assetIds: readonly string[],

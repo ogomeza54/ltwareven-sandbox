@@ -13,7 +13,10 @@ import {
 import { PostgresInvoiceRepository } from "../repositories/invoice-repository";
 import { PostgresInvoiceDocumentRepository } from "../repositories/invoice-document-repository";
 import { InvoiceDraftService } from "../services/invoice-draft-service";
-import { requireInvoiceSameOrigin } from "./invoice-asset-routes";
+import {
+  expectedInvoiceDraftRevision,
+  requireInvoiceSameOrigin,
+} from "./invoice-asset-routes";
 
 type RequestWithId = Request & { requestId?: string };
 
@@ -123,6 +126,31 @@ export function registerInvoiceDraftRoutes(
         }
         response.json(
           await service.get(invoiceActorFromRequest(request), parsed.data),
+        );
+      } catch (error) {
+        sendInvoiceError(error, request, response);
+      }
+    },
+  );
+
+  app.post(
+    "/api/invoice-drafts/:draftId/cancel",
+    isAuthenticated,
+    withCompanyContext,
+    requireInvoiceSameOrigin,
+    async (request, response) => {
+      try {
+        const parsed = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        if (!parsed.success) {
+          throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+        }
+        response.json(
+          await service.cancel(
+            invoiceActorFromRequest(request),
+            parsed.data,
+            expectedInvoiceDraftRevision(request),
+            requestId(request),
+          ),
         );
       } catch (error) {
         sendInvoiceError(error, request, response);

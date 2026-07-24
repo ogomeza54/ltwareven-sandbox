@@ -60,6 +60,7 @@ export function InvoiceSourceUpload({
     busy,
     upload,
     remove,
+    discard,
     move,
     refresh,
   } = useInvoiceSources(open);
@@ -91,6 +92,7 @@ export function InvoiceSourceUpload({
     ? invoiceExtractionTiming(extraction, timingClock)
     : null;
   const blocked = (atLimit && !replacementAsset) || busy || extractionBusy;
+  const sourceReviewLocked = draft?.status === "needs_review";
 
   const setPending = (next: PendingInvoiceCapture | null): void => {
     pendingRef.current = replacePendingCapture(pendingRef.current, next);
@@ -231,6 +233,30 @@ export function InvoiceSourceUpload({
     requestAnimationFrame(() => {
       (isImage ? cameraInput : fileInput).current?.click();
     });
+  };
+
+  const removeOrDiscard = async (
+    asset: (typeof assets)[number],
+  ): Promise<void> => {
+    if (!sourceReviewLocked) {
+      await remove(asset);
+      return;
+    }
+    if (
+      !window.confirm(
+        "Discard this invoice and start over? The extracted review will be closed and no stock will be changed.",
+      )
+    ) {
+      return;
+    }
+    if (!(await discard())) return;
+    displayedDraftId.current = null;
+    setReplacementAsset(null);
+    setUploadFailed(false);
+    setLocalError(null);
+    setPending(null);
+    setExtraction(null);
+    setExtractionError(null);
   };
 
   return (
@@ -469,7 +495,7 @@ export function InvoiceSourceUpload({
                   variant="ghost"
                   size="icon"
                   className="min-h-12 min-w-12"
-                  disabled={busy || index === 0}
+                  disabled={busy || sourceReviewLocked || index === 0}
                   onClick={() => void move(asset, -1)}
                   aria-label={`Move saved page ${index + 1} earlier`}
                 >
@@ -480,7 +506,9 @@ export function InvoiceSourceUpload({
                   variant="ghost"
                   size="icon"
                   className="min-h-12 min-w-12"
-                  disabled={busy || index === assets.length - 1}
+                  disabled={
+                    busy || sourceReviewLocked || index === assets.length - 1
+                  }
                   onClick={() => void move(asset, 1)}
                   aria-label={`Move saved page ${index + 1} later`}
                 >
@@ -492,7 +520,7 @@ export function InvoiceSourceUpload({
                       type="button"
                       variant="ghost"
                       className="min-h-12"
-                      disabled={busy}
+                      disabled={busy || sourceReviewLocked}
                       onClick={() => retakeSaved(asset)}
                       aria-label={`Retake saved page ${index + 1}`}
                     >
@@ -504,8 +532,12 @@ export function InvoiceSourceUpload({
                       size="icon"
                       className="min-h-12 min-w-12"
                       disabled={busy}
-                      onClick={() => void remove(asset)}
-                      aria-label={`Remove saved page ${index + 1}`}
+                      onClick={() => void removeOrDiscard(asset)}
+                      aria-label={
+                        sourceReviewLocked
+                          ? "Discard invoice and start over"
+                          : `Remove saved page ${index + 1}`
+                      }
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>

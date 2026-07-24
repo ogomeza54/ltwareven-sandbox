@@ -6,6 +6,7 @@ import type {
   InvoicePublicAssetDto,
 } from "@shared/invoice-extraction/contracts";
 import {
+  cancelInvoiceDraft,
   createInvoiceDraft,
   deleteInvoiceSource,
   invoiceDraftAcceptsSourceUpload,
@@ -237,6 +238,31 @@ export function useInvoiceSources(open: boolean) {
     }
   }, false);
 
+  const discard = async (): Promise<boolean> =>
+    runMutation(async () => {
+      const operationTenant = tenantRef.current;
+      const currentDraft = draftRef.current;
+      if (!currentDraft) return false;
+      setError(null);
+      setStatus(null);
+      try {
+        await cancelInvoiceDraft(currentDraft);
+        if (operationTenant !== tenantRef.current) return false;
+        draftRef.current = null;
+        setDraft(null);
+        queryClient.setQueryData(queryKey, null);
+        setStatus("Invoice discarded. You can upload another invoice.");
+        return true;
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "The invoice could not be discarded.",
+        );
+        return false;
+      }
+    }, false);
+
   const move = async (
     asset: InvoicePublicAssetDto,
     direction: -1 | 1,
@@ -327,6 +353,7 @@ export function useInvoiceSources(open: boolean) {
       drafts.isLoading || uploadingNames.length > 0 || mutationCount > 0,
     upload,
     remove,
+    discard,
     move,
     refresh,
   };

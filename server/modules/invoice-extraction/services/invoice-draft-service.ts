@@ -22,6 +22,13 @@ export interface InvoiceDraftRepositoryPort {
     actor: InvoiceActorContext,
     draftId: string,
   ): ReturnType<PostgresInvoiceRepository["getDraft"]>;
+  transitionDraft(
+    context: Parameters<PostgresInvoiceRepository["transitionDraft"]>[0],
+    draftId: string,
+    expectedRevision: number,
+    expectedStatus: Parameters<PostgresInvoiceRepository["transitionDraft"]>[3],
+    nextStatus: Parameters<PostgresInvoiceRepository["transitionDraft"]>[4],
+  ): ReturnType<PostgresInvoiceRepository["transitionDraft"]>;
 }
 
 export class InvoiceDraftService {
@@ -72,5 +79,27 @@ export class InvoiceDraftService {
       draft.source = await this.documents.getSource(actor, draftId);
     }
     return draft;
+  }
+
+  async cancel(
+    actor: InvoiceActorContext,
+    draftId: string,
+    expectedRevision: number,
+    requestId?: string,
+  ): Promise<InvoiceDraftDto> {
+    requireInvoiceCapability(actor, "process_draft");
+    const draft = await this.repository.getDraft(actor, draftId);
+    if (!draft) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+    return this.repository.transitionDraft(
+      {
+        actor,
+        correlationId: randomUUID(),
+        requestId,
+      },
+      draftId,
+      expectedRevision,
+      draft.status,
+      "canceled",
+    );
   }
 }

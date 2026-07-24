@@ -35,7 +35,12 @@ function onePagePdf(): Buffer {
 
 interface MockState {
   revision: number;
-  draftStatus: "uploaded" | "needs_review" | "rejected" | "confirmed";
+  draftStatus:
+    | "uploaded"
+    | "needs_review"
+    | "rejected"
+    | "confirmed"
+    | "canceled";
   activeRunId: string | null;
   extractionPolls: number;
   reviewSaves: number;
@@ -197,6 +202,14 @@ async function mockApplication(
       return json(route, freshDraft(state), 202);
     }
     if (path === `/api/invoice-drafts/${draftId}`) {
+      return json(route, draft(state));
+    }
+    if (
+      path === `/api/invoice-drafts/${draftId}/cancel` &&
+      request.method() === "POST"
+    ) {
+      state.draftStatus = "canceled";
+      state.revision += 1;
       return json(route, draft(state));
     }
     if (
@@ -892,6 +905,47 @@ test("AI extraction is polled and stops at a human review result without stock w
   expect(state.draftCreations).toBe(1);
   expect(state.freshDraftAssets).toEqual(["replacement-invoice.png"]);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
+});
+
+test("a reviewed invoice can be discarded and replaced without changing stock", async ({
+  page,
+}) => {
+  const state = await mockApplication(page);
+  await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await expect(
+    page.getByRole("region", { name: "Invoice review workspace" }),
+  ).toBeVisible({ timeout: 8_000 });
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Discard this invoice and start over?");
+    await dialog.accept();
+  });
+  await page
+    .getByRole("button", { name: "Discard invoice and start over" })
+    .first()
+    .click();
+
+  await expect(
+    page.getByText("Invoice discarded. You can upload another invoice."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Invoice review workspace" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("page-one.png")).toHaveCount(0);
+  expect(state.draftStatus).toBe("canceled");
+  expect(state.stockConfirmations).toBe(0);
+
+  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+    name: "replacement-after-discard.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await page.getByRole("button", { name: /Use document/ }).click();
+  await expect(
+    page.getByText("replacement-after-discard.png saved."),
+  ).toBeVisible();
+  expect(state.draftCreations).toBe(1);
 });
 
 test("reviewed invoice confirms stock exactly once through the reserved intent", async ({

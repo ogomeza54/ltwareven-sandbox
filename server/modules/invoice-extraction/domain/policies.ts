@@ -10,7 +10,7 @@ const allowedDraftTransitions: Readonly<
 > = {
   draft: ["uploaded", "canceled"],
   uploaded: ["needs_review", "canceled"],
-  needs_review: ["rejected", "confirming"],
+  needs_review: ["rejected", "confirming", "canceled"],
   rejected: [],
   confirming: ["confirmed", "needs_review"],
   confirmed: [],
