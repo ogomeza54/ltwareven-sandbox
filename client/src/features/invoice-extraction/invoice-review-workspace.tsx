@@ -392,10 +392,10 @@ export function InvoiceReviewWorkspace({
     const targetId = unresolved[0].id;
     requestAnimationFrame(() => {
       const target = document.getElementById(
-        `invoice-line-${targetId}-resolution`,
+        `invoice-line-${targetId}-approval-error`,
       );
-      target?.focus({ preventScroll: true });
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.focus({ preventScroll: true });
     });
   };
 
@@ -683,6 +683,28 @@ export function InvoiceReviewWorkspace({
                     </p>
                   </div>
                 </div>
+                {showLineApprovalError &&
+                line.match.decision === "unresolved" ? (
+                  <div
+                    id={`invoice-line-${line.id}-approval-error`}
+                    tabIndex={-1}
+                    role="alert"
+                    className="flex items-start gap-2 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive"
+                  >
+                    <TriangleAlert
+                      className="mt-0.5 h-4 w-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <p>
+                      This invoice line is not linked to stock. Link{" "}
+                      <span className="font-medium">
+                        {line.description || "this unnamed line"}
+                      </span>{" "}
+                      to an existing part or prepare a new part before approving
+                      lines and totals.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium">Catalog resolution</p>
@@ -927,27 +949,6 @@ export function InvoiceReviewWorkspace({
               ? "Amounts reconcile within the configured tolerance."
               : "Correct missing values or the amount difference before approval."}
           </p>
-          {showLineApprovalError && unresolvedLines.length > 0 ? (
-            <div
-              id="invoice-line-approval-error"
-              role="alert"
-              className="mt-3 flex items-start gap-2 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive"
-            >
-              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <p>
-                {unresolvedLines.length} invoice{" "}
-                {unresolvedLines.length === 1 ? "line is" : "lines are"} not
-                linked to stock. Link{" "}
-                {unresolvedLines.length === 1 ? "it" : "each one"} to an
-                existing part or prepare a new part before approving lines and
-                totals. First unresolved line:{" "}
-                <span className="font-medium">
-                  {unresolvedLines[0].description || "Unnamed line"}
-                </span>
-                .
-              </p>
-            </div>
-          ) : null}
           {!readOnly ? (
             <Button
               type="button"
@@ -955,7 +956,12 @@ export function InvoiceReviewWorkspace({
               disabled={!workspace.reconciliation.withinTolerance || lineSaving.current}
               aria-describedby={
                 showLineApprovalError && unresolvedLines.length > 0
-                  ? "invoice-line-approval-error"
+                  ? unresolvedLines
+                      .map(
+                        (line) =>
+                          `invoice-line-${line.id}-approval-error`,
+                      )
+                      .join(" ")
                   : undefined
               }
               onClick={approveLines}
