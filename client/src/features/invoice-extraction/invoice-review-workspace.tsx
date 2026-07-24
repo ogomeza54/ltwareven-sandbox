@@ -89,6 +89,7 @@ export function InvoiceReviewWorkspace({
   const lineDirty = useRef(false);
   const lineSaving = useRef(false);
   const [showLineApprovalError, setShowLineApprovalError] = useState(false);
+  const [workflowNotice, setWorkflowNotice] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Record<string, InvoicePartCandidate[]>>({});
   const [candidateQuery, setCandidateQuery] = useState<Record<string, string>>({});
   const [catalogTree, setCatalogTree] = useState<CatalogGroup[]>([]);
@@ -385,7 +386,30 @@ export function InvoiceReviewWorkspace({
     );
     if (unresolved.length === 0) {
       setShowLineApprovalError(false);
-      void flushLines("approved");
+      void flushLines("approved").then((approved) => {
+        if (!approved) return;
+        const current = workspaceRef.current;
+        if (!current) return;
+        if (current.decision !== "approved") {
+          setWorkflowNotice(
+            "Lines and totals approved. Next: approve the invoice header.",
+          );
+          requestAnimationFrame(() =>
+            document
+              .getElementById("invoice-header-approval-section")
+              ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+          );
+          return;
+        }
+        setWorkflowNotice(
+          "Header, lines and totals are approved. Continue to final confirmation.",
+        );
+        requestAnimationFrame(() =>
+          document
+            .getElementById("invoice-final-confirmation")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+        );
+      });
       return;
     }
     setShowLineApprovalError(true);
@@ -397,6 +421,31 @@ export function InvoiceReviewWorkspace({
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
       target?.focus({ preventScroll: true });
     });
+  };
+
+  const approveHeader = async (): Promise<void> => {
+    if (!(await flush("approved"))) return;
+    const current = workspaceRef.current;
+    if (!current) return;
+    if (current.reconciliation.decision !== "approved") {
+      setWorkflowNotice(
+        "Header approved. Next: approve the invoice lines and totals.",
+      );
+      requestAnimationFrame(() =>
+        document
+          .getElementById("invoice-lines-approval-section")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      );
+      return;
+    }
+    setWorkflowNotice(
+      "Header, lines and totals are approved. Continue to final confirmation.",
+    );
+    requestAnimationFrame(() =>
+      document
+        .getElementById("invoice-final-confirmation")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
   };
 
   const goToIssue = (direction: -1 | 1): void => {
@@ -934,7 +983,10 @@ export function InvoiceReviewWorkspace({
           ))}
         </div>
 
-        <div className="rounded-lg border border-border p-3">
+        <div
+          id="invoice-lines-approval-section"
+          className="rounded-lg border border-border p-3"
+        >
           <h4 className="font-medium">Reconciliation</h4>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             <div><dt className="text-muted-foreground">Calculated subtotal</dt><dd>{workspace.reconciliation.calculatedSubtotal ?? "Incomplete"}</dd></div>
@@ -953,7 +1005,16 @@ export function InvoiceReviewWorkspace({
             <Button
               type="button"
               className="mt-3 min-h-11"
-              disabled={!workspace.reconciliation.withinTolerance || lineSaving.current}
+              variant={
+                workspace.reconciliation.decision === "approved"
+                  ? "outline"
+                  : "default"
+              }
+              disabled={
+                workspace.reconciliation.decision === "approved" ||
+                !workspace.reconciliation.withinTolerance ||
+                lineSaving.current
+              }
               aria-describedby={
                 showLineApprovalError && unresolvedLines.length > 0
                   ? unresolvedLines
@@ -966,7 +1027,14 @@ export function InvoiceReviewWorkspace({
               }
               onClick={approveLines}
             >
-              Approve lines & totals
+              {workspace.reconciliation.decision === "approved" ? (
+                <>
+                  <Check className="mr-2 h-4 w-4" />
+                  Lines & totals approved
+                </>
+              ) : (
+                "Approve lines & totals"
+              )}
             </Button>
           ) : null}
         </div>
@@ -975,7 +1043,10 @@ export function InvoiceReviewWorkspace({
         workspace.reconciliation.decision === "approved" &&
         workspace.lines.length > 0 &&
         workspace.lines.every((line) => line.match.decision !== "unresolved") ? (
-          <div className="rounded-lg border border-amber-500/50 p-3">
+          <div
+            id="invoice-final-confirmation"
+            className="rounded-lg border border-amber-500/50 p-3"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h4 className="font-medium">Final confirmation</h4>
@@ -1089,7 +1160,40 @@ export function InvoiceReviewWorkspace({
       </div>
 
       {!readOnly && workspace.decision !== "rejected" ? (
-        <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-end sm:justify-between">
+        <div
+          id="invoice-header-approval-section"
+          className="flex flex-col gap-3 border-t border-border pt-3"
+        >
+          {workflowNotice ||
+          (workspace.decision === "approved" &&
+            workspace.reconciliation.decision !== "approved") ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
+            >
+              <span>
+                {workflowNotice ??
+                  "Header approved. Next: approve the invoice lines and totals."}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11"
+                onClick={() =>
+                  document
+                    .getElementById(
+                      workspace.reconciliation.decision === "approved"
+                        ? "invoice-final-confirmation"
+                        : "invoice-lines-approval-section",
+                    )
+                    ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                }
+              >
+                Go to next step
+              </Button>
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex-1">
             <Label htmlFor="invoice-rejection-reason">Reject reason</Label>
             <Input id="invoice-rejection-reason" value={rejectionReason} placeholder="Required only when rejecting" onChange={(event) => setRejectionReason(event.target.value)} />
@@ -1108,10 +1212,23 @@ export function InvoiceReviewWorkspace({
                 setError(caught instanceof Error ? caught.message : "Invoice could not be rejected.");
               }
             }}>Reject invoice</Button>
-            <Button type="button" className="min-h-11" disabled={issues.length > 0 || saving.current} onClick={() => void flush("approved")}>
+            <Button
+              type="button"
+              className="min-h-11"
+              variant={workspace.decision === "approved" ? "outline" : "default"}
+              disabled={
+                workspace.decision === "approved" ||
+                issues.length > 0 ||
+                saving.current
+              }
+              onClick={() => void approveHeader()}
+            >
               <Check className="mr-2 h-4 w-4" />
-              Approve header
+              {workspace.decision === "approved"
+                ? "Header approved"
+                : "Approve header"}
             </Button>
+          </div>
           </div>
         </div>
       ) : null}

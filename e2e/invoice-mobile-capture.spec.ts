@@ -967,6 +967,14 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await expect.poll(() => state.reviewedFields.includes("total")).toBe(true);
   await page.getByRole("button", { name: "Approve header" }).click();
   await expect.poll(() => state.reviewDecision).toBe("approved");
+  await expect(
+    page.getByRole("button", { name: "Header approved" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText(
+      "Header approved. Next: approve the invoice lines and totals.",
+    ),
+  ).toBeVisible();
 
   await page.getByLabel("Unit cost").fill("50");
   await page.getByLabel("Unit cost").blur();
