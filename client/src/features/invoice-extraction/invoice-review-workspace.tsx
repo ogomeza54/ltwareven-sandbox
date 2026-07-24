@@ -88,6 +88,7 @@ export function InvoiceReviewWorkspace({
   const linesRef = useRef<InvoiceReviewWorkspaceDto["lines"]>([]);
   const lineDirty = useRef(false);
   const lineSaving = useRef(false);
+  const [showLineApprovalError, setShowLineApprovalError] = useState(false);
   const [candidates, setCandidates] = useState<Record<string, InvoicePartCandidate[]>>({});
   const [candidateQuery, setCandidateQuery] = useState<Record<string, string>>({});
   const [catalogTree, setCatalogTree] = useState<CatalogGroup[]>([]);
@@ -323,6 +324,9 @@ export function InvoiceReviewWorkspace({
       setWorkspace(saved);
       linesRef.current = saved.lines;
       setLines(saved.lines);
+      if (saved.lines.every((line) => line.match.decision !== "unresolved")) {
+        setShowLineApprovalError(false);
+      }
       if (match.decision === "existing") {
         setNewPartDraft((value) => {
           const next = { ...value };
@@ -356,6 +360,9 @@ export function InvoiceReviewWorkspace({
   };
 
   const issues = workspace?.issues ?? [];
+  const unresolvedLines = lines.filter(
+    (line) => line.match.decision === "unresolved",
+  );
   const activeIssue = issues[Math.min(issueIndex, Math.max(0, issues.length - 1))];
   const currentAsset = workspace?.source.assets[activeAsset];
   const proposed = workspace?.proposedHeader;
@@ -371,6 +378,26 @@ export function InvoiceReviewWorkspace({
         : null,
     [proposed],
   );
+
+  const approveLines = (): void => {
+    const unresolved = linesRef.current.filter(
+      (line) => line.match.decision === "unresolved",
+    );
+    if (unresolved.length === 0) {
+      setShowLineApprovalError(false);
+      void flushLines("approved");
+      return;
+    }
+    setShowLineApprovalError(true);
+    const targetId = unresolved[0].id;
+    requestAnimationFrame(() => {
+      const target = document.getElementById(
+        `invoice-line-${targetId}-resolution`,
+      );
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
 
   const goToIssue = (direction: -1 | 1): void => {
     const currentWorkspace = workspace;
@@ -620,6 +647,8 @@ export function InvoiceReviewWorkspace({
               </div>
               <div className="space-y-2 border-t border-border pt-2 md:col-span-2 lg:col-span-6">
                 <div
+                  id={`invoice-line-${line.id}-resolution`}
+                  tabIndex={-1}
                   role="status"
                   aria-label={`Stock resolution for invoice line ${index + 1}`}
                   className={`flex items-start gap-3 rounded-md border p-3 ${
@@ -898,8 +927,39 @@ export function InvoiceReviewWorkspace({
               ? "Amounts reconcile within the configured tolerance."
               : "Correct missing values or the amount difference before approval."}
           </p>
+          {showLineApprovalError && unresolvedLines.length > 0 ? (
+            <div
+              id="invoice-line-approval-error"
+              role="alert"
+              className="mt-3 flex items-start gap-2 rounded border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <p>
+                {unresolvedLines.length} invoice{" "}
+                {unresolvedLines.length === 1 ? "line is" : "lines are"} not
+                linked to stock. Link{" "}
+                {unresolvedLines.length === 1 ? "it" : "each one"} to an
+                existing part or prepare a new part before approving lines and
+                totals. First unresolved line:{" "}
+                <span className="font-medium">
+                  {unresolvedLines[0].description || "Unnamed line"}
+                </span>
+                .
+              </p>
+            </div>
+          ) : null}
           {!readOnly ? (
-            <Button type="button" className="mt-3 min-h-11" disabled={!workspace.reconciliation.withinTolerance || lineSaving.current} onClick={() => void flushLines("approved")}>
+            <Button
+              type="button"
+              className="mt-3 min-h-11"
+              disabled={!workspace.reconciliation.withinTolerance || lineSaving.current}
+              aria-describedby={
+                showLineApprovalError && unresolvedLines.length > 0
+                  ? "invoice-line-approval-error"
+                  : undefined
+              }
+              onClick={approveLines}
+            >
               Approve lines & totals
             </Button>
           ) : null}

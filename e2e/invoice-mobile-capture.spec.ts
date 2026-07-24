@@ -918,11 +918,18 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await page.getByLabel("Unit cost").blur();
   await expect.poll(() => state.lineUnitCost).toBe("50");
   await page.getByRole("button", { name: "Approve lines & totals" }).click();
-  await expect.poll(() => state.lineDecision).toBe("approved");
+  const resolutionError = page.getByRole("alert").filter({
+    hasText: "invoice line is not linked to stock",
+  });
+  await expect(resolutionError).toContainText("Brake pad");
+  expect(state.lineDecision).toBe("draft");
 
   await page.getByRole("button", { name: "Find matches" }).click();
   await page.getByRole("button", { name: "Select" }).click();
   await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  await expect(resolutionError).toHaveCount(0);
+  await page.getByRole("button", { name: "Approve lines & totals" }).click();
+  await expect.poll(() => state.lineDecision).toBe("approved");
   await page
     .getByRole("button", { name: "Prepare confirmation summary" })
     .click();
