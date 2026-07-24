@@ -10,6 +10,7 @@ export interface InvoiceProviderAsset {
 export interface InvoiceProviderRequest {
   assets: readonly InvoiceProviderAsset[];
   model: string;
+  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   background: boolean;
   storeResponse: boolean;
 }

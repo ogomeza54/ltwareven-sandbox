@@ -85,6 +85,7 @@ export class InvoiceExtractionService {
         : await this.provider.submit({
             assets: await this.loadAssets(attempt),
             model: attempt.model,
+            reasoningEffort: this.config.reasoningEffort,
             background: attempt.executionMode === "background",
             storeResponse: attempt.storeResponse,
           });

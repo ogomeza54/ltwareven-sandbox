@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Camera,
+  Clock3,
   FileText,
   Image as ImageIcon,
   Trash2,
@@ -26,6 +27,10 @@ import {
 import type { InvoiceExtractionRunDto } from "@shared/invoice-extraction/contracts";
 import { useInvoiceSources } from "./use-invoice-sources";
 import { InvoiceReviewWorkspace } from "./invoice-review-workspace";
+import {
+  formatExtractionSeconds,
+  invoiceExtractionTiming,
+} from "./extraction-timing";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -61,6 +66,7 @@ export function InvoiceSourceUpload({
   const [extraction, setExtraction] = useState<InvoiceExtractionRunDto | null>(null);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [startingExtraction, setStartingExtraction] = useState(false);
+  const [timingClock, setTimingClock] = useState(() => Date.now());
   const [pending, setPendingState] = useState<PendingInvoiceCapture | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [uploadFailed, setUploadFailed] = useState(false);
@@ -81,6 +87,9 @@ export function InvoiceSourceUpload({
     startingExtraction ||
     extraction?.status === "queued" ||
     extraction?.status === "processing";
+  const extractionTiming = extraction
+    ? invoiceExtractionTiming(extraction, timingClock)
+    : null;
   const blocked = (atLimit && !replacementAsset) || busy || extractionBusy;
 
   const setPending = (next: PendingInvoiceCapture | null): void => {
@@ -133,7 +142,7 @@ export function InvoiceSourceUpload({
     if (!open || !extraction || !["queued", "processing"].includes(extraction.status)) {
       return;
     }
-    const timer = window.setInterval(() => {
+    const poll = () => {
       void getInvoiceExtractionRun(extraction.id)
         .then(async (next) => {
           setExtraction(next);
@@ -142,9 +151,18 @@ export function InvoiceSourceUpload({
           }
         })
         .catch(() => setExtractionError("Extraction status is temporarily unavailable."));
-    }, 2_000);
+    };
+    poll();
+    const timer = window.setInterval(poll, 1_000);
     return () => window.clearInterval(timer);
   }, [extraction?.id, extraction?.status, open]);
+
+  useEffect(() => {
+    if (!extraction || !["queued", "processing"].includes(extraction.status)) return;
+    setTimingClock(Date.now());
+    const timer = window.setInterval(() => setTimingClock(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [extraction?.id, extraction?.status]);
 
   const analyze = async (): Promise<void> => {
     if (!draft || assets.length === 0) return;
@@ -262,15 +280,42 @@ export function InvoiceSourceUpload({
             </Button>
           </div>
           {extraction ? (
-            <p className="mt-2 text-sm" role="status">
-              Status: {extraction.status}
-              {extraction.status === "completed" && extraction.proposal
-                ? ` · ${extraction.proposal.lines.length} line items proposed for review`
-                : ""}
-              {extraction.status === "failed"
-                ? " · No inventory was changed. You can retry or enter the invoice manually."
-                : ""}
-            </p>
+            <div className="mt-3 space-y-2" role="status" aria-label="Invoice analysis progress">
+              <p className="text-sm">
+                Status: <span className="font-medium">{extraction.status}</span>
+                {extraction.status === "completed" && extraction.proposal
+                  ? ` · ${extraction.proposal.lines.length} line items proposed for review`
+                  : ""}
+                {extraction.status === "failed"
+                  ? " · No inventory was changed. You can retry or enter the invoice manually."
+                  : ""}
+              </p>
+              {extractionTiming ? (
+                <dl className="grid grid-cols-3 gap-2 rounded border border-border bg-background/50 p-2 text-xs">
+                  <div>
+                    <dt className="flex items-center gap-1 text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Queue
+                    </dt>
+                    <dd className="mt-1 font-mono text-sm font-medium">
+                      {formatExtractionSeconds(extractionTiming.queueMs)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">AI processing</dt>
+                    <dd className="mt-1 font-mono text-sm font-medium">
+                      {formatExtractionSeconds(extractionTiming.processingMs)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Total</dt>
+                    <dd className="mt-1 font-mono text-sm font-medium">
+                      {formatExtractionSeconds(extractionTiming.totalMs)}
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
           ) : null}
           {extractionError ? (
             <p className="mt-2 text-sm text-destructive" role="alert">

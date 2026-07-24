@@ -39,6 +39,7 @@ test("invoice pilot configuration has validated safe defaults", () => {
     openaiApiKey: undefined,
     openaiWebhookSecret: undefined,
     openaiModel: "gpt-5.6-terra",
+    reasoningEffort: "none",
     engineVersion: "invoice-v1",
     proposalSchemaVersion: "invoice-proposal-v1",
     executionMode: "background",

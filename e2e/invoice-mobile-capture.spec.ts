@@ -490,6 +490,8 @@ function extractionRun(
           }
         : null,
     createdAt: "2026-07-23T12:00:00.000Z",
+    startedAt:
+      status === "queued" ? null : "2026-07-23T12:00:00.250Z",
     completedAt: status === "completed" ? "2026-07-23T12:00:02.000Z" : null,
   };
 }
@@ -843,6 +845,15 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(
     page.getByText(/1 line items proposed for review/),
   ).toBeVisible({ timeout: 8_000 });
+  const progress = page.getByRole("status", {
+    name: "Invoice analysis progress",
+  });
+  await expect(progress).toContainText("Queue");
+  await expect(progress).toContainText("0.3 s");
+  await expect(progress).toContainText("AI processing");
+  await expect(progress).toContainText("1.8 s");
+  await expect(progress).toContainText("Total");
+  await expect(progress).toContainText("2.0 s");
   await expect(page.getByRole("region", { name: "Invoice review workspace" })).toBeVisible();
   await expect(page.getByText(/AI proposed: Test Vendor/)).toBeVisible();
   const vendor = page.getByLabel("Vendor / Supplier", { exact: true });

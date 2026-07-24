@@ -38,6 +38,9 @@ const invoiceConfigSchema = z.object({
   openaiApiKey: z.string().min(1).optional(),
   openaiWebhookSecret: z.string().min(1).optional(),
   openaiModel: z.string().min(1).default("gpt-5.6-terra"),
+  reasoningEffort: z
+    .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    .default("none"),
   engineVersion: z.string().min(1).default("invoice-v1"),
   proposalSchemaVersion: z.literal("invoice-proposal-v1").default("invoice-proposal-v1"),
   executionMode: z.enum(["background", "synchronous"]).default("background"),
@@ -80,6 +83,7 @@ export function loadInvoiceConfig(
     openaiApiKey: environment.OPENAI_API_KEY,
     openaiWebhookSecret: environment.OPENAI_WEBHOOK_SECRET,
     openaiModel: environment.INVOICE_OPENAI_MODEL,
+    reasoningEffort: environment.INVOICE_OPENAI_REASONING_EFFORT,
     engineVersion: environment.INVOICE_ENGINE_VERSION,
     proposalSchemaVersion: environment.INVOICE_PROPOSAL_SCHEMA_VERSION,
     executionMode: environment.INVOICE_OPENAI_EXECUTION_MODE,

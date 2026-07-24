@@ -138,6 +138,7 @@ export class OpenAIInvoiceProvider implements InvoiceExtractionProviderPort {
     ];
     const response = await this.client.responses.create({
       model: request.model,
+      reasoning: { effort: request.reasoningEffort },
       background: request.background,
       store: request.storeResponse,
       input: [{ role: "user", content }],

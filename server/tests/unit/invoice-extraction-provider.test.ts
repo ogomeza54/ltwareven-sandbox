@@ -119,6 +119,7 @@ test("client starts and polls an extraction without sending tenant authority", a
     storeResponse: true,
     proposal: null,
     createdAt: "2026-07-23T00:00:00.000Z",
+    startedAt: null,
     completedAt: null,
   } as const;
   globalThis.fetch = (async (input, init) => {

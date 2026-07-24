@@ -50,6 +50,7 @@ interface RunViewRow {
   store_response: boolean;
   payload: unknown | null;
   created_at: Date | string;
+  started_at: Date | string | null;
   completed_at: Date | string | null;
 }
 
@@ -92,6 +93,7 @@ function runDto(row: RunViewRow): InvoiceExtractionRunDto {
     storeResponse: row.store_response,
     proposal: row.payload ? invoiceProposalSchema.parse(row.payload) : null,
     createdAt: iso(row.created_at),
+    startedAt: row.started_at ? iso(row.started_at) : null,
     completedAt: row.completed_at ? iso(row.completed_at) : null,
   };
 }
@@ -180,6 +182,7 @@ export class PostgresInvoiceExtractionRepository {
               sdk: "openai",
               sdkVersion: "6.48.0",
               ...(activeEngine?.provider_config ?? {}),
+              reasoningEffort: config.reasoningEffort,
             })}::jsonb
           )
           returning id
@@ -227,7 +230,7 @@ export class PostgresInvoiceExtractionRepository {
              attempt.status as attempt_status, run.failure_code,
              run.engine_version, run.model, run.schema_version,
              run.execution_mode, run.store_response, proposal.payload,
-             run.created_at, run.completed_at
+             run.created_at, run.started_at, run.completed_at
       from invoice_extraction_runs run
       left join lateral (
         select status from invoice_provider_attempts

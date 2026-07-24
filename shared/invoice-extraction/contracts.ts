@@ -303,6 +303,7 @@ export const invoiceExtractionRunDtoSchema = z.object({
   storeResponse: z.boolean(),
   proposal: invoiceProposalSchema.nullable(),
   createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
   completedAt: z.string().datetime().nullable(),
 });
 export type InvoiceExtractionRunDto = z.infer<
