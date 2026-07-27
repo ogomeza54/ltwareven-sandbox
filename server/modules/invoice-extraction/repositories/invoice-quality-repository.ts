@@ -63,22 +63,59 @@ export class PostgresInvoiceQualityRepository {
         ? sql`and run.engine_version = ${filters.engineVersion}`
         : sql``}
     `;
+    const relevantFieldFeedback = sql`
+      feedback.subject_type in ('header', 'line')
+      and (
+        (
+          feedback.proposal is not null
+          and feedback.proposal <> 'null'::jsonb
+          and not (
+            feedback.subject_path like '%.classification'
+            and feedback.proposal = '"unknown"'::jsonb
+          )
+        )
+        or (
+          feedback.final_value is not null
+          and feedback.final_value <> 'null'::jsonb
+          and not (
+            feedback.subject_path like '%.classification'
+            and feedback.final_value = '"unknown"'::jsonb
+          )
+        )
+      )
+    `;
+    const aiFilledFeedback = sql`
+      feedback.proposal is not null
+      and feedback.proposal <> 'null'::jsonb
+      and not (
+        feedback.subject_path like '%.classification'
+        and feedback.proposal = '"unknown"'::jsonb
+      )
+    `;
 
-    const [feedbackTotalsResult, decisionResult, subjectResult, runResult, casesResult] =
+    const [feedbackTotalsResult, decisionResult, subjectResult, runResult, casesResult, matchDecisionResult] =
       await Promise.all([
         this.database.execute(sql`
-          select count(*)::int as feedback_events,
-                 count(*) filter (where feedback.decision in ('accepted', 'corrected', 'added', 'removed'))::int as reviewed_events,
+          select count(*) filter (where ${relevantFieldFeedback})::int as feedback_events,
+                 count(*) filter (where ${relevantFieldFeedback})::int as reviewed_events,
                  count(*) filter (
-                   where feedback.decision in ('corrected', 'added', 'removed')
+                   where ${relevantFieldFeedback} and ${aiFilledFeedback}
+                 )::int as ai_filled_events,
+                 count(*) filter (
+                   where ${relevantFieldFeedback}
+                     and feedback.decision in ('corrected', 'added', 'removed')
                      and coalesce(feedback.reason, '') <> 'automatic_enrichment'
                  )::int as corrected_events,
                  count(*) filter (
-                   where feedback.reason = 'automatic_enrichment'
+                   where ${relevantFieldFeedback}
+                     and feedback.reason = 'automatic_enrichment'
                  )::int as automatic_enrichment_events,
-                 count(*) filter (where feedback.decision = 'accepted')::int as accepted_events
+                 count(*) filter (
+                   where ${relevantFieldFeedback}
+                     and feedback.decision = 'accepted'
+                 )::int as accepted_events
           from invoice_feedback_events feedback
-          where ${feedbackFilter}
+          where ${feedbackFilter} and ${relevantFieldFeedback}
         `),
         this.database.execute(sql`
           select case
@@ -88,7 +125,7 @@ export class PostgresInvoiceQualityRepository {
                  end as key,
                  count(*)::int as count
           from invoice_feedback_events feedback
-          where ${feedbackFilter}
+          where ${feedbackFilter} and ${relevantFieldFeedback}
           group by key
           order by key
         `),
@@ -108,20 +145,27 @@ export class PostgresInvoiceQualityRepository {
                  ) - 1, 0)::int as retry_attempts,
                  coalesce(document.total_pages, 0)::int as pages,
                  (
-                   select count(*) from invoice_feedback_events event
-                   where event.company_id = run.company_id and event.run_id = run.id
-                     and event.decision in ('accepted', 'corrected', 'added', 'removed')
+                   select count(*) from invoice_feedback_events feedback
+                   where feedback.company_id = run.company_id and feedback.run_id = run.id
+                     and ${relevantFieldFeedback}
                  )::int as reviewed_events,
                  (
-                   select count(*) from invoice_feedback_events event
-                   where event.company_id = run.company_id and event.run_id = run.id
-                     and event.decision in ('corrected', 'added', 'removed')
-                     and coalesce(event.reason, '') <> 'automatic_enrichment'
+                   select count(*) from invoice_feedback_events feedback
+                   where feedback.company_id = run.company_id and feedback.run_id = run.id
+                     and ${relevantFieldFeedback} and ${aiFilledFeedback}
+                 )::int as ai_filled_events,
+                 (
+                   select count(*) from invoice_feedback_events feedback
+                   where feedback.company_id = run.company_id and feedback.run_id = run.id
+                     and ${relevantFieldFeedback}
+                     and feedback.decision in ('corrected', 'added', 'removed')
+                     and coalesce(feedback.reason, '') <> 'automatic_enrichment'
                  )::int as corrected_events
                  ,(
-                   select count(*) from invoice_feedback_events event
-                   where event.company_id = run.company_id and event.run_id = run.id
-                     and event.reason = 'automatic_enrichment'
+                   select count(*) from invoice_feedback_events feedback
+                   where feedback.company_id = run.company_id and feedback.run_id = run.id
+                     and ${relevantFieldFeedback}
+                     and feedback.reason = 'automatic_enrichment'
                  )::int as automatic_enrichment_events
           from invoice_extraction_runs run
           join invoice_review_drafts draft
@@ -144,14 +188,19 @@ export class PostgresInvoiceQualityRepository {
                  header.final_values ->> 'vendorName' as supplier,
                  run.engine_version,
                  count(feedback.id) filter (
-                   where feedback.decision in ('accepted', 'corrected', 'added', 'removed')
+                   where ${relevantFieldFeedback}
                  )::int as reviewed_events,
                  count(feedback.id) filter (
-                   where feedback.decision in ('corrected', 'added', 'removed')
+                   where ${relevantFieldFeedback} and ${aiFilledFeedback}
+                 )::int as ai_filled_events,
+                 count(feedback.id) filter (
+                   where ${relevantFieldFeedback}
+                     and feedback.decision in ('corrected', 'added', 'removed')
                      and coalesce(feedback.reason, '') <> 'automatic_enrichment'
                  )::int as corrected_events,
                  count(feedback.id) filter (
-                   where feedback.reason = 'automatic_enrichment'
+                   where ${relevantFieldFeedback}
+                     and feedback.reason = 'automatic_enrichment'
                  )::int as automatic_enrichment_events,
                  case when draft.status in ('confirmed', 'rejected', 'canceled')
                    then greatest(extract(epoch from (draft.updated_at - draft.created_at)), 0)
@@ -176,22 +225,32 @@ export class PostgresInvoiceQualityRepository {
           order by draft.updated_at desc, draft.id desc
           limit ${filters.limit} offset ${filters.offset}
         `),
+        this.database.execute(sql`
+          select feedback.decision as key, count(*)::int as count
+          from invoice_feedback_events feedback
+          where ${feedbackFilter} and feedback.subject_type = 'match'
+          group by feedback.decision
+          order by feedback.decision
+        `),
       ]);
 
     const feedbackTotals = rows<{
       feedback_events: number;
       reviewed_events: number;
+      ai_filled_events: number;
       corrected_events: number;
       automatic_enrichment_events: number;
       accepted_events: number;
     }>(feedbackTotalsResult)[0] ?? {
       feedback_events: 0,
       reviewed_events: 0,
+      ai_filled_events: 0,
       corrected_events: 0,
       automatic_enrichment_events: 0,
       accepted_events: 0,
     };
     const reviewedEvents = integer(feedbackTotals.reviewed_events);
+    const aiFilledEvents = integer(feedbackTotals.ai_filled_events);
     const correctedEvents = integer(feedbackTotals.corrected_events);
     const automaticEnrichmentEvents = integer(
       feedbackTotals.automatic_enrichment_events,
@@ -203,6 +262,7 @@ export class PostgresInvoiceQualityRepository {
       supplier: string | null;
       engine_version: string | null;
       reviewed_events: number;
+      ai_filled_events: number;
       corrected_events: number;
       automatic_enrichment_events: number;
       review_seconds: string | null;
@@ -219,6 +279,7 @@ export class PostgresInvoiceQualityRepository {
       retry_attempts: number;
       pages: number;
       reviewed_events: number;
+      ai_filled_events: number;
       corrected_events: number;
       automatic_enrichment_events: number;
     }>(runResult);
@@ -230,9 +291,11 @@ export class PostgresInvoiceQualityRepository {
         retryAttempts: 0,
         pages: 0,
         reviewedEvents: 0,
+        aiFilledEvents: 0,
         correctedEvents: 0,
         automaticEnrichmentEvents: 0,
         correctionRate: null as number | null,
+        aiFilledRate: null as number | null,
         automaticEnrichmentRate: null as number | null,
       };
       current.runs += 1;
@@ -240,6 +303,7 @@ export class PostgresInvoiceQualityRepository {
       current.retryAttempts += integer(item.retry_attempts);
       current.pages += integer(item.pages);
       current.reviewedEvents += integer(item.reviewed_events);
+      current.aiFilledEvents += integer(item.ai_filled_events);
       current.correctedEvents += integer(item.corrected_events);
       current.automaticEnrichmentEvents += integer(
         item.automatic_enrichment_events,
@@ -253,13 +317,16 @@ export class PostgresInvoiceQualityRepository {
       retryAttempts: number;
       pages: number;
       reviewedEvents: number;
+      aiFilledEvents: number;
       correctedEvents: number;
       automaticEnrichmentEvents: number;
       correctionRate: number | null;
+      aiFilledRate: number | null;
       automaticEnrichmentRate: number | null;
     }>()).values()).map((item) => ({
       ...item,
       correctionRate: rate(item.correctedEvents, item.reviewedEvents),
+      aiFilledRate: rate(item.aiFilledEvents, item.reviewedEvents),
       automaticEnrichmentRate: rate(
         item.automaticEnrichmentEvents,
         item.reviewedEvents,
@@ -277,10 +344,12 @@ export class PostgresInvoiceQualityRepository {
         failedRuns: engines.reduce((sum, item) => sum + item.failedRuns, 0),
         feedbackEvents: integer(feedbackTotals.feedback_events),
         reviewedEvents,
+        aiFilledEvents,
         correctedEvents,
         automaticEnrichmentEvents,
         acceptedEvents,
         correctionRate: rate(correctedEvents, denominator),
+        aiFilledRate: rate(aiFilledEvents, denominator),
         automaticEnrichmentRate: rate(automaticEnrichmentEvents, denominator),
         acceptanceRate: rate(acceptedEvents, denominator),
         averageReviewSeconds:
@@ -308,12 +377,26 @@ export class PostgresInvoiceQualityRepository {
         }),
       ),
       engines,
+      byMatchDecision: (() => {
+        const items = rows<{ key: string; count: number }>(matchDecisionResult);
+        const matchDenominator = items.reduce(
+          (sum, item) => sum + integer(item.count),
+          0,
+        );
+        return items.map((item) => ({
+          key: item.key,
+          count: integer(item.count),
+          denominator: matchDenominator,
+          rate: rate(integer(item.count), matchDenominator),
+        }));
+      })(),
       cases: cases.map((item) => ({
         draftId: item.draft_id,
         status: item.status,
         supplier: item.supplier,
         engineVersion: item.engine_version,
         reviewedEvents: integer(item.reviewed_events),
+        aiFilledEvents: integer(item.ai_filled_events),
         correctedEvents: integer(item.corrected_events),
         automaticEnrichmentEvents: integer(
           item.automatic_enrichment_events,

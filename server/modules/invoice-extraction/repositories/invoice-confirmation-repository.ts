@@ -25,7 +25,7 @@ import type { InventoryReceivingCommand } from "../../inventory-receiving/types"
 import { loadInvoiceConfig } from "../config/invoice-config";
 import {
   classifyHeaderFeedback,
-  classifyLineFeedback,
+  classifyLineFieldFeedback,
 } from "../domain/feedback-classification";
 
 type InvoiceDatabase = typeof applicationDatabase;
@@ -904,34 +904,57 @@ export class PostgresInvoiceConfirmationRepository {
                   proposedLine.unitCost.observed,
                 classification: proposedLine.classification?.kind ?? null,
               };
-        const feedback = classifyLineFeedback(normalizedProposal, finalLine);
-        await tx.execute(sql`
-          insert into invoice_feedback_events (
-            company_id, draft_id, run_id, engine_version, subject_type,
-            subject_path, decision, proposal, final_value, reason,
-            supplier_normalized, actor_company_id, actor_user_id
-          ) values (
-            ${actor.effectiveCompanyId}, ${draftId}::uuid,
-            ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
-            'line', ${`lines.${line.id}`},
-            ${feedback.decision},
-            ${JSON.stringify(normalizedProposal)}::jsonb,
-            ${JSON.stringify(finalLine)}::jsonb,
-            ${feedback.reason},
-            ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
-          )
-        `);
-        if (line.classification === "adjustment") continue;
-        const finalMatch =
-          line.decision === "existing"
-            ? { kind: "existing", partId: line.selected_part_id }
-            : { kind: "new", proposedPart: line.proposed_new_part };
         const suggestedPartId =
           line.original_suggestion &&
           typeof line.original_suggestion === "object" &&
           "partId" in line.original_suggestion
             ? String(line.original_suggestion.partId)
             : null;
+        const lineFields = [
+          "description",
+          "vendorPartNumber",
+          "quantity",
+          "unitCost",
+          "classification",
+        ] as const;
+        for (const field of lineFields) {
+          const proposedValue = normalizedProposal?.[field] ?? null;
+          const finalValue = finalLine[field];
+          const classificationAutomaticallyEnriched =
+            field === "classification" &&
+            (proposedValue === null || proposedValue === "unknown") &&
+            finalValue !== "unknown" &&
+            (line.classification === "adjustment" ||
+              (line.decision === "existing" &&
+                suggestedPartId === line.selected_part_id));
+          const feedback = classifyLineFieldFeedback(
+            field,
+            proposedValue,
+            finalValue,
+            classificationAutomaticallyEnriched,
+          );
+          await tx.execute(sql`
+            insert into invoice_feedback_events (
+              company_id, draft_id, run_id, engine_version, subject_type,
+              subject_path, decision, proposal, final_value, reason,
+              supplier_normalized, actor_company_id, actor_user_id
+            ) values (
+              ${actor.effectiveCompanyId}, ${draftId}::uuid,
+              ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
+              'line', ${`lines.${line.id}.${field}`},
+              ${feedback.decision},
+              ${JSON.stringify(proposedValue)}::jsonb,
+              ${JSON.stringify(finalValue)}::jsonb,
+              ${feedback.reason},
+              ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
+            )
+          `);
+        }
+        if (line.classification === "adjustment") continue;
+        const finalMatch =
+          line.decision === "existing"
+            ? { kind: "existing", partId: line.selected_part_id }
+            : { kind: "new", proposedPart: line.proposed_new_part };
         await tx.execute(sql`
           insert into invoice_feedback_events (
             company_id, draft_id, run_id, engine_version, subject_type,

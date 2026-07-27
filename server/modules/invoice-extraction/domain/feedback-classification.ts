@@ -2,19 +2,11 @@ import Decimal from "decimal.js";
 
 export const AUTOMATIC_ENRICHMENT_REASON = "automatic_enrichment";
 
-type FeedbackDecision = "accepted" | "corrected" | "added";
+type FeedbackDecision = "accepted" | "corrected" | "added" | "removed";
 
 export interface FeedbackClassification {
   decision: FeedbackDecision;
   reason: typeof AUTOMATIC_ENRICHMENT_REASON | null;
-}
-
-interface InvoiceLineSnapshot {
-  description: string | null;
-  vendorPartNumber: string | null;
-  quantity: string | null;
-  unitCost: string | null;
-  classification: string | null;
 }
 
 function decimalTextEqual(left: string | null, right: string | null): boolean {
@@ -38,34 +30,35 @@ export function classifyHeaderFeedback(
     field === "currency" &&
     (proposed === null || proposed.trim() === "") &&
     finalValue === "USD";
+  const isDefaultZero =
+    (field === "tax" || field === "freight") &&
+    (proposed === null || proposed.trim() === "") &&
+    finalValue !== null &&
+    decimalTextEqual(finalValue, "0");
   return {
-    decision: "corrected",
-    reason: isDefaultCurrency ? AUTOMATIC_ENRICHMENT_REASON : null,
+    decision: proposed === null ? "added" : finalValue === null ? "removed" : "corrected",
+    reason:
+      isDefaultCurrency || isDefaultZero
+        ? AUTOMATIC_ENRICHMENT_REASON
+        : null,
   };
 }
 
-export function classifyLineFeedback(
-  proposed: InvoiceLineSnapshot | null,
-  finalValue: InvoiceLineSnapshot,
+export function classifyLineFieldFeedback(
+  field: string,
+  proposed: string | null,
+  finalValue: string | null,
+  automaticallyEnriched = false,
 ): FeedbackClassification {
-  if (proposed === null) return { decision: "added", reason: null };
-
   const valuesMatch =
-    proposed.description === finalValue.description &&
-    proposed.vendorPartNumber === finalValue.vendorPartNumber &&
-    decimalTextEqual(proposed.quantity, finalValue.quantity) &&
-    decimalTextEqual(proposed.unitCost, finalValue.unitCost);
-  if (valuesMatch && proposed.classification === finalValue.classification) {
+    field === "quantity" || field === "unitCost"
+      ? decimalTextEqual(proposed, finalValue)
+      : proposed === finalValue;
+  if (valuesMatch) {
     return { decision: "accepted", reason: null };
   }
-
-  const classificationWasInferred =
-    valuesMatch &&
-    (proposed.classification === null || proposed.classification === "unknown") &&
-    finalValue.classification !== null &&
-    finalValue.classification !== "unknown";
   return {
-    decision: "corrected",
-    reason: classificationWasInferred ? AUTOMATIC_ENRICHMENT_REASON : null,
+    decision: proposed === null ? "added" : finalValue === null ? "removed" : "corrected",
+    reason: automaticallyEnriched ? AUTOMATIC_ENRICHMENT_REASON : null,
   };
 }

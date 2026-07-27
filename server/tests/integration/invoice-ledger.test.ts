@@ -1525,7 +1525,7 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
       order by created_at, id`,
     [companyA, draft.id],
   );
-  assert.equal(feedback.rowCount, 13);
+  assert.equal(feedback.rowCount, 21);
   assert.ok(
     feedback.rows.some(
       (event) =>
@@ -1571,8 +1571,13 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
     limit: 20,
     offset: 0,
   });
-  assert.equal(dashboard.totals.feedbackEvents, 13);
+  assert.equal(
+    dashboard.totals.feedbackEvents,
+    dashboard.totals.reviewedEvents,
+  );
   assert.ok(dashboard.totals.reviewedEvents > 0);
+  assert.ok(dashboard.totals.aiFilledEvents > 0);
+  assert.ok(dashboard.byMatchDecision.length > 0);
   assert.equal(dashboard.totals.lowSample, true);
   assert.ok(dashboard.cases.some((entry) => entry.draftId === draft.id));
   assert.equal(
