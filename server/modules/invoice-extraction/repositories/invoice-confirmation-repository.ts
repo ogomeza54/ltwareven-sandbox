@@ -23,6 +23,10 @@ import Decimal from "decimal.js";
 import { receiveInventoryWithinTransaction } from "../../inventory-receiving/postgres-inventory-intake-service";
 import type { InventoryReceivingCommand } from "../../inventory-receiving/types";
 import { loadInvoiceConfig } from "../config/invoice-config";
+import {
+  classifyHeaderFeedback,
+  classifyLineFeedback,
+} from "../domain/feedback-classification";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type TransactionExecutor = Parameters<
@@ -40,15 +44,6 @@ function rows<T>(result: unknown): T[] {
     return (result as Result<T>).rows;
   }
   return [];
-}
-
-function decimalTextEqual(left: string | null, right: string | null): boolean {
-  if (left === null || right === null) return left === right;
-  try {
-    return new Decimal(left).eq(right);
-  } catch {
-    return false;
-  }
 }
 
 interface IntentRow {
@@ -836,17 +831,19 @@ export class PostgresInvoiceConfirmationRepository {
         const proposed =
           proposal.header[field].normalized ?? proposal.header[field].observed;
         const finalValue = finalHeader[field];
+        const feedback = classifyHeaderFeedback(field, proposed, finalValue);
         await tx.execute(sql`
           insert into invoice_feedback_events (
             company_id, draft_id, run_id, engine_version, subject_type,
-            subject_path, decision, proposal, final_value,
+            subject_path, decision, proposal, final_value, reason,
             supplier_normalized, actor_company_id, actor_user_id
           ) values (
             ${actor.effectiveCompanyId}, ${draftId}::uuid,
             ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
             'header', ${`header.${field}`},
-            ${proposed === finalValue ? "accepted" : "corrected"},
+            ${feedback.decision},
             ${JSON.stringify(proposed)}::jsonb, ${JSON.stringify(finalValue)}::jsonb,
+            ${feedback.reason},
             ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
           )
         `);
@@ -907,29 +904,20 @@ export class PostgresInvoiceConfirmationRepository {
                   proposedLine.unitCost.observed,
                 classification: proposedLine.classification?.kind ?? null,
               };
-        const lineAccepted =
-          normalizedProposal !== null &&
-          normalizedProposal.description === finalLine.description &&
-          normalizedProposal.vendorPartNumber === finalLine.vendorPartNumber &&
-          normalizedProposal.classification === finalLine.classification &&
-          decimalTextEqual(normalizedProposal.quantity, finalLine.quantity) &&
-          decimalTextEqual(normalizedProposal.unitCost, finalLine.unitCost);
+        const feedback = classifyLineFeedback(normalizedProposal, finalLine);
         await tx.execute(sql`
           insert into invoice_feedback_events (
             company_id, draft_id, run_id, engine_version, subject_type,
-            subject_path, decision, proposal, final_value,
+            subject_path, decision, proposal, final_value, reason,
             supplier_normalized, actor_company_id, actor_user_id
           ) values (
             ${actor.effectiveCompanyId}, ${draftId}::uuid,
             ${feedbackContext.run_id}::uuid, ${feedbackContext.engine_version},
             'line', ${`lines.${line.id}`},
-            ${normalizedProposal === null
-              ? "added"
-              : lineAccepted
-                ? "accepted"
-                : "corrected"},
+            ${feedback.decision},
             ${JSON.stringify(normalizedProposal)}::jsonb,
             ${JSON.stringify(finalLine)}::jsonb,
+            ${feedback.reason},
             ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
           )
         `);

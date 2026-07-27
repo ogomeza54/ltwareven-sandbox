@@ -69,17 +69,28 @@ export class PostgresInvoiceQualityRepository {
         this.database.execute(sql`
           select count(*)::int as feedback_events,
                  count(*) filter (where feedback.decision in ('accepted', 'corrected', 'added', 'removed'))::int as reviewed_events,
-                 count(*) filter (where feedback.decision in ('corrected', 'added', 'removed'))::int as corrected_events,
+                 count(*) filter (
+                   where feedback.decision in ('corrected', 'added', 'removed')
+                     and coalesce(feedback.reason, '') <> 'automatic_enrichment'
+                 )::int as corrected_events,
+                 count(*) filter (
+                   where feedback.reason = 'automatic_enrichment'
+                 )::int as automatic_enrichment_events,
                  count(*) filter (where feedback.decision = 'accepted')::int as accepted_events
           from invoice_feedback_events feedback
           where ${feedbackFilter}
         `),
         this.database.execute(sql`
-          select feedback.decision as key, count(*)::int as count
+          select case
+                   when feedback.reason = 'automatic_enrichment'
+                     then 'automatic enrichment'
+                   else feedback.decision
+                 end as key,
+                 count(*)::int as count
           from invoice_feedback_events feedback
           where ${feedbackFilter}
-          group by feedback.decision
-          order by feedback.decision
+          group by key
+          order by key
         `),
         this.database.execute(sql`
           select feedback.subject_type as key, count(*)::int as count
@@ -105,7 +116,13 @@ export class PostgresInvoiceQualityRepository {
                    select count(*) from invoice_feedback_events event
                    where event.company_id = run.company_id and event.run_id = run.id
                      and event.decision in ('corrected', 'added', 'removed')
+                     and coalesce(event.reason, '') <> 'automatic_enrichment'
                  )::int as corrected_events
+                 ,(
+                   select count(*) from invoice_feedback_events event
+                   where event.company_id = run.company_id and event.run_id = run.id
+                     and event.reason = 'automatic_enrichment'
+                 )::int as automatic_enrichment_events
           from invoice_extraction_runs run
           join invoice_review_drafts draft
             on draft.company_id = run.company_id and draft.id = run.draft_id
@@ -114,16 +131,28 @@ export class PostgresInvoiceQualityRepository {
           left join invoice_documents document
             on document.company_id = draft.company_id and document.draft_id = draft.id
           where ${draftFilter}
+            and exists (
+              select 1 from invoice_feedback_events feedback
+              where feedback.company_id = run.company_id
+                and feedback.draft_id = run.draft_id
+                and ${feedbackFilter}
+            )
           order by run.engine_version, run.created_at, run.id
         `),
         this.database.execute(sql`
           select draft.id as draft_id, draft.status,
                  header.final_values ->> 'vendorName' as supplier,
                  run.engine_version,
-                 count(feedback.id)::int as feedback_events,
+                 count(feedback.id) filter (
+                   where feedback.decision in ('accepted', 'corrected', 'added', 'removed')
+                 )::int as reviewed_events,
                  count(feedback.id) filter (
                    where feedback.decision in ('corrected', 'added', 'removed')
+                     and coalesce(feedback.reason, '') <> 'automatic_enrichment'
                  )::int as corrected_events,
+                 count(feedback.id) filter (
+                   where feedback.reason = 'automatic_enrichment'
+                 )::int as automatic_enrichment_events,
                  case when draft.status in ('confirmed', 'rejected', 'canceled')
                    then greatest(extract(epoch from (draft.updated_at - draft.created_at)), 0)
                    else null end as review_seconds,
@@ -143,9 +172,7 @@ export class PostgresInvoiceQualityRepository {
               : sql``}
           where ${draftFilter}
           group by draft.id, header.final_values, run.engine_version
-          having ${filters.subjectType || filters.decision
-            ? sql`count(feedback.id) > 0`
-            : sql`true`}
+          having count(feedback.id) > 0
           order by draft.updated_at desc, draft.id desc
           limit ${filters.limit} offset ${filters.offset}
         `),
@@ -155,23 +182,29 @@ export class PostgresInvoiceQualityRepository {
       feedback_events: number;
       reviewed_events: number;
       corrected_events: number;
+      automatic_enrichment_events: number;
       accepted_events: number;
     }>(feedbackTotalsResult)[0] ?? {
       feedback_events: 0,
       reviewed_events: 0,
       corrected_events: 0,
+      automatic_enrichment_events: 0,
       accepted_events: 0,
     };
     const reviewedEvents = integer(feedbackTotals.reviewed_events);
     const correctedEvents = integer(feedbackTotals.corrected_events);
+    const automaticEnrichmentEvents = integer(
+      feedbackTotals.automatic_enrichment_events,
+    );
     const acceptedEvents = integer(feedbackTotals.accepted_events);
     const cases = rows<{
       draft_id: string;
       status: string;
       supplier: string | null;
       engine_version: string | null;
-      feedback_events: number;
+      reviewed_events: number;
       corrected_events: number;
+      automatic_enrichment_events: number;
       review_seconds: string | null;
       updated_at: Date | string;
     }>(casesResult);
@@ -187,6 +220,7 @@ export class PostgresInvoiceQualityRepository {
       pages: number;
       reviewed_events: number;
       corrected_events: number;
+      automatic_enrichment_events: number;
     }>(runResult);
     const engines = Array.from(engineRows.reduce((map, item) => {
       const current = map.get(item.engine_version) ?? {
@@ -197,7 +231,9 @@ export class PostgresInvoiceQualityRepository {
         pages: 0,
         reviewedEvents: 0,
         correctedEvents: 0,
+        automaticEnrichmentEvents: 0,
         correctionRate: null as number | null,
+        automaticEnrichmentRate: null as number | null,
       };
       current.runs += 1;
       current.failedRuns += item.status === "failed" ? 1 : 0;
@@ -205,6 +241,9 @@ export class PostgresInvoiceQualityRepository {
       current.pages += integer(item.pages);
       current.reviewedEvents += integer(item.reviewed_events);
       current.correctedEvents += integer(item.corrected_events);
+      current.automaticEnrichmentEvents += integer(
+        item.automatic_enrichment_events,
+      );
       map.set(item.engine_version, current);
       return map;
     }, new Map<string, {
@@ -215,10 +254,16 @@ export class PostgresInvoiceQualityRepository {
       pages: number;
       reviewedEvents: number;
       correctedEvents: number;
+      automaticEnrichmentEvents: number;
       correctionRate: number | null;
+      automaticEnrichmentRate: number | null;
     }>()).values()).map((item) => ({
       ...item,
       correctionRate: rate(item.correctedEvents, item.reviewedEvents),
+      automaticEnrichmentRate: rate(
+        item.automaticEnrichmentEvents,
+        item.reviewedEvents,
+      ),
     }));
 
     return invoiceQualityDashboardSchema.parse({
@@ -233,8 +278,10 @@ export class PostgresInvoiceQualityRepository {
         feedbackEvents: integer(feedbackTotals.feedback_events),
         reviewedEvents,
         correctedEvents,
+        automaticEnrichmentEvents,
         acceptedEvents,
         correctionRate: rate(correctedEvents, denominator),
+        automaticEnrichmentRate: rate(automaticEnrichmentEvents, denominator),
         acceptanceRate: rate(acceptedEvents, denominator),
         averageReviewSeconds:
           terminalReviewSeconds.length === 0
@@ -266,8 +313,11 @@ export class PostgresInvoiceQualityRepository {
         status: item.status,
         supplier: item.supplier,
         engineVersion: item.engine_version,
-        feedbackEvents: integer(item.feedback_events),
+        reviewedEvents: integer(item.reviewed_events),
         correctedEvents: integer(item.corrected_events),
+        automaticEnrichmentEvents: integer(
+          item.automatic_enrichment_events,
+        ),
         reviewSeconds: decimal(item.review_seconds),
         updatedAt: new Date(item.updated_at).toISOString(),
       })),
