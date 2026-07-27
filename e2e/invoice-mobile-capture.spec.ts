@@ -874,7 +874,7 @@ test("manual receiving remains submit-capable without invoice capture", async ({
   expect(state.intakeSubmissions).toBe(1);
 });
 
-test("AI extraction is polled and stops at a human review result without stock writes", async ({
+test("AI extraction populates the existing intake form without stock writes", async ({
   page,
 }) => {
   const state = await mockApplication(page);
@@ -895,53 +895,21 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(progress).toContainText("1.8 s");
   await expect(progress).toContainText("Total");
   await expect(progress).toContainText("2.0 s");
-  await expect(page.getByRole("region", { name: "Invoice review workspace" })).toBeVisible();
-  await expect(page.getByText(/AI proposed: Test Vendor/)).toBeVisible();
-  const vendor = page.getByLabel("Vendor / Supplier", { exact: true });
-  await vendor.fill("Corrected Vendor");
-  await vendor.blur();
-  await expect.poll(() => state.reviewSaves).toBeGreaterThan(0);
-  expect(state.reviewHeader.vendorName).toBe("Corrected Vendor");
-  await expect(page.getByText("Not linked to stock")).toBeVisible();
-  await page.getByRole("button", { name: "Prepare new part" }).click();
-  await expect(page.getByLabel("New part name")).toBeVisible();
-  await page.getByLabel("New part reference").fill("NEW-BP-1");
-  await page.getByRole("button", { name: "Save new-part proposal" }).click();
-  await expect(page.getByText("New stock part will be created")).toBeVisible();
-  await expect(page.getByLabel("New part name")).toHaveCount(0);
-  await page.getByRole("button", { name: "Edit new part" }).click();
-  await expect(page.getByLabel("New part reference")).toHaveValue("NEW-BP-1");
-  await page.getByRole("button", { name: "Find matches" }).click();
-  await expect(page.getByText("Score 95/100")).toBeVisible();
-  await page.getByRole("button", { name: "Select" }).click();
-  await expect(page.getByText("Linked to existing stock")).toBeVisible();
-  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
-  await expect(page.getByLabel("New part name")).toHaveCount(0);
-  expect(state.selectedPartId).toBe(
-    "00000000-0000-4000-8000-000000000030",
-  );
-  await page.getByLabel("Reject reason").fill("Document is not a supplier invoice");
-  await page.getByRole("button", { name: "Reject invoice" }).click();
-  await expect(page.getByText("Rejected: Document is not a supplier invoice")).toBeVisible();
-  expect(state.reviewDecision).toBe("rejected");
-  expect(state.intakeSubmissions).toBe(0);
-
-  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
-    name: "replacement-invoice.png",
-    mimeType: "image/png",
-    buffer: png,
-  });
-  await page.getByRole("button", { name: /Use document/ }).click();
-  await expect(page.getByText("replacement-invoice.png saved.")).toBeVisible();
   await expect(
-    page.getByText("Rejected: Document is not a supplier invoice"),
+    page.getByRole("region", { name: "Invoice review workspace" }),
   ).toHaveCount(0);
-  expect(state.draftCreations).toBe(1);
-  expect(state.freshDraftAssets).toEqual(["replacement-invoice.png"]);
-  await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
+  await expect(page.getByText(/Invoice scanned · 1 line detected/)).toBeVisible();
+  const vendor = page.getByLabel("Vendor / Supplier *", { exact: true });
+  await expect(vendor).toHaveValue("Test Vendor");
+  await vendor.fill("Corrected Vendor");
+  await expect(vendor).toHaveValue("Corrected Vendor");
+  await expect(page.getByText("New stock part — verify its name and reference")).toBeVisible();
+  expect(state.intakeSubmissions).toBe(0);
+  expect(state.stockConfirmations).toBe(0);
+  await expect(page.getByRole("button", { name: "Confirm & Update Stock" })).toBeVisible();
 });
 
-test("an exact stock reference is linked automatically but still requires line approval", async ({
+test("an exact stock reference is linked automatically but still waits for final confirmation", async ({
   page,
 }) => {
   const state = await mockApplication(page);
@@ -950,9 +918,11 @@ test("an exact stock reference is linked automatically but still requires line a
 
   await openReceiveInventory(page);
   await expect(
-    page.getByText("Automatically matched — approval required"),
+    page.getByText("Matched to existing stock"),
   ).toBeVisible();
-  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  await expect(page.getByLabel("Part or item name")).toHaveValue(
+    "Brake Pad Catalog",
+  );
   await expect.poll(() => state.selectedPartId).toBe(
     "00000000-0000-4000-8000-000000000030",
   );
@@ -967,7 +937,7 @@ test("a reviewed invoice can be discarded and replaced without changing stock", 
   await openReceiveInventory(page);
   await page.getByRole("button", { name: "Analyze invoice" }).click();
   await expect(
-    page.getByRole("region", { name: "Invoice review workspace" }),
+    page.getByText(/Invoice scanned · 1 line detected/),
   ).toBeVisible({ timeout: 8_000 });
 
   page.once("dialog", async (dialog) => {
@@ -1001,7 +971,7 @@ test("a reviewed invoice can be discarded and replaced without changing stock", 
   expect(state.draftCreations).toBe(1);
 });
 
-test("an approved unknown line is identified before final confirmation", async ({
+test("an unknown line classification is highlighted inline", async ({
   page,
 }) => {
   const state = await mockApplication(page);
@@ -1015,28 +985,12 @@ test("an approved unknown line is identified before final confirmation", async (
   state.selectedPartId = "00000000-0000-4000-8000-000000000030";
 
   await openReceiveInventory(page);
-  const type = page.getByLabel("Type");
-  await expect(type).toHaveValue("unknown");
   await expect(
-    page.getByText(
-      "Choose Inventory or Consumable before final confirmation.",
-    ),
+    page.getByText("Choose Inventory or Consumable for this line."),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Inventory", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Prepare confirmation summary" }),
-  ).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Review line issues" }).click();
-  await expect(type).toBeFocused();
-  await type.selectOption("inventory");
-  await type.blur();
-  await expect.poll(() => state.lineClassification).toBe("inventory");
-  await page.getByRole("button", { name: "Approve lines & totals" }).click();
-  await expect(page.locator("#receive-inventory-vendor")).toHaveValue(
-    "Test Vendor",
-  );
-  await expect(
-    page.getByRole("button", { name: "Prepare confirmation summary" }),
+    page.getByText("Choose Inventory or Consumable for this line."),
   ).toHaveCount(0);
 });
 
@@ -1044,71 +998,23 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   page,
 }) => {
   const state = await mockApplication(page);
+  state.lineVendorPartNumber = "BP-100";
   await openReceiveInventory(page);
   await page.getByRole("button", { name: "Analyze invoice" }).click();
   await expect(
-    page.getByRole("region", { name: "Invoice review workspace" }),
+    page.getByText(/Invoice scanned · 1 line detected/),
   ).toBeVisible({ timeout: 8_000 });
-
-  await page.locator("#invoice-review-invoiceNumber").fill("INV-E2E-1");
-  await page.locator("#invoice-review-invoiceNumber").blur();
-  await page.locator("#invoice-review-invoiceDate").fill("2026-07-23");
-  await page.locator("#invoice-review-invoiceDate").blur();
-  await page.locator("#invoice-review-total").fill("100.00");
-  await page.locator("#invoice-review-total").blur();
-  await expect.poll(() => state.reviewedFields.includes("total")).toBe(true);
-  await page.getByRole("button", { name: "Approve header" }).click();
-  await expect.poll(() => state.reviewDecision).toBe("approved");
-  await expect(
-    page.getByRole("button", { name: "Header approved" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText(
-      "Header approved. Next: approve the invoice lines and totals.",
-    ),
-  ).toBeVisible();
-
-  await page.getByLabel("Unit cost").fill("50");
-  await page.getByLabel("Unit cost").blur();
-  await expect.poll(() => state.lineUnitCost).toBe("50");
-  await page.getByRole("button", { name: "Approve lines & totals" }).click();
-  const invoiceLine = page.getByRole("article", { name: "Invoice line 1" });
-  const resolutionError = invoiceLine.getByRole("alert");
-  await expect(resolutionError).toContainText(
-    "This invoice line is not linked to stock",
-  );
-  await expect(resolutionError).toContainText("Brake pad");
-  await expect(resolutionError).toBeFocused();
-  expect(state.lineDecision).toBe("draft");
-
-  await page.getByRole("button", { name: "Find matches" }).click();
-  await page.getByRole("button", { name: "Select" }).click();
-  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
-  await expect(resolutionError).toHaveCount(0);
-  await page.getByRole("button", { name: "Approve lines & totals" }).click();
-  await expect.poll(() => state.lineDecision).toBe("approved");
-  await expect(
-    page.getByRole("button", { name: "Prepare confirmation summary" }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByLabel("Invoice confirmation summary"),
-  ).toContainText("100.00 USD");
-  await expect(
-    page.getByText(
-      "Summary ready. Review these values, then confirm to update stock.",
-    ),
-  ).toBeVisible();
+  await expect(page.getByText("Matched to existing stock")).toBeVisible();
   await expect(page.locator("#receive-inventory-vendor")).toHaveValue(
     "Test Vendor",
   );
-  await expect(page.locator("#receive-inventory-vendor")).toBeInViewport();
-  await expect(
-    page.locator("#receive-inventory-invoice-number"),
-  ).toHaveValue("INV-E2E-1");
+  await page.locator("#receive-inventory-invoice-number").fill("INV-E2E-1");
+  await page.locator("#receive-inventory-total").fill("100.00");
   await expect(page.getByLabel("Part or item name")).toHaveValue(
     "Brake Pad Catalog",
   );
   await expect(page.getByLabel("Part number")).toHaveValue("BP-100");
+  await page.getByLabel("Lot price").fill("100.00");
   await expect(page.getByLabel("Lot price")).toHaveValue("100.00");
   await expect(page.locator("#receive-inventory-tax")).toHaveValue("0.00");
   await expect(page.locator("#receive-inventory-total")).toHaveValue("100.00");

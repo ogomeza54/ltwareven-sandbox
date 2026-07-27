@@ -12,13 +12,26 @@ import {
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
 import { InvoiceSourceUpload } from "@/features/invoice-extraction/invoice-source-upload";
-import { confirmInvoiceIntent } from "@/features/invoice-extraction/invoice-source-api";
-import type { InvoiceConfirmationIntentDto } from "@shared/invoice-extraction/contracts";
+import {
+  confirmInvoiceIntent,
+  createInvoiceConfirmationIntent,
+  overrideInvoiceDuplicate,
+  updateInvoiceHeaderReview,
+  updateInvoiceLineMatches,
+  updateInvoiceLinesReview,
+} from "@/features/invoice-extraction/invoice-source-api";
+import type {
+  InvoiceConfirmationIntentDto,
+  InvoiceHeaderField,
+  InvoiceReviewWorkspaceDto,
+} from "@shared/invoice-extraction/contracts";
 
 type ItemType = "inventory" | "consumable";
 
 interface LineItem {
   id: string;
+  reviewLineId?: string;
+  classificationNeedsReview?: boolean;
   partId?: string;
   partNameSnapshot: string;
   partNumberSnapshot: string;
@@ -79,6 +92,17 @@ function getReconciliation(subtotal: number, tax: number, delivery: number, tota
   return "warning";
 }
 
+const allInvoiceHeaderFields: readonly InvoiceHeaderField[] = [
+  "vendorName",
+  "invoiceNumber",
+  "invoiceDate",
+  "currency",
+  "subtotal",
+  "tax",
+  "freight",
+  "total",
+];
+
 export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInventoryModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -95,7 +119,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
   const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
+  const [aiReviewWorkspace, setAiReviewWorkspace] =
+    useState<InvoiceReviewWorkspaceDto | null>(null);
   const [invoiceSourceSession, setInvoiceSourceSession] = useState(0);
+  const confirmationKeyRef = useRef<string | null>(null);
+  const [duplicateReason, setDuplicateReason] = useState("");
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -107,6 +135,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const deliveryNum = parseFloat(deliveryFee) || 0;
   const calculatedTotal = subtotal + taxNum + deliveryNum;
   const reconciliation = getReconciliation(subtotal, taxNum, deliveryNum, totalAmount);
+  const aiIssueFor = (field: string) =>
+    aiReviewWorkspace?.issues.find(
+      (issue) => issue.path === `header.${field}`,
+    );
 
   // Get subgroups for a given groupId
   const getSubgroups = (groupId: string) => {
@@ -219,50 +251,72 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setPartSearch({});
     setSearchFocus(null);
     setPreparedInvoiceIntent(null);
+    setAiReviewWorkspace(null);
+    setDuplicateReason("");
+    confirmationKeyRef.current = null;
   };
 
-  const applyPreparedInvoice = useCallback(
-    (intent: InvoiceConfirmationIntentDto) => {
-      const mappedItems: LineItem[] = intent.summary.lines.map((line) => {
-        const existingPart =
-          line.resolution.kind === "existing"
-            ? (allParts as any[]).find(
-                (part: any) => part.id === line.resolution.partId,
-              )
-            : null;
-        const proposedPart =
-          line.resolution.kind === "new"
-            ? line.resolution.proposedPart
-            : null;
+  const applyAiReview = useCallback(
+    (workspace: InvoiceReviewWorkspaceDto) => {
+      const mappedItems: LineItem[] = workspace.lines.map((line) => {
+        const existingPart = line.match.selectedPart
+          ? (allParts as any[]).find(
+              (part: any) => part.id === line.match.selectedPart?.id,
+            )
+          : null;
+        const proposedPart = line.match.proposedNewPart;
+        const quantity = Number(line.quantity ?? "1") || 1;
+        const lineTotal =
+          line.calculatedLineTotal ??
+          ((Number(line.unitCost ?? "0") || 0) * quantity).toFixed(2);
         return {
-          id: `ai-${line.lineId}`,
-          partId:
-            line.resolution.kind === "existing"
-              ? line.resolution.partId
-              : undefined,
+          id: `ai-${line.id}`,
+          reviewLineId: line.id,
+          partId: line.match.selectedPart?.id,
           partNameSnapshot:
-            line.resolution.kind === "existing"
-              ? line.resolution.partName
-              : proposedPart?.name ?? line.description,
+            line.match.selectedPart?.name ??
+            proposedPart?.name ??
+            line.description ??
+            "",
           partNumberSnapshot:
-            line.partNumber || proposedPart?.partNumber || "",
-          itemType: line.itemType,
+            line.vendorPartNumber ||
+            proposedPart?.partNumber ||
+            line.match.selectedPart?.partNumber ||
+            "",
+          itemType:
+            line.classification === "consumable"
+              ? "consumable"
+              : proposedPart?.itemType ?? "inventory",
+          classificationNeedsReview: line.classification === "unknown",
           groupId:
             existingPart?.groupId || proposedPart?.groupId || undefined,
           subgroupId:
             existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
-          qty: Number(line.quantity),
-          lotPrice: line.lineTotal,
-          lineTotal: line.lineTotal,
+          qty: quantity,
+          lotPrice: lineTotal,
+          lineTotal,
         };
       });
-      setPreparedInvoiceIntent(intent);
-      setVendor(intent.summary.vendor);
-      setInvoiceNumber(intent.summary.invoiceNumber ?? "");
-      setInvoiceDate(intent.summary.invoiceDate ?? "");
-      setTaxAmount(intent.summary.tax);
-      setDeliveryFee(intent.summary.freight);
-      setTotalAmount(intent.summary.total);
+      setAiReviewWorkspace(workspace);
+      setPreparedInvoiceIntent(null);
+      setVendor(workspace.finalHeader.vendorName ?? "");
+      setInvoiceNumber(workspace.finalHeader.invoiceNumber ?? "");
+      setInvoiceDate(workspace.finalHeader.invoiceDate ?? todayValue());
+      setTaxAmount(
+        workspace.reconciliation.calculatedTax ??
+          workspace.finalHeader.tax ??
+          "0.00",
+      );
+      setDeliveryFee(
+        workspace.reconciliation.calculatedFreight ??
+          workspace.finalHeader.freight ??
+          "0.00",
+      );
+      setTotalAmount(
+        workspace.reconciliation.calculatedTotal ??
+          workspace.finalHeader.total ??
+          "",
+      );
       setItems(mappedItems);
       setPartSearch(
         Object.fromEntries(
@@ -337,9 +391,100 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   });
 
   const confirmPreparedMutation = useMutation({
-    mutationFn: async (intent: InvoiceConfirmationIntentDto) =>
-      confirmInvoiceIntent(intent),
-    onSuccess: () => {
+    mutationFn: async () => {
+      if (
+        preparedInvoiceIntent &&
+        preparedInvoiceIntent.duplicateStatus !== "suspected"
+      ) {
+        return confirmInvoiceIntent(preparedInvoiceIntent);
+      }
+      if (!aiReviewWorkspace) {
+        throw new Error("The AI invoice review is not ready.");
+      }
+      let current = await updateInvoiceHeaderReview(
+        aiReviewWorkspace,
+        {
+          vendorName: vendor.trim() || null,
+          invoiceNumber: invoiceNumber.trim() || null,
+          invoiceDate: invoiceDate || null,
+          currency: "USD",
+          subtotal: subtotal.toFixed(2),
+          tax: (taxNum || 0).toFixed(2),
+          freight: (deliveryNum || 0).toFixed(2),
+          total: (parseFloat(totalAmount) || calculatedTotal).toFixed(2),
+        },
+        allInvoiceHeaderFields,
+        "approved",
+      );
+      current = await updateInvoiceLinesReview(
+        current,
+        items.map((item) => ({
+          id: item.reviewLineId ?? null,
+          description: item.partNameSnapshot.trim() || null,
+          vendorPartNumber: item.partNumberSnapshot.trim() || null,
+          quantity: String(item.qty || 1),
+          unitCost: derivedPerUnit(item.lotPrice, item.qty),
+          classification: item.itemType,
+        })),
+        "approved",
+      );
+      const itemByReviewId = new Map(
+        items
+          .filter((item) => item.reviewLineId)
+          .map((item) => [item.reviewLineId!, item]),
+      );
+      current = await updateInvoiceLineMatches(
+        current,
+        current.lines.map((line, index) => {
+          const item = itemByReviewId.get(line.id) ?? items[index];
+          if (!item) throw new Error("An invoice line could not be resolved.");
+          if (item.partId) {
+            return {
+              lineId: line.id,
+              decision: "existing" as const,
+              selectedPartId: item.partId,
+              proposedNewPart: null,
+            };
+          }
+          if (!item.partNameSnapshot.trim() || !item.partNumberSnapshot.trim()) {
+            throw new Error(
+              `Choose an existing stock part or provide a name and reference for ${item.partNameSnapshot || "the unresolved line"}.`,
+            );
+          }
+          return {
+            lineId: line.id,
+            decision: "new" as const,
+            selectedPartId: null,
+            proposedNewPart: {
+              name: item.partNameSnapshot.trim(),
+              partNumber: item.partNumberSnapshot.trim(),
+              itemType: item.itemType,
+              category: null,
+              groupId: item.groupId ?? null,
+              subgroupId: item.subgroupId ?? null,
+            },
+          };
+        }),
+      );
+      confirmationKeyRef.current ??= globalThis.crypto.randomUUID();
+      const intent = await createInvoiceConfirmationIntent(
+        current,
+        confirmationKeyRef.current,
+      );
+      setPreparedInvoiceIntent(intent);
+      if (intent.duplicateStatus === "suspected") return intent;
+      return confirmInvoiceIntent(intent);
+    },
+    onSuccess: (intent) => {
+      if (intent.duplicateStatus === "suspected") {
+        toast({
+          title: "Possible duplicate",
+          description:
+            "This invoice may already have been received. Stock was not updated.",
+          variant: "destructive",
+        });
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
@@ -363,26 +508,47 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   });
 
   const handleSubmit = () => {
-    if (preparedInvoiceIntent) {
-      if (preparedInvoiceIntent.duplicateStatus === "suspected") {
-        toast({
-          title: "Possible duplicate",
-          description:
-            "Review or override the duplicate warning before updating stock.",
-          variant: "destructive",
-        });
-        return;
-      }
-      confirmPreparedMutation.mutate(preparedInvoiceIntent);
-      return;
-    }
     if (!vendor.trim()) {
       toast({ title: "Vendor required", description: "Please enter a vendor name.", variant: "destructive" });
+      vendorInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      vendorInputRef.current?.focus();
       return;
     }
     const filledItems = items.filter(i => i.partNameSnapshot.trim());
     if (filledItems.length === 0) {
       toast({ title: "Items required", description: "Add at least one line item.", variant: "destructive" });
+      return;
+    }
+    if (aiReviewWorkspace && reconciliation !== "matched") {
+      toast({
+        title: "Invoice totals need review",
+        description: "Correct the subtotal, tax, freight or invoice total before confirmation.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const classificationIssue = items.find(
+      (item) => item.classificationNeedsReview,
+    );
+    if (aiReviewWorkspace && classificationIssue) {
+      toast({
+        title: "Part type needs review",
+        description: `Choose Inventory or Consumable for ${classificationIssue.partNameSnapshot || "the highlighted line"}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (preparedInvoiceIntent?.duplicateStatus === "suspected") {
+      toast({
+        title: "Possible duplicate",
+        description:
+          "Review or override the duplicate warning before updating stock.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (aiReviewWorkspace || preparedInvoiceIntent) {
+      confirmPreparedMutation.mutate();
       return;
     }
     createMutation.mutate();
@@ -425,7 +591,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             key={invoiceSourceSession}
             open={open}
             onBusyChange={setInvoiceSourceBusy}
-            onConfirmationPrepared={applyPreparedInvoice}
+            onReviewReady={applyAiReview}
             onEnterManual={() => {
               vendorInputRef.current?.scrollIntoView({
                 block: "center",
@@ -435,18 +601,59 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             }}
           />
 
-          {preparedInvoiceIntent ? (
+          {aiReviewWorkspace ? (
             <div
               role="status"
               className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
             >
-              AI-reviewed invoice loaded below. Verify the traditional form,
-              then confirm once to update stock.
+              Invoice scanned · {items.length} line{items.length === 1 ? "" : "s"} detected. Review the highlighted stock links and edit any value directly below.
+            </div>
+          ) : null}
+
+          {preparedInvoiceIntent?.duplicateStatus === "suspected" ? (
+            <div className="space-y-2 rounded border border-destructive bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">
+                Possible duplicate invoice. Stock has not been updated.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                An administrator can provide a reason to confirm this receipt anyway.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  aria-label="Duplicate override reason"
+                  value={duplicateReason}
+                  onChange={(event) => setDuplicateReason(event.target.value)}
+                  placeholder="Reason for receiving this duplicate"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={duplicateReason.trim().length < 3}
+                  onClick={async () => {
+                    try {
+                      const overridden = await overrideInvoiceDuplicate(
+                        preparedInvoiceIntent,
+                        duplicateReason,
+                      );
+                      setPreparedInvoiceIntent(overridden);
+                    } catch (error) {
+                      toast({
+                        title: "Duplicate override failed",
+                        description:
+                          error instanceof Error ? error.message : "Try again.",
+                        variant: "destructive",
+                      });
+                    }
+                  }}
+                >
+                  Approve duplicate
+                </Button>
+              </div>
             </div>
           ) : null}
 
           <fieldset
-            disabled={Boolean(preparedInvoiceIntent)}
+            disabled={confirmPreparedMutation.isPending}
             className="contents disabled:opacity-80"
           >
           {/* Vendor — only field needed before entering items */}
@@ -458,8 +665,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               placeholder="e.g., FleetParts Wholesale"
               value={vendor}
               onChange={e => setVendor(e.target.value)}
-              className="text-foreground placeholder:text-foreground/50"
+              className={`text-foreground placeholder:text-foreground/50 ${aiIssueFor("vendorName") ? "border-amber-500" : ""}`}
             />
+            {aiIssueFor("vendorName") ? (
+              <p className="text-xs text-amber-500">
+                {aiIssueFor("vendorName")?.message}
+              </p>
+            ) : null}
           </div>
 
           {/* Line Items */}
@@ -523,7 +735,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
                             <button
                               type="button"
-                              onClick={() => updateItem(item.id, { itemType: "inventory" })}
+                              onClick={() => updateItem(item.id, { itemType: "inventory", classificationNeedsReview: false })}
                               aria-pressed={item.itemType === "inventory"}
                               className={`min-h-11 flex-1 px-1.5 py-1 transition-colors ${
                                 item.itemType === "inventory"
@@ -535,7 +747,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             </button>
                             <button
                               type="button"
-                              onClick={() => updateItem(item.id, { itemType: "consumable" })}
+                              onClick={() => updateItem(item.id, { itemType: "consumable", classificationNeedsReview: false })}
                               aria-pressed={item.itemType === "consumable"}
                               className={`min-h-11 flex-1 px-1.5 py-1 transition-colors border-l border-border ${
                                 item.itemType === "consumable"
@@ -546,6 +758,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               Consumable
                             </button>
                           </div>
+                          {item.classificationNeedsReview ? (
+                            <p className="text-xs text-amber-500" role="alert">
+                              Choose Inventory or Consumable for this line.
+                            </p>
+                          ) : null}
 
                           {/* Group dropdown */}
                           <select
@@ -600,6 +817,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 </button>
                               )}
                             </div>
+                            {aiReviewWorkspace ? (
+                              <p
+                                className={`mt-1 text-xs ${item.partId ? "text-green-500" : "text-amber-500"}`}
+                              >
+                                {item.partId
+                                  ? "Matched to existing stock"
+                                  : "New stock part — verify its name and reference"}
+                              </p>
+                            ) : null}
                             {showDropdown && (
                               <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg md:w-80">
                                 {/* Existing parts */}
@@ -746,8 +972,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                   placeholder="e.g., INV-2024-00821"
                   value={invoiceNumber}
                   onChange={e => setInvoiceNumber(e.target.value)}
-                  className="text-foreground placeholder:text-foreground/50"
+                  className={`text-foreground placeholder:text-foreground/50 ${aiIssueFor("invoiceNumber") ? "border-amber-500" : ""}`}
                 />
+                {aiIssueFor("invoiceNumber") ? (
+                  <p className="text-xs text-amber-500">
+                    {aiIssueFor("invoiceNumber")?.message}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-foreground font-medium">Invoice Date</Label>
@@ -850,7 +1081,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           >
             {confirmPreparedMutation.isPending
               ? "Confirming..."
-              : preparedInvoiceIntent
+              : preparedInvoiceIntent || aiReviewWorkspace
                 ? "Confirm & Update Stock"
                 : createMutation.isPending
               ? "Saving..."

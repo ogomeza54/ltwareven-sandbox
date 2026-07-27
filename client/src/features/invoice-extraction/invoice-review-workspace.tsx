@@ -89,15 +89,19 @@ function lineProblemTarget(
 interface Props {
   draftId: string;
   readOnly?: boolean;
+  headless?: boolean;
   onDraftChanged?: () => Promise<unknown>;
   onConfirmationPrepared?: (intent: InvoiceConfirmationIntentDto) => void;
+  onWorkspaceChanged?: (workspace: InvoiceReviewWorkspaceDto) => void;
 }
 
 export function InvoiceReviewWorkspace({
   draftId,
   readOnly = false,
+  headless = false,
   onDraftChanged,
   onConfirmationPrepared,
+  onWorkspaceChanged,
 }: Props) {
   const [workspace, setWorkspace] = useState<InvoiceReviewWorkspaceDto | null>(null);
   const workspaceRef = useRef<InvoiceReviewWorkspaceDto | null>(null);
@@ -185,6 +189,10 @@ export function InvoiceReviewWorkspace({
       onConfirmationPrepared?.(confirmationIntent);
     }
   }, [confirmationIntent, onConfirmationPrepared]);
+
+  useEffect(() => {
+    if (workspace) onWorkspaceChanged?.(workspace);
+  }, [onWorkspaceChanged, workspace]);
 
   const flush = async (
     decision: "draft" | "approved" = "draft",
@@ -612,8 +620,11 @@ export function InvoiceReviewWorkspace({
     return <p role="alert" className="text-sm text-destructive">{error}</p>;
   }
   if (!workspace || !header || !proposedSummary) {
-    return <p className="text-sm text-muted-foreground">Loading invoice review…</p>;
+    return headless ? null : (
+      <p className="text-sm text-muted-foreground">Loading invoice review…</p>
+    );
   }
+  if (headless) return null;
 
   return (
     <section className="space-y-4 rounded-lg border border-amber-500/40 p-3" aria-label="Invoice review workspace">

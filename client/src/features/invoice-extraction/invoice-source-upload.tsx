@@ -27,6 +27,7 @@ import {
 import type {
   InvoiceConfirmationIntentDto,
   InvoiceExtractionRunDto,
+  InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
 import { useInvoiceSources } from "./use-invoice-sources";
 import { InvoiceReviewWorkspace } from "./invoice-review-workspace";
@@ -45,6 +46,7 @@ interface InvoiceSourceUploadProps {
   onEnterManual: () => void;
   onBusyChange?: (busy: boolean) => void;
   onConfirmationPrepared?: (intent: InvoiceConfirmationIntentDto) => void;
+  onReviewReady?: (workspace: InvoiceReviewWorkspaceDto) => void;
 }
 
 export function InvoiceSourceUpload({
@@ -52,6 +54,7 @@ export function InvoiceSourceUpload({
   onEnterManual,
   onBusyChange,
   onConfirmationPrepared,
+  onReviewReady,
 }: InvoiceSourceUploadProps) {
   const { companyId } = useCompany();
   const {
@@ -360,8 +363,10 @@ export function InvoiceSourceUpload({
           key={draft.id}
           draftId={draft.id}
           readOnly={draft.status === "rejected"}
+          headless={Boolean(onReviewReady)}
           onDraftChanged={refresh}
           onConfirmationPrepared={onConfirmationPrepared}
+          onWorkspaceChanged={onReviewReady}
         />
       ) : null}
 
