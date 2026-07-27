@@ -4,12 +4,6 @@ import { AlertTriangle, CheckCircle2, FileText, LoaderCircle } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import type { PendingInvoiceCapture } from "./capture-quality";
 
-function formatBytes(bytes: number): string {
-  return bytes < 1024
-    ? `${bytes} B`
-    : `${(bytes / 1_048_576).toFixed(1)} MiB`;
-}
-
 interface InvoiceCapturePreviewProps {
   capture: PendingInvoiceCapture;
   uploading: boolean;
@@ -92,13 +86,13 @@ function LocalPdfPreview({ file }: { file: File }) {
       {status === "loading" ? (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
-          Rendering PDF preview…
+          Preparing preview…
         </div>
       ) : null}
       <canvas
         ref={canvas}
         role="img"
-        aria-label="Local preview of the first PDF page"
+        aria-label="Preview of the first invoice page"
         className={`max-h-72 max-w-full object-contain shadow-lg ${
           status === "ready" ? "block" : "hidden"
         }`}
@@ -111,7 +105,7 @@ function LocalPdfPreview({ file }: { file: File }) {
       {status === "failed" ? (
         <div className="flex flex-col items-center gap-2 px-3 text-center text-sm text-muted-foreground">
           <FileText className="h-12 w-12" aria-hidden="true" />
-          <span>The PDF preview could not be rendered locally.</span>
+          <span>We could not show a preview of this document.</span>
         </div>
       ) : null}
     </div>
@@ -168,16 +162,13 @@ export const InvoiceCapturePreview = forwardRef<
             {capture.file.name || "invoice-source"}
           </p>
           <p className="text-sm text-muted-foreground">
-            {formatBytes(capture.file.size)}
-            {quality.status === "available"
-              ? quality.pages
-                ? ` · ${quality.pages.length} ${quality.pages.length === 1 ? "page" : "pages"} checked`
-                : ` · ${quality.width} × ${quality.height} pixels`
-              : ""}
+            {quality.status === "available" && quality.pages
+              ? `${quality.pages.length} ${quality.pages.length === 1 ? "page" : "pages"} ready to review`
+              : "Ready to review"}
           </p>
           {quality.status === "checking" ? (
             <p role="status" className="text-sm text-muted-foreground">
-              Checking document quality…
+              Checking that the invoice is clear…
             </p>
           ) : quality.status === "unavailable" ? (
             <div role="status" className="flex gap-2 text-sm text-amber-500">
@@ -201,15 +192,15 @@ export const InvoiceCapturePreview = forwardRef<
             <p role="status" className="flex gap-2 text-sm text-foreground">
               <CheckCircle2 className="h-4 w-4 text-green-500" aria-hidden="true" />
               {quality.pages
-                ? `No obvious quality problems were found across ${quality.pages.length} PDF ${quality.pages.length === 1 ? "page" : "pages"}.`
-                : "No obvious image-quality problems were found."}
+                ? `${quality.pages.length} ${quality.pages.length === 1 ? "page looks" : "pages look"} clear and readable.`
+                : "The invoice looks clear and readable."}
             </p>
           )}
         </div>
       </div>
 
       <fieldset className="rounded border border-border p-3 text-sm">
-        <legend className="px-1 font-medium">Complete review before upload</legend>
+        <legend className="px-1 font-medium">Before continuing</legend>
         <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
           <li>All invoice edges and text are visible.</li>
           <li>The document is upright and readable.</li>
@@ -235,8 +226,8 @@ export const InvoiceCapturePreview = forwardRef<
             : retrying
               ? "Retry upload"
             : requiresReview
-              ? "Use document anyway"
-              : "Use document"}
+              ? "Continue anyway"
+              : "Continue"}
         </Button>
       </div>
     </div>

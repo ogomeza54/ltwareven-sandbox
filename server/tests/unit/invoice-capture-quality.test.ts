@@ -89,7 +89,7 @@ test("PDF quality analysis reports a browser fallback outside the DOM", async ()
   assert.deepEqual(result, {
     status: "unavailable",
     reason:
-      "This browser cannot check PDF page quality locally. You can still upload the original.",
+      "This browser cannot check every page automatically. Review the preview before continuing.",
   });
 });
 

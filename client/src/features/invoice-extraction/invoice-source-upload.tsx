@@ -45,11 +45,6 @@ import {
   invoiceExtractionTiming,
 } from "./extraction-timing";
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1_048_576).toFixed(1)} MiB`;
-}
-
 interface InvoiceSourceUploadProps {
   open: boolean;
   onEnterManual: () => void;
@@ -250,7 +245,7 @@ export function InvoiceSourceUpload({
     setLocalError(null);
     setUploadFailed(false);
     if (file.size > 10_485_760) {
-      setLocalError("Each invoice file must be 10 MiB or smaller.");
+      setLocalError("This file is too large. Choose one smaller than 10 MB.");
       return;
     }
     if (atLimit && !replacementAsset) {
@@ -406,7 +401,7 @@ export function InvoiceSourceUpload({
           className="flex items-center gap-1.5 font-medium text-foreground"
         >
           <Camera className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          Invoice Photo
+          Scan invoice
         </Label>
         <Button
           type="button"
@@ -418,16 +413,16 @@ export function InvoiceSourceUpload({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Optional. JPEG, PNG, HEIC/HEIF or PDF; 10 MiB per file; up to 10
-        ordered pages/photos. The original is uploaded only after your review.
+        Take clear photos of the full invoice or choose a document. You can add
+        up to 10 pages.
       </p>
       {assets.length > 0 ? (
         <div className="rounded border border-border p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-foreground">AI-assisted invoice reading</p>
+              <p className="text-sm font-medium text-foreground">Reading your invoice</p>
               <p className="text-xs text-muted-foreground">
-                The result is always reviewed before any stock update.
+                We will fill in the details below for you to check.
               </p>
             </div>
             <Button
@@ -438,10 +433,10 @@ export function InvoiceSourceUpload({
             >
               <WandSparkles className="mr-2 h-4 w-4" aria-hidden="true" />
               {extractionBusy
-                ? "Analyzing…"
+                ? "Reading…"
                 : extraction?.status === "failed"
-                  ? "Retry analysis"
-                  : "Analyze invoice"}
+                  ? "Try again"
+                  : "Read invoice"}
             </Button>
           </div>
           {extraction ? (
@@ -451,21 +446,21 @@ export function InvoiceSourceUpload({
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className="flex items-center gap-1.5 font-medium">
                       <Clock3 className="h-4 w-4 text-amber-500" aria-hidden="true" />
-                      {extraction.status === "completed" ? "AI processing completed" : "AI processing"}
+                      {extraction.status === "completed" ? "Invoice ready" : "Reading invoice"}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {formatExtractionSeconds(extractionProgress.elapsedMs)} elapsed
+                      {formatExtractionSeconds(extractionProgress.elapsedMs)}
                       {extractionProgress.estimatedRemainingMs !== null && extraction.status !== "completed"
-                        ? ` · about ${Math.max(1, Math.ceil(extractionProgress.estimatedRemainingMs / 1000))} s remaining`
+                          ? ` · about ${Math.max(1, Math.ceil(extractionProgress.estimatedRemainingMs / 1000))} seconds left`
                         : extraction.status === "processing" || extraction.status === "queued"
-                          ? " · finishing…"
+                          ? " · almost done…"
                           : ""}
                     </span>
                   </div>
                   <div
                     className="h-2 overflow-hidden rounded-full bg-slate-800"
                     role="progressbar"
-                    aria-label="AI processing progress"
+                    aria-label="Invoice reading progress"
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={extractionProgress.percent}
@@ -481,12 +476,12 @@ export function InvoiceSourceUpload({
                   </div>
                   {extraction.status === "completed" && extraction.proposal ? (
                     <p className="text-xs text-emerald-400">
-                      {extraction.proposal.lines.length} line items ready for review.
+                      {extraction.proposal.lines.length} items found. Check them below.
                     </p>
                   ) : null}
                   {extraction.status === "failed" ? (
                     <p className="text-xs text-red-400">
-                      Analysis failed. No inventory was changed; retry or enter the invoice manually.
+                      We could not read this invoice. Try again or enter it manually. Stock was not changed.
                     </p>
                   ) : null}
                 </div>
@@ -544,13 +539,13 @@ export function InvoiceSourceUpload({
           }`}
         >
           <Upload className="h-4 w-4" aria-hidden="true" />
-          Choose file
+          Choose invoice
           <input
             ref={fileInput}
             type="file"
             disabled={blocked}
             accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf"
-            aria-label="Choose invoice image or PDF"
+            aria-label="Choose an invoice document"
             className="absolute inset-0 cursor-pointer opacity-0"
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -586,8 +581,7 @@ export function InvoiceSourceUpload({
           className="flex flex-wrap items-center justify-between gap-2 rounded border border-border p-2 text-sm text-muted-foreground"
         >
           <p>
-            The saved page {replacementAsset.position ?? ""} remains available
-            until its replacement is uploaded successfully.
+            The current page will stay in place until the replacement is ready.
           </p>
           <Button
             type="button"
@@ -610,7 +604,7 @@ export function InvoiceSourceUpload({
       >
         {loading ? (
           <p className="text-sm text-muted-foreground">
-            Restoring saved invoice sources…
+            Loading your invoice…
           </p>
         ) : null}
         {assets.map((asset, index) => {
@@ -619,7 +613,7 @@ export function InvoiceSourceUpload({
             <article
               key={asset.id}
               className="grid gap-3 rounded border border-border p-3 text-sm sm:grid-cols-[5rem_minmax(0,1fr)_auto]"
-              aria-label={`Saved page ${index + 1}: ${asset.displayName}`}
+              aria-label={`Invoice document ${index + 1}: ${asset.displayName}`}
             >
               <div className="flex h-20 items-center justify-center overflow-hidden rounded bg-muted">
                 {asset.state === "Saved" && isImage && draft ? (
@@ -637,13 +631,12 @@ export function InvoiceSourceUpload({
               <div className="min-w-0">
                 <p className="break-words text-foreground">{asset.displayName}</p>
                 <p className="text-xs text-muted-foreground">
-                  {asset.detectedType ?? "Validating type"} ·{" "}
-                  {asset.byteSize
-                    ? formatBytes(asset.byteSize)
-                    : "Validating size"}{" "}
-                  · {asset.pageCount ?? "Validating"}{" "}
-                  {asset.pageCount === 1 ? "page" : "pages"} · position{" "}
-                  {asset.position ?? index + 1} of {assets.length} · {asset.state}
+                  {asset.pageCount
+                    ? `${asset.pageCount} ${asset.pageCount === 1 ? "page" : "pages"} ready`
+                    : "Checking document…"}
+                  {assets.length > 1
+                    ? ` · Document ${index + 1} of ${assets.length}`
+                    : ""}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1">
@@ -709,15 +702,16 @@ export function InvoiceSourceUpload({
             key={`${name}-${index}`}
             className="rounded border border-dashed border-border px-3 py-2 text-sm text-muted-foreground"
           >
-            {name} · Uploading
+            Adding {name}…
           </div>
         ))}
         {status ? <p role="status" className="text-sm">{status}</p> : null}
       </div>
 
       <p className="text-xs text-muted-foreground">
-        {totalPages} of 10 pages saved. Saved pages resume from private storage;
-        a selected local file is available only in this tab until upload succeeds.
+        {totalPages
+          ? `${totalPages} ${totalPages === 1 ? "page" : "pages"} added. You can add up to 10.`
+          : "Add up to 10 photos or pages."}
       </p>
       {localError || error ? (
         <p role="alert" className="text-sm text-destructive">

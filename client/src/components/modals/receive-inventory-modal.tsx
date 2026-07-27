@@ -659,7 +659,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             Receive Inventory
           </DialogTitle>
           <DialogDescription className="text-foreground/70">
-            Enter vendor invoice details and line items. Part quantities will be updated on save.
+            Scan an invoice or enter it manually. Check the details before updating stock.
           </DialogDescription>
         </DialogHeader>
 
@@ -683,7 +683,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               role="status"
               className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
             >
-              Invoice scanned · {items.length} line{items.length === 1 ? "" : "s"} detected. Review stock links and financial adjustments, then edit any value directly below.
+              Invoice ready · {items.length} item{items.length === 1 ? "" : "s"} found. Check the details below before updating stock.
             </div>
           ) : null}
 
@@ -739,7 +739,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           >
           {/* Vendor — only field needed before entering items */}
           <div className="max-w-sm space-y-1.5">
-            <Label htmlFor="receive-inventory-vendor" className="text-foreground font-medium">Vendor / Supplier *</Label>
+            <Label htmlFor="receive-inventory-vendor" className="text-foreground font-medium">Supplier *</Label>
             <Input
               ref={vendorInputRef}
               id="receive-inventory-vendor"
@@ -758,13 +758,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           {/* Line Items */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-foreground">Line Items</h3>
+              <h3 className="font-semibold text-foreground">Parts on this invoice</h3>
               <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={addItem}>
-                <Plus className="h-4 w-4 mr-1" /> Add Item
+                <Plus className="h-4 w-4 mr-1" /> Add part
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Select a category and subgroup to scope the item search. Search to link to an existing part, or type a new name to auto-create it on save.
+              Check each part and make sure it is linked to the correct stock item.
             </p>
 
             <div className="rounded-lg border">
@@ -772,13 +772,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 <thead className="hidden bg-muted/50 md:table-header-group">
                   <tr>
                     <th className="text-left px-2 py-2 text-foreground font-medium w-6" title="Linked to catalog part" />
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-52">Type & Category</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-24">Part #</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-16">Qty</th>
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-28">Lot Price</th>
-                    <th className="text-right px-3 py-2 text-foreground font-medium w-24">Line Total</th>
-                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Per-unit cost after proportional tax and freight allocation">Landed / unit</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-52">Stock type</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium">Part</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-24">Part number</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-16">Quantity</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-28">Invoice price</th>
+                    <th className="text-right px-3 py-2 text-foreground font-medium w-24">Total</th>
+                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Cost per unit including tax, delivery and other invoice charges">Final cost / unit</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -1062,7 +1062,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
                         {/* Landed Cost */}
                         <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
-                          <span className="font-medium text-amber-500 md:hidden">Landed / unit</span>
+                          <span className="font-medium text-amber-500 md:hidden">Final cost / unit</span>
                           {item.itemType === "adjustment" ? (
                             <span className="text-muted-foreground">—</span>
                           ) : item.partNameSnapshot.trim() ? (
@@ -1089,7 +1089,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Landed / unit = (stock line total + proportional tax, freight and financial adjustments) ÷ quantity. Adjustment lines never change stock.
+              Final cost includes the part price, tax, delivery and other invoice charges. Charges and credits do not change stock quantities.
             </p>
           </div>
 

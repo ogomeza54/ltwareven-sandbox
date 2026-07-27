@@ -126,7 +126,7 @@ export function useInvoiceSources(open: boolean) {
       return null;
     }
     if (file.size > 10_485_760) {
-      setError("Each invoice file must be 10 MiB or smaller.");
+      setError("This file is too large. Choose one smaller than 10 MB.");
       return null;
     }
     try {

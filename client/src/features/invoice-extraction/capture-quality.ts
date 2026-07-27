@@ -191,7 +191,7 @@ async function analyzePdfFile(file: File): Promise<CaptureQualityResult> {
   if (typeof document === "undefined") {
     return {
       status: "unavailable",
-      reason: "This browser cannot check PDF page quality locally. You can still upload the original.",
+      reason: "This browser cannot check every page automatically. Review the preview before continuing.",
     };
   }
 
@@ -212,7 +212,7 @@ async function analyzePdfFile(file: File): Promise<CaptureQualityResult> {
     if (pdf.numPages > 10) {
       return {
         status: "unavailable",
-        reason: "This PDF has more than 10 pages. Select a document with no more than 10 pages.",
+        reason: "This invoice has more than 10 pages. Choose a document with no more than 10 pages.",
       };
     }
 
@@ -292,7 +292,7 @@ async function analyzePdfFile(file: File): Promise<CaptureQualityResult> {
     return {
       status: "unavailable",
       reason:
-        "PDF quality checks could not be completed locally. Review every rendered page before upload.",
+        "We could not check every page automatically. Review each page before continuing.",
     };
   } finally {
     await pdf?.destroy();
