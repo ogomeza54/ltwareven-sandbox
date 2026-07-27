@@ -124,6 +124,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const vendorInputRef = useRef<HTMLInputElement>(null);
   const duplicateWarningRef = useRef<HTMLDivElement>(null);
   const duplicateReasonInputRef = useRef<HTMLInputElement>(null);
+  const partNumberInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
   const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
@@ -132,6 +133,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [invoiceSourceSession, setInvoiceSourceSession] = useState(0);
   const confirmationKeyRef = useRef<string | null>(null);
   const [duplicateReason, setDuplicateReason] = useState("");
+  const [lineReferenceErrors, setLineReferenceErrors] = useState<Record<string, string>>({});
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -250,6 +252,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       };
     }));
     setPartSearch(prev => ({ ...prev, [itemId]: part.name }));
+    setLineReferenceErrors((previous) => {
+      const next = { ...previous };
+      delete next[itemId];
+      return next;
+    });
     setSearchFocus(null);
   };
 
@@ -287,6 +294,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setPreparedInvoiceIntent(null);
     setAiReviewWorkspace(null);
     setDuplicateReason("");
+    setLineReferenceErrors({});
     confirmationKeyRef.current = null;
   };
 
@@ -361,6 +369,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           "",
       );
       setItems(mappedItems);
+      setLineReferenceErrors({});
       setPartSearch(
         Object.fromEntries(
           mappedItems.map((item) => [item.id, item.partNameSnapshot]),
@@ -504,7 +513,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             }
             if (!item.partNameSnapshot.trim() || !item.partNumberSnapshot.trim()) {
               throw new Error(
-                `Choose an existing stock part or provide a name and reference for ${item.partNameSnapshot || "the unresolved line"}.`,
+                `Enter a part number for ${item.partNameSnapshot || "this new stock item"} before confirming.`,
               );
             }
             return {
@@ -610,6 +619,28 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       toast({
         title: "Part type needs review",
         description: `Choose Inventory or Consumable for ${classificationIssue.partNameSnapshot || "the highlighted line"}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const missingReference = items.find(
+      (item) =>
+        item.itemType !== "adjustment" &&
+        !item.partId &&
+        item.partNameSnapshot.trim() &&
+        !item.partNumberSnapshot.trim(),
+    );
+    if (aiReviewWorkspace && missingReference) {
+      const message = "Enter a part number to create this new stock item.";
+      setLineReferenceErrors({ [missingReference.id]: message });
+      requestAnimationFrame(() => {
+        const input = partNumberInputRefs.current[missingReference.id];
+        input?.scrollIntoView({ behavior: "smooth", block: "center" });
+        input?.focus({ preventScroll: true });
+      });
+      toast({
+        title: "Part number required",
+        description: `Enter a part number for ${missingReference.partNameSnapshot} before confirming.`,
         variant: "destructive",
       });
       return;
@@ -1006,12 +1037,35 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         <td className="block py-2 md:table-cell md:px-3 md:pt-3">
                           <span className="font-medium md:hidden">Part number</span>
                           <input
+                            ref={(element) => {
+                              partNumberInputRefs.current[item.id] = element;
+                            }}
                             aria-label="Part number"
+                            aria-invalid={Boolean(lineReferenceErrors[item.id])}
+                            aria-describedby={lineReferenceErrors[item.id] ? `part-number-error-${item.id}` : undefined}
                             className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none placeholder:text-foreground/50 md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             placeholder="Part #"
                             value={item.partNumberSnapshot}
-                            onChange={e => updateItem(item.id, { partNumberSnapshot: e.target.value })}
+                            onChange={e => {
+                              updateItem(item.id, { partNumberSnapshot: e.target.value });
+                              if (e.target.value.trim()) {
+                                setLineReferenceErrors((previous) => {
+                                  const next = { ...previous };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                              }
+                            }}
                           />
+                          {lineReferenceErrors[item.id] ? (
+                            <p
+                              id={`part-number-error-${item.id}`}
+                              role="alert"
+                              className="mt-1 text-xs text-destructive"
+                            >
+                              {lineReferenceErrors[item.id]}
+                            </p>
+                          ) : null}
                         </td>
 
                         {/* Qty */}
