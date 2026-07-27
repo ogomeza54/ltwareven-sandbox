@@ -93,6 +93,7 @@ interface MockState {
   failFirstUpload: boolean;
   intakeSubmissions: number;
   draftCreations: number;
+  matchRevisionConflicts: number;
   freshDraftAssets: string[];
   assets: Array<{
     id: string;
@@ -138,6 +139,7 @@ async function mockApplication(
   commitBeforeFirstAbort = false,
   commitReorderBeforeAbort = false,
   commitDeleteBeforeAbort = false,
+  conflictFirstMatchUpdate = false,
 ) {
   let reorderAborted = false;
   let deleteAborted = false;
@@ -172,6 +174,7 @@ async function mockApplication(
     failFirstUpload,
     intakeSubmissions: 0,
     draftCreations: 0,
+    matchRevisionConflicts: 0,
     freshDraftAssets: [],
     assets: [
       {
@@ -280,6 +283,21 @@ async function mockApplication(
       path === `/api/invoice-drafts/${draftId}/review/matches` &&
       request.method() === "PATCH"
     ) {
+      if (
+        conflictFirstMatchUpdate &&
+        state.lineDecision === "approved" &&
+        state.matchRevisionConflicts === 0
+      ) {
+        state.matchRevisionConflicts += 1;
+        return json(
+          route,
+          {
+            code: "INVOICE_DRAFT_REVISION_CONFLICT",
+            message: "The invoice draft changed. Refresh and try again.",
+          },
+          409,
+        );
+      }
       const body = request.postDataJSON() as {
         revision: number;
         matches: Array<{
@@ -1079,4 +1097,27 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await expect(page.getByText("page-one.png")).toHaveCount(0);
   await expect(page.getByText(/Status: completed/)).toHaveCount(0);
   await expect(page.getByText("0 of 10 pages saved.")).toBeVisible();
+});
+
+test("confirmation refreshes and retries once after a draft revision conflict", async ({
+  page,
+}) => {
+  const state = await mockApplication(page, false, false, false, false, true);
+  state.lineVendorPartNumber = "BP-100";
+  await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await expect(
+    page.getByText(/Invoice scanned · 1 line detected/),
+  ).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText("Matched to existing stock")).toBeVisible();
+  await page.locator("#receive-inventory-invoice-number").fill("INV-CONFLICT-1");
+  await page.locator("#receive-inventory-total").fill("100.00");
+  await page.getByLabel("Lot price").fill("100.00");
+
+  await page.getByRole("button", { name: "Confirm & Update Stock" }).click();
+
+  await expect.poll(() => state.matchRevisionConflicts).toBe(1);
+  await expect.poll(() => state.stockConfirmations).toBe(1);
+  await expect(page.getByText("Failed to confirm invoice")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toBeHidden();
 });

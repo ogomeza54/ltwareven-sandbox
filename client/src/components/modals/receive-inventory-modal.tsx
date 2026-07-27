@@ -15,6 +15,8 @@ import { InvoiceSourceUpload } from "@/features/invoice-extraction/invoice-sourc
 import {
   confirmInvoiceIntent,
   createInvoiceConfirmationIntent,
+  getInvoiceReview,
+  InvoiceSourceApiError,
   overrideInvoiceDuplicate,
   updateInvoiceHeaderReview,
   updateInvoiceLineMatches,
@@ -401,76 +403,101 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       if (!aiReviewWorkspace) {
         throw new Error("The AI invoice review is not ready.");
       }
-      let current = await updateInvoiceHeaderReview(
-        aiReviewWorkspace,
-        {
-          vendorName: vendor.trim() || null,
-          invoiceNumber: invoiceNumber.trim() || null,
-          invoiceDate: invoiceDate || null,
-          currency: "USD",
-          subtotal: subtotal.toFixed(2),
-          tax: (taxNum || 0).toFixed(2),
-          freight: (deliveryNum || 0).toFixed(2),
-          total: (parseFloat(totalAmount) || calculatedTotal).toFixed(2),
-        },
-        allInvoiceHeaderFields,
-        "approved",
-      );
-      current = await updateInvoiceLinesReview(
-        current,
-        items.map((item) => ({
-          id: item.reviewLineId ?? null,
-          description: item.partNameSnapshot.trim() || null,
-          vendorPartNumber: item.partNumberSnapshot.trim() || null,
-          quantity: String(item.qty || 1),
-          unitCost: derivedPerUnit(item.lotPrice, item.qty),
-          classification: item.itemType,
-        })),
-        "approved",
-      );
       const itemByReviewId = new Map(
         items
           .filter((item) => item.reviewLineId)
           .map((item) => [item.reviewLineId!, item]),
       );
-      current = await updateInvoiceLineMatches(
-        current,
-        current.lines.map((line, index) => {
-          const item = itemByReviewId.get(line.id) ?? items[index];
-          if (!item) throw new Error("An invoice line could not be resolved.");
-          if (item.partId) {
+      const saveReviewAndPrepare = async (
+        workspace: InvoiceReviewWorkspaceDto,
+      ): Promise<InvoiceConfirmationIntentDto> => {
+        let current = await updateInvoiceHeaderReview(
+          workspace,
+          {
+            vendorName: vendor.trim() || null,
+            invoiceNumber: invoiceNumber.trim() || null,
+            invoiceDate: invoiceDate || null,
+            currency: "USD",
+            subtotal: subtotal.toFixed(2),
+            tax: (taxNum || 0).toFixed(2),
+            freight: (deliveryNum || 0).toFixed(2),
+            total: (parseFloat(totalAmount) || calculatedTotal).toFixed(2),
+          },
+          allInvoiceHeaderFields,
+          "approved",
+        );
+        setAiReviewWorkspace(current);
+        current = await updateInvoiceLinesReview(
+          current,
+          items.map((item) => ({
+            id: item.reviewLineId ?? null,
+            description: item.partNameSnapshot.trim() || null,
+            vendorPartNumber: item.partNumberSnapshot.trim() || null,
+            quantity: String(item.qty || 1),
+            unitCost: derivedPerUnit(item.lotPrice, item.qty),
+            classification: item.itemType,
+          })),
+          "approved",
+        );
+        setAiReviewWorkspace(current);
+        current = await updateInvoiceLineMatches(
+          current,
+          current.lines.map((line, index) => {
+            const item = itemByReviewId.get(line.id) ?? items[index];
+            if (!item) throw new Error("An invoice line could not be resolved.");
+            if (item.partId) {
+              return {
+                lineId: line.id,
+                decision: "existing" as const,
+                selectedPartId: item.partId,
+                proposedNewPart: null,
+              };
+            }
+            if (!item.partNameSnapshot.trim() || !item.partNumberSnapshot.trim()) {
+              throw new Error(
+                `Choose an existing stock part or provide a name and reference for ${item.partNameSnapshot || "the unresolved line"}.`,
+              );
+            }
             return {
               lineId: line.id,
-              decision: "existing" as const,
-              selectedPartId: item.partId,
-              proposedNewPart: null,
+              decision: "new" as const,
+              selectedPartId: null,
+              proposedNewPart: {
+                name: item.partNameSnapshot.trim(),
+                partNumber: item.partNumberSnapshot.trim(),
+                itemType: item.itemType,
+                category: null,
+                groupId: item.groupId ?? null,
+                subgroupId: item.subgroupId ?? null,
+              },
             };
-          }
-          if (!item.partNameSnapshot.trim() || !item.partNumberSnapshot.trim()) {
-            throw new Error(
-              `Choose an existing stock part or provide a name and reference for ${item.partNameSnapshot || "the unresolved line"}.`,
-            );
-          }
-          return {
-            lineId: line.id,
-            decision: "new" as const,
-            selectedPartId: null,
-            proposedNewPart: {
-              name: item.partNameSnapshot.trim(),
-              partNumber: item.partNumberSnapshot.trim(),
-              itemType: item.itemType,
-              category: null,
-              groupId: item.groupId ?? null,
-              subgroupId: item.subgroupId ?? null,
-            },
-          };
-        }),
-      );
-      confirmationKeyRef.current ??= globalThis.crypto.randomUUID();
-      const intent = await createInvoiceConfirmationIntent(
-        current,
-        confirmationKeyRef.current,
-      );
+          }),
+        );
+        setAiReviewWorkspace(current);
+        confirmationKeyRef.current ??= globalThis.crypto.randomUUID();
+        return createInvoiceConfirmationIntent(
+          current,
+          confirmationKeyRef.current,
+        );
+      };
+
+      const draftId = aiReviewWorkspace.draftId;
+      let latest = await getInvoiceReview(draftId);
+      setAiReviewWorkspace(latest);
+      let intent: InvoiceConfirmationIntentDto;
+      try {
+        intent = await saveReviewAndPrepare(latest);
+      } catch (error) {
+        if (
+          !(error instanceof InvoiceSourceApiError) ||
+          error.code !== "INVOICE_DRAFT_REVISION_CONFLICT"
+        ) {
+          throw error;
+        }
+        latest = await getInvoiceReview(draftId);
+        setAiReviewWorkspace(latest);
+        intent = await saveReviewAndPrepare(latest);
+      }
       setPreparedInvoiceIntent(intent);
       if (intent.duplicateStatus === "suspected") return intent;
       return confirmInvoiceIntent(intent);
