@@ -119,7 +119,7 @@ export class OpenAIInvoiceProvider implements InvoiceExtractionProviderPort {
     const content: OpenAI.Responses.ResponseInputContent[] = [
       {
         type: "input_text",
-        text: `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Preserve visible negative quantities and amounts. Classify credits, returns, deposits, rebates, refunds, CORE charges and CORE returns as adjustment; they are financial lines and not stock receipts. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${request.assets.map((asset) => asset.id).join(", ")}.`,
+        text: `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Preserve visible negative quantities and amounts. Do not classify a line from product-specific keywords. Treat a quantity-bearing return or exchange as a financial adjustment only when the document contains an opposite-sign line for the same vendor part reference and product description; otherwise classify it as unknown for human review. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${request.assets.map((asset) => asset.id).join(", ")}.`,
       },
       ...request.assets.map((asset): OpenAI.Responses.ResponseInputContent =>
         asset.mimeType === "application/pdf"

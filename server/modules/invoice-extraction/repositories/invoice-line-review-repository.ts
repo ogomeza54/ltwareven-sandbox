@@ -17,7 +17,7 @@ import {
   normalizeQuantity,
   type InvoiceReconciliation,
 } from "../domain/invoice-money";
-import { classifyInvoiceProposalLine } from "../domain/invoice-line-classification";
+import { classifyInvoiceProposalLines } from "../domain/invoice-line-classification";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type TransactionExecutor = Parameters<
@@ -243,6 +243,7 @@ export class PostgresInvoiceLineReviewRepository {
       `),
     )[0];
     if (!totals) return null;
+    const detectedClassifications = classifyInvoiceProposalLines(proposal.lines);
     return {
       lines: lineRows.map((line) => {
         const proposed =
@@ -250,7 +251,7 @@ export class PostgresInvoiceLineReviewRepository {
             ? null
             : proposal.lines[line.source_line_index] ?? null;
         const detectedClassification = proposed
-          ? classifyInvoiceProposalLine(proposed)
+          ? detectedClassifications[line.source_line_index!]
           : line.classification;
         const proposedQuantity = proposed
           ? proposed.quantity.normalized ?? proposed.quantity.observed

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { InvoiceProposal } from "@shared/invoice-extraction/contracts";
-import { classifyInvoiceProposalLine } from "../../modules/invoice-extraction/domain/invoice-line-classification";
+import { classifyInvoiceProposalLines } from "../../modules/invoice-extraction/domain/invoice-line-classification";
 import { reconcileInvoiceMoney } from "../../modules/invoice-extraction/domain/invoice-money";
 import { applyLandedCosts } from "../../modules/inventory-receiving/inventory-intake-mappers";
 
@@ -19,6 +19,7 @@ function line(input: {
   quantity: string;
   unitCost: string;
   lineTotal: string;
+  classification?: "inventory" | "consumable" | "adjustment" | "unknown";
 }): InvoiceProposal["lines"][number] {
   return {
     description: observed(input.description),
@@ -26,34 +27,71 @@ function line(input: {
     quantity: observed(input.quantity),
     unitCost: observed(input.unitCost),
     lineTotal: observed(input.lineTotal),
-    classification: { kind: "inventory", confidence: 0.9 },
+    classification: { kind: input.classification ?? "inventory", confidence: 0.9 },
   };
 }
 
-test("CORE charges and returns are deterministic financial adjustments", () => {
-  assert.equal(
-    classifyInvoiceProposalLine(
+test("opposite quantities for the same reference and product form financial adjustments", () => {
+  assert.deepEqual(
+    classifyInvoiceProposalLines([
       line({
         description: "BRAKE SHOE KIT",
         partNumber: "104F/ABP MK4711Q 20STAN-CORE",
         quantity: "2",
         unitCost: "55.00",
         lineTotal: "110.00",
+        classification: "adjustment",
       }),
-    ),
-    "adjustment",
-  );
-  assert.equal(
-    classifyInvoiceProposalLine(
       line({
         description: "BRAKE SHOE KIT",
         partNumber: "104F/ABP MK4711Q 20STAN-CORE",
         quantity: "-2",
         unitCost: "45.00",
         lineTotal: "-90.00",
+        classification: "adjustment",
       }),
-    ),
-    "adjustment",
+    ]),
+    ["adjustment", "adjustment"],
+  );
+});
+
+test("a product keyword alone never suppresses a stock movement", () => {
+  assert.deepEqual(
+    classifyInvoiceProposalLines([
+      line({
+        description: "CORE FILTER",
+        partNumber: "CORE-123",
+        quantity: "2",
+        unitCost: "55.00",
+        lineTotal: "110.00",
+        classification: "inventory",
+      }),
+    ]),
+    ["inventory"],
+  );
+});
+
+test("opposite quantities with a different reference or product stay reviewable", () => {
+  assert.deepEqual(
+    classifyInvoiceProposalLines([
+      line({
+        description: "BRAKE SHOE KIT",
+        partNumber: "PART-A",
+        quantity: "2",
+        unitCost: "55.00",
+        lineTotal: "110.00",
+        classification: "adjustment",
+      }),
+      line({
+        description: "BRAKE SHOE KIT",
+        partNumber: "PART-B",
+        quantity: "-2",
+        unitCost: "45.00",
+        lineTotal: "-90.00",
+        classification: "adjustment",
+      }),
+    ]),
+    ["unknown", "unknown"],
   );
 });
 

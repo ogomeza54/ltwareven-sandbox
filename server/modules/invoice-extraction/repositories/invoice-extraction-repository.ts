@@ -17,7 +17,7 @@ import {
   normalizeQuantity,
   normalizeUnitCost,
 } from "../domain/invoice-money";
-import { classifyInvoiceProposalLine } from "../domain/invoice-line-classification";
+import { classifyInvoiceProposalLines } from "../domain/invoice-line-classification";
 import { recalculateReviewTotals } from "./invoice-line-review-repository";
 
 type InvoiceDatabase = typeof applicationDatabase;
@@ -509,6 +509,7 @@ export class PostgresInvoiceExtractionRepository {
           throw error;
         }
       };
+      const lineClassifications = classifyInvoiceProposalLines(proposal.lines);
       for (let index = 0; index < proposal.lines.length; index += 1) {
         const line = proposal.lines[index];
         const description =
@@ -531,7 +532,7 @@ export class PostgresInvoiceExtractionRepository {
             ${companyId}, ${run.draft_id}::uuid, ${proposalId}::uuid,
             ${index}, ${index + 1}, ${description}, ${vendorPartNumber},
             ${quantity}, ${unitCost},
-            ${classifyInvoiceProposalLine(line)}
+            ${lineClassifications[index]}
           )
           on conflict (company_id, draft_id, source_line_index) do nothing
         `);
