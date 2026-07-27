@@ -769,7 +769,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             value={item.groupId || ""}
                             onChange={e => updateItem(item.id, { groupId: e.target.value || undefined })}
                             aria-label="Item category"
-                            className="min-h-11 w-full rounded border border-border bg-muted/30 px-2 py-1 text-xs text-foreground outline-none focus:border-amber-500/60"
+                            style={{ colorScheme: "dark" }}
+                            className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-xs font-medium text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40"
                           >
                             <option value="">— Category —</option>
                             {(catalogTree as any[]).map((g: any) => (
@@ -783,7 +784,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               value={item.subgroupId || ""}
                               onChange={e => updateItem(item.id, { subgroupId: e.target.value || undefined })}
                               aria-label="Item subgroup"
-                              className="min-h-11 w-full rounded border border-border bg-muted/30 px-2 py-1 text-xs text-foreground outline-none focus:border-amber-500/60"
+                              style={{ colorScheme: "dark" }}
+                              className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-xs font-medium text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40"
                             >
                               <option value="">— Subgroup —</option>
                               {subgroups.map((sg: any) => (
