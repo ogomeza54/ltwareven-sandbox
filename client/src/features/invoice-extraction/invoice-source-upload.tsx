@@ -41,6 +41,7 @@ import { useInvoiceSources } from "./use-invoice-sources";
 import { InvoiceReviewWorkspace } from "./invoice-review-workspace";
 import {
   formatExtractionSeconds,
+  invoiceExtractionProgress,
   invoiceExtractionTiming,
 } from "./extraction-timing";
 
@@ -114,6 +115,9 @@ export function InvoiceSourceUpload({
     extraction?.status === "processing";
   const extractionTiming = extraction
     ? invoiceExtractionTiming(extraction, timingClock)
+    : null;
+  const extractionProgress = extraction && extractionTiming
+    ? invoiceExtractionProgress(extraction.status, extractionTiming)
     : null;
   const blocked = (atLimit && !replacementAsset) || busy || extractionBusy;
   const sourceReviewLocked = draft?.status === "needs_review";
@@ -442,39 +446,50 @@ export function InvoiceSourceUpload({
           </div>
           {extraction ? (
             <div className="mt-3 space-y-2" role="status" aria-label="Invoice analysis progress">
-              <p className="text-sm">
-                Status: <span className="font-medium">{extraction.status}</span>
-                {extraction.status === "completed" && extraction.proposal
-                  ? ` · ${extraction.proposal.lines.length} line items proposed for review`
-                  : ""}
-                {extraction.status === "failed"
-                  ? " · No inventory was changed. You can retry or enter the invoice manually."
-                  : ""}
-              </p>
-              {extractionTiming ? (
-                <dl className="grid grid-cols-3 gap-2 rounded border border-border bg-background/50 p-2 text-xs">
-                  <div>
-                    <dt className="flex items-center gap-1 text-muted-foreground">
-                      <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Queue
-                    </dt>
-                    <dd className="mt-1 font-mono text-sm font-medium">
-                      {formatExtractionSeconds(extractionTiming.queueMs)}
-                    </dd>
+              {extractionProgress ? (
+                <div className="space-y-2 rounded border border-border bg-background/50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Clock3 className="h-4 w-4 text-amber-500" aria-hidden="true" />
+                      {extraction.status === "completed" ? "AI processing completed" : "AI processing"}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatExtractionSeconds(extractionProgress.elapsedMs)} elapsed
+                      {extractionProgress.estimatedRemainingMs !== null && extraction.status !== "completed"
+                        ? ` · about ${Math.max(1, Math.ceil(extractionProgress.estimatedRemainingMs / 1000))} s remaining`
+                        : extraction.status === "processing" || extraction.status === "queued"
+                          ? " · finishing…"
+                          : ""}
+                    </span>
                   </div>
-                  <div>
-                    <dt className="text-muted-foreground">AI processing</dt>
-                    <dd className="mt-1 font-mono text-sm font-medium">
-                      {formatExtractionSeconds(extractionTiming.processingMs)}
-                    </dd>
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-slate-800"
+                    role="progressbar"
+                    aria-label="AI processing progress"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={extractionProgress.percent}
+                  >
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-500 ${
+                        extraction.status === "failed" || extraction.status === "canceled"
+                          ? "bg-red-500"
+                          : "bg-amber-500"
+                      }`}
+                      style={{ width: `${extractionProgress.percent}%` }}
+                    />
                   </div>
-                  <div>
-                    <dt className="text-muted-foreground">Total</dt>
-                    <dd className="mt-1 font-mono text-sm font-medium">
-                      {formatExtractionSeconds(extractionTiming.totalMs)}
-                    </dd>
-                  </div>
-                </dl>
+                  {extraction.status === "completed" && extraction.proposal ? (
+                    <p className="text-xs text-emerald-400">
+                      {extraction.proposal.lines.length} line items ready for review.
+                    </p>
+                  ) : null}
+                  {extraction.status === "failed" ? (
+                    <p className="text-xs text-red-400">
+                      Analysis failed. No inventory was changed; retry or enter the invoice manually.
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}

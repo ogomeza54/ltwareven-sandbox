@@ -710,7 +710,9 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
   await page.getByRole("button", { name: "Retry upload" }).click();
   await expect(page.getByText("phone-invoice.png saved.")).toBeVisible();
   expect(state.assets).toHaveLength(3);
-  await expect(page.getByText(/Status: (queued|processing|completed)/)).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "AI processing progress" }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Enter manually" }).click();
   await expect(page.getByLabel("Vendor / Supplier *")).toBeFocused();
@@ -904,20 +906,16 @@ test("AI extraction populates the existing intake form without stock writes", as
   await openReceiveInventory(page);
   await page.getByRole("button", { name: "Analyze invoice" }).click();
   await expect(
-    page.getByText(/Status: (queued|processing|completed)/),
-  ).toBeVisible();
-  await expect(
-    page.getByText(/1 line items proposed for review/),
+    page.getByText("1 line items ready for review."),
   ).toBeVisible({ timeout: 8_000 });
   const progress = page.getByRole("status", {
     name: "Invoice analysis progress",
   });
-  await expect(progress).toContainText("Queue");
-  await expect(progress).toContainText("0.3 s");
-  await expect(progress).toContainText("AI processing");
+  await expect(progress).toContainText("AI processing completed");
   await expect(progress).toContainText("1.8 s");
-  await expect(progress).toContainText("Total");
-  await expect(progress).toContainText("2.0 s");
+  await expect(progress).not.toContainText("Queue");
+  await expect(progress).not.toContainText("Total");
+  await expect(page.getByRole("progressbar", { name: "AI processing progress" })).toHaveAttribute("aria-valuenow", "100");
   await expect(
     page.getByRole("region", { name: "Invoice review workspace" }),
   ).toHaveCount(0);
