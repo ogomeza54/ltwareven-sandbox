@@ -222,12 +222,12 @@ export function InvoiceSourceUpload({
     return () => window.clearInterval(timer);
   }, [extraction?.id, extraction?.status]);
 
-  const analyze = async (): Promise<void> => {
-    if (!draft || assets.length === 0) return;
+  const analyze = async (targetDraft = draft): Promise<void> => {
+    if (!targetDraft || !targetDraft.source?.assets.length) return;
     setStartingExtraction(true);
     setExtractionError(null);
     try {
-      setExtraction(await startInvoiceExtraction(draft));
+      setExtraction(await startInvoiceExtraction(targetDraft));
       await refresh().catch(() => null);
     } catch (caught) {
       setExtractionError(
@@ -356,6 +356,8 @@ export function InvoiceSourceUpload({
     setReplacementAsset(null);
     setLocalError(null);
     setPending(null);
+    const latestDraft = await refresh().catch(() => null);
+    if (latestDraft) await analyze(latestDraft);
   };
 
   const retakeSaved = (asset: (typeof assets)[number]): void => {

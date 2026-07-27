@@ -686,6 +686,10 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
   const state = await mockApplication(page, true);
   await openReceiveInventory(page);
 
+  await page.getByRole("button", { name: "Move saved page 2 earlier" }).click();
+  await expect(page.getByText(/page-two\.png moved to position 1 of 2/)).toBeVisible();
+  expect(state.assets[0].displayName).toBe("page-two.png");
+
   const camera = page.getByLabel("Take invoice photo with rear camera");
   await expect(camera).toHaveAttribute("capture", "environment");
   await expect(page.getByLabel("Choose invoice image or PDF")).toBeVisible();
@@ -706,10 +710,7 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
   await page.getByRole("button", { name: "Retry upload" }).click();
   await expect(page.getByText("phone-invoice.png saved.")).toBeVisible();
   expect(state.assets).toHaveLength(3);
-
-  await page.getByRole("button", { name: "Move saved page 2 earlier" }).click();
-  await expect(page.getByText(/page-two\.png moved to position 1 of 3/)).toBeVisible();
-  expect(state.assets[0].displayName).toBe("page-two.png");
+  await expect(page.getByText(/Status: (queued|processing|completed)/)).toBeVisible();
 
   await page.getByRole("button", { name: "Enter manually" }).click();
   await expect(page.getByLabel("Vendor / Supplier *")).toBeFocused();
