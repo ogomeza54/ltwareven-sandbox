@@ -121,6 +121,11 @@ export function InvoiceReviewWorkspace({
   const [workflowNotice, setWorkflowNotice] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Record<string, InvoicePartCandidate[]>>({});
   const [candidateQuery, setCandidateQuery] = useState<Record<string, string>>({});
+  const [autoMatchingReferences, setAutoMatchingReferences] = useState(false);
+  const [autoMatchedLineIds, setAutoMatchedLineIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const autoMatchAttempts = useRef<Set<string>>(new Set());
   const [catalogTree, setCatalogTree] = useState<CatalogGroup[]>([]);
   const [newPartDraft, setNewPartDraft] = useState<Record<string, {
     name: string;
@@ -343,6 +348,80 @@ export function InvoiceReviewWorkspace({
       setError(caught instanceof Error ? caught.message : "Part candidates could not be loaded.");
     }
   };
+
+  const autoMatchExactReferences = async (
+    current: InvoiceReviewWorkspaceDto,
+  ): Promise<void> => {
+    const eligible = current.lines.filter(
+      (line) =>
+        line.match.decision === "unresolved" &&
+        !line.id.startsWith("new-") &&
+        Boolean(line.vendorPartNumber?.trim()),
+    );
+    if (!eligible.length) return;
+    const signature = `${current.draftId}:${eligible
+      .map((line) => `${line.id}:${line.vendorPartNumber?.trim()}`)
+      .join("|")}`;
+    if (autoMatchAttempts.current.has(signature)) return;
+    autoMatchAttempts.current.add(signature);
+    setAutoMatchingReferences(true);
+    try {
+      const results = await Promise.all(
+        eligible.map(async (line) => ({
+          line,
+          candidates: await getInvoicePartCandidates(current, line.id),
+        })),
+      );
+      setCandidates((value) => ({
+        ...value,
+        ...Object.fromEntries(
+          results.map(({ line, candidates: matches }) => [line.id, matches]),
+        ),
+      }));
+      const exactMatches = results.flatMap(({ line, candidates: matches }) => {
+        const exact = matches.filter((candidate) =>
+          candidate.signals.includes("Exact part reference"),
+        );
+        return exact.length === 1
+          ? [{ lineId: line.id, partId: exact[0].part.id }]
+          : [];
+      });
+      if (!exactMatches.length) return;
+      const saved = await updateInvoiceLineMatches(
+        current,
+        exactMatches.map((match) => ({
+          lineId: match.lineId,
+          decision: "existing" as const,
+          selectedPartId: match.partId,
+          proposedNewPart: null,
+        })),
+      );
+      workspaceRef.current = saved;
+      setWorkspace(saved);
+      linesRef.current = saved.lines;
+      setLines(saved.lines);
+      setAutoMatchedLineIds(
+        (value) => new Set([...value, ...exactMatches.map((match) => match.lineId)]),
+      );
+      setWorkflowNotice(
+        `${exactMatches.length} line${exactMatches.length === 1 ? "" : "s"} automatically linked by exact stock reference. Review before approving lines and totals.`,
+      );
+      await onDraftChanged?.();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `${caught.message} Automatic reference matching could not finish; you can still use Find matches.`
+          : "Automatic reference matching could not finish; you can still use Find matches.",
+      );
+    } finally {
+      setAutoMatchingReferences(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!workspace || readOnly) return;
+    void autoMatchExactReferences(workspace);
+  }, [readOnly, workspace?.draftRevision]);
 
   const saveMatch = async (
     lineId: string,
@@ -811,7 +890,11 @@ export function InvoiceReviewWorkspace({
                   <div>
                     <p className="text-sm font-semibold">
                       {line.match.decision === "existing" && line.match.selectedPart
-                        ? "Linked to existing stock"
+                        ? autoMatchedLineIds.has(line.id)
+                          ? workspace.reconciliation.decision === "approved"
+                            ? "Automatically matched and approved"
+                            : "Automatically matched — approval required"
+                          : "Linked to existing stock"
                         : line.match.decision === "new" && line.match.proposedNewPart
                           ? "New stock part will be created"
                           : "Not linked to stock"}
@@ -850,7 +933,11 @@ export function InvoiceReviewWorkspace({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium">Catalog resolution</p>
-                    <p className="text-xs text-muted-foreground">Search the current inventory or choose to create a part.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {autoMatchingReferences
+                        ? "Checking exact references in current stock…"
+                        : "Exact references are checked automatically. You can also search or create a part."}
+                    </p>
                   </div>
                   {!readOnly && !line.id.startsWith("new-") ? (
                     <div className="flex flex-1 flex-wrap justify-end gap-2">
@@ -872,7 +959,7 @@ export function InvoiceReviewWorkspace({
                           }
                         }}
                       />
-                      <Button type="button" variant="outline" className="min-h-11" onClick={() => void loadCandidates(line.id)}>
+                      <Button type="button" variant="outline" className="min-h-11" disabled={autoMatchingReferences} onClick={() => void loadCandidates(line.id)}>
                         Find matches
                       </Button>
                       <Button

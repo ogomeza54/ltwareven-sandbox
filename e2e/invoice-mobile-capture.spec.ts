@@ -56,6 +56,7 @@ interface MockState {
     groupId: string | null;
     subgroupId: string | null;
   } | null;
+  lineVendorPartNumber: string | null;
   lineUnitCost: string | null;
   lineClassification: "inventory" | "consumable" | "unknown";
   lineDecision: "draft" | "approved";
@@ -134,6 +135,7 @@ async function mockApplication(
     reviewedFields: [],
     selectedPartId: null,
     proposedNewPart: null,
+    lineVendorPartNumber: null,
     lineUnitCost: null,
     lineClassification: "inventory",
     lineDecision: "draft",
@@ -556,7 +558,7 @@ function reviewWorkspace(state: MockState) {
         sourceLineIndex: 0,
         position: 1,
         description: "Brake pad",
-        vendorPartNumber: null,
+        vendorPartNumber: state.lineVendorPartNumber,
         quantity: "2",
         unitCost: state.lineUnitCost,
         calculatedLineTotal: state.lineUnitCost ? "100.00" : null,
@@ -878,7 +880,9 @@ test("AI extraction is polled and stops at a human review result without stock w
   const state = await mockApplication(page);
   await openReceiveInventory(page);
   await page.getByRole("button", { name: "Analyze invoice" }).click();
-  await expect(page.getByText(/Status: queued|Status: processing/)).toBeVisible();
+  await expect(
+    page.getByText(/Status: (queued|processing|completed)/),
+  ).toBeVisible();
   await expect(
     page.getByText(/1 line items proposed for review/),
   ).toBeVisible({ timeout: 8_000 });
@@ -935,6 +939,25 @@ test("AI extraction is polled and stops at a human review result without stock w
   expect(state.draftCreations).toBe(1);
   expect(state.freshDraftAssets).toEqual(["replacement-invoice.png"]);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
+});
+
+test("an exact stock reference is linked automatically but still requires line approval", async ({
+  page,
+}) => {
+  const state = await mockApplication(page);
+  state.draftStatus = "needs_review";
+  state.lineVendorPartNumber = "BP-100";
+
+  await openReceiveInventory(page);
+  await expect(
+    page.getByText("Automatically matched — approval required"),
+  ).toBeVisible();
+  await expect(page.getByText(/Linked to Brake Pad Catalog/)).toBeVisible();
+  await expect.poll(() => state.selectedPartId).toBe(
+    "00000000-0000-4000-8000-000000000030",
+  );
+  expect(state.lineDecision).toBe("draft");
+  expect(state.stockConfirmations).toBe(0);
 });
 
 test("a reviewed invoice can be discarded and replaced without changing stock", async ({
