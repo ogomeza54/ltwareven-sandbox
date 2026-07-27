@@ -656,6 +656,30 @@ async function openReceiveInventory(page: Page) {
   await expect(page.getByRole("dialog")).toBeVisible();
 }
 
+test("Take photo requests the device camera and explains denied permission", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          throw new DOMException("Permission denied", "NotAllowedError");
+        },
+      },
+    });
+  });
+  await mockApplication(page);
+  await openReceiveInventory(page);
+
+  await page.getByRole("button", { name: "Take photo", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Take invoice photo" })).toBeVisible();
+  await expect(
+    page.getByText("Camera access was denied. Allow camera access in your browser, then try again."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose an image instead" })).toBeVisible();
+});
+
 test("capture previews before upload, retries, reorders, resumes and enters manual mode", async ({
   page,
 }, testInfo) => {
@@ -762,13 +786,12 @@ test("saved retake preserves the original until replacement succeeds", async ({
   await openReceiveInventory(page);
   const firstPage = page
     .getByRole("article", { name: /Saved page 1: page-one\.png/ });
-  const chooserPromise = page.waitForEvent("filechooser");
   await firstPage.getByRole("button", { name: "Retake saved page 1" }).click();
-  const chooser = await chooserPromise;
+  await expect(page.getByRole("heading", { name: "Take invoice photo" })).toBeVisible();
   expect(state.assets.some((asset) => asset.displayName === "page-one.png")).toBe(
     true,
   );
-  await chooser.setFiles({
+  await page.getByLabel("Take invoice photo with rear camera").setInputFiles({
     name: "replacement.png",
     mimeType: "image/png",
     buffer: png,
@@ -801,12 +824,11 @@ test("saved retake remains available at the ten-page limit", async ({
   await openReceiveInventory(page);
   await expect(page.getByText("10 of 10 pages saved.")).toBeVisible();
 
-  const chooserPromise = page.waitForEvent("filechooser");
   await page
     .getByRole("button", { name: "Retake saved page 1", exact: true })
     .click();
-  const chooser = await chooserPromise;
-  await chooser.setFiles({
+  await expect(page.getByRole("heading", { name: "Take invoice photo" })).toBeVisible();
+  await page.getByLabel("Take invoice photo with rear camera").setInputFiles({
     name: "limit-replacement.png",
     mimeType: "image/png",
     buffer: png,

@@ -11,6 +11,14 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useCompany } from "@/hooks/use-company";
 import {
@@ -79,11 +87,19 @@ export function InvoiceSourceUpload({
   const [pending, setPendingState] = useState<PendingInvoiceCapture | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [uploadFailed, setUploadFailed] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [replacementAsset, setReplacementAsset] = useState<
     (typeof assets)[number] | null
   >(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef(0);
   const preview = useRef<HTMLDivElement>(null);
   const pendingRef = useRef<PendingInvoiceCapture | null>(null);
   const displayedDraftId = useRef<string | null>(null);
@@ -107,13 +123,45 @@ export function InvoiceSourceUpload({
     setPendingState(next);
   };
 
+  const stopCamera = (): void => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (video.current) video.current.srcObject = null;
+    setCameraStream(null);
+    setCameraReady(false);
+    setCameraStarting(false);
+  };
+
+  const closeCamera = (): void => {
+    cameraRequestRef.current += 1;
+    stopCamera();
+    setCameraOpen(false);
+    setCameraError(null);
+  };
+
   useEffect(
     () => () => {
       replacePendingCapture(pendingRef.current, null);
       pendingRef.current = null;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
     },
     [],
   );
+
+  useEffect(() => {
+    if (open) return;
+    stopCamera();
+    setCameraOpen(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!cameraOpen || !cameraStream || !video.current) return;
+    video.current.srcObject = cameraStream;
+    void video.current.play().catch(() => {
+      setCameraError("The camera preview could not be started. Check your browser camera permissions.");
+    });
+  }, [cameraOpen, cameraStream]);
 
   useEffect(() => {
     onBusyChange?.(mutating);
@@ -221,6 +269,81 @@ export function InvoiceSourceUpload({
     setPendingState(checked);
   };
 
+  const openCamera = async (allowAtPageLimit = false): Promise<void> => {
+    if (busy || extractionBusy || (atLimit && !replacementAsset && !allowAtPageLimit)) return;
+    setLocalError(null);
+    setCameraError(null);
+    setCameraReady(false);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraInput.current?.click();
+      return;
+    }
+
+    setCameraOpen(true);
+    setCameraStarting(true);
+    const requestId = cameraRequestRef.current + 1;
+    cameraRequestRef.current = requestId;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+      if (cameraRequestRef.current !== requestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      cameraStreamRef.current = stream;
+      setCameraStream(stream);
+    } catch (caught) {
+      const errorName = caught instanceof DOMException ? caught.name : "";
+      setCameraError(
+        errorName === "NotAllowedError"
+          ? "Camera access was denied. Allow camera access in your browser, then try again."
+          : "No camera could be opened. Check that a camera is connected and not being used by another application.",
+      );
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  const capturePhoto = (): void => {
+    const source = video.current;
+    if (!source || source.videoWidth === 0 || source.videoHeight === 0) {
+      setCameraError("The camera is not ready yet. Wait for the preview, then try again.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = source.videoWidth;
+    canvas.height = source.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("The photo could not be captured by this browser.");
+      return;
+    }
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setCameraError("The photo could not be captured. Please try again.");
+          return;
+        }
+        const file = new File([blob], `invoice-photo-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        closeCamera();
+        void selectFile(file, "camera");
+      },
+      "image/jpeg",
+      0.92,
+    );
+  };
+
   const useDocument = async (): Promise<void> => {
     const selected = pendingRef.current;
     if (!selected) return;
@@ -238,9 +361,11 @@ export function InvoiceSourceUpload({
   const retakeSaved = (asset: (typeof assets)[number]): void => {
     setReplacementAsset(asset);
     const isImage = asset.detectedType?.startsWith("image/");
-    requestAnimationFrame(() => {
-      (isImage ? cameraInput : fileInput).current?.click();
-    });
+    if (isImage) {
+      void openCamera(true);
+    } else {
+      requestAnimationFrame(() => fileInput.current?.click());
+    }
   };
 
   const removeOrDiscard = async (
@@ -371,28 +496,31 @@ export function InvoiceSourceUpload({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <label
-          className={`relative flex min-h-12 cursor-pointer items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium focus-within:ring-2 focus-within:ring-ring ${
-            blocked ? "pointer-events-none opacity-50" : "hover:bg-accent"
-          }`}
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-12"
+          disabled={blocked}
+          onClick={() => void openCamera()}
         >
           <Camera className="h-4 w-4" aria-hidden="true" />
           Take photo
-          <input
-            ref={cameraInput}
-            type="file"
-            disabled={blocked}
-            accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif"
-            capture="environment"
-            aria-label="Take invoice photo with rear camera"
-            className="absolute inset-0 cursor-pointer opacity-0"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              void selectFile(file, "camera");
-            }}
-          />
-        </label>
+        </Button>
+        <input
+          ref={cameraInput}
+          type="file"
+          disabled={blocked}
+          accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif"
+          capture="environment"
+          aria-label="Take invoice photo with rear camera"
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (cameraOpen) closeCamera();
+            void selectFile(file, "camera");
+          }}
+        />
         <label
           className={`relative flex min-h-12 cursor-pointer items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium focus-within:ring-2 focus-within:ring-ring ${
             blocked ? "pointer-events-none opacity-50" : "hover:bg-accent"
@@ -422,9 +550,10 @@ export function InvoiceSourceUpload({
           capture={pending}
           uploading={uploadingNames.length > 0}
           retrying={uploadFailed}
-          onRetake={() =>
-            (pending.source === "camera" ? cameraInput : fileInput).current?.click()
-          }
+          onRetake={() => {
+            if (pending.source === "camera") void openCamera(Boolean(replacementAsset));
+            else fileInput.current?.click();
+          }}
           onRemove={() => {
             setUploadFailed(false);
             setReplacementAsset(null);
@@ -578,6 +707,75 @@ export function InvoiceSourceUpload({
           {localError ?? error}
         </p>
       ) : null}
+
+      <Dialog
+        open={cameraOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeCamera();
+        }}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl border-slate-700 bg-slate-950 p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Take invoice photo</DialogTitle>
+            <DialogDescription>
+              Place the full invoice inside the frame and make sure the text is readable.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative flex min-h-64 items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-black sm:min-h-96">
+            <video
+              ref={video}
+              autoPlay
+              muted
+              playsInline
+              aria-label="Live camera preview"
+              className="max-h-[65vh] w-full object-contain"
+              onCanPlay={() => setCameraReady(true)}
+            />
+            {cameraStarting ? (
+              <p className="absolute text-sm text-slate-300" role="status">
+                Opening camera…
+              </p>
+            ) : null}
+            {cameraError ? (
+              <div
+                className="absolute inset-x-4 rounded border border-red-500/60 bg-slate-950/95 p-4 text-sm text-red-300"
+                role="alert"
+              >
+                {cameraError}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-12"
+              onClick={closeCamera}
+            >
+              Cancel
+            </Button>
+            {cameraError ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-12"
+                onClick={() => cameraInput.current?.click()}
+              >
+                Choose an image instead
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              className="min-h-12"
+              disabled={!cameraReady || Boolean(cameraError)}
+              onClick={capturePhoto}
+            >
+              <Camera className="h-4 w-4" aria-hidden="true" />
+              Capture photo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
