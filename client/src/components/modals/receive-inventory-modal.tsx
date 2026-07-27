@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -122,6 +122,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [totalAmount, setTotalAmount] = useState("");
   const [items, setItems] = useState<LineItem[]>([newLineItem()]);
   const vendorInputRef = useRef<HTMLInputElement>(null);
+  const duplicateWarningRef = useRef<HTMLDivElement>(null);
+  const duplicateReasonInputRef = useRef<HTMLInputElement>(null);
   const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
   const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
@@ -151,6 +153,25 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     aiReviewWorkspace?.issues.find(
       (issue) => issue.path === `header.${field}`,
     );
+
+  const focusDuplicateWarning = useCallback(() => {
+    duplicateWarningRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    duplicateReasonInputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (
+      !open ||
+      preparedInvoiceIntent?.duplicateStatus !== "suspected"
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(focusDuplicateWarning);
+    return () => cancelAnimationFrame(frame);
+  }, [focusDuplicateWarning, open, preparedInvoiceIntent?.duplicateStatus]);
 
   // Get subgroups for a given groupId
   const getSubgroups = (groupId: string) => {
@@ -594,6 +615,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       return;
     }
     if (preparedInvoiceIntent?.duplicateStatus === "suspected") {
+      focusDuplicateWarning();
       toast({
         title: "Possible duplicate",
         description:
@@ -666,7 +688,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           ) : null}
 
           {preparedInvoiceIntent?.duplicateStatus === "suspected" ? (
-            <div className="space-y-2 rounded border border-destructive bg-destructive/5 p-3">
+            <div
+              ref={duplicateWarningRef}
+              className="scroll-m-6 space-y-2 rounded border border-destructive bg-destructive/5 p-3"
+            >
               <p className="text-sm font-medium text-destructive">
                 Possible duplicate invoice. Stock has not been updated.
               </p>
@@ -675,6 +700,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
+                  ref={duplicateReasonInputRef}
                   aria-label="Duplicate override reason"
                   value={duplicateReason}
                   onChange={(event) => setDuplicateReason(event.target.value)}
