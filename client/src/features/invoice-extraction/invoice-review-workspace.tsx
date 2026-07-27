@@ -372,13 +372,11 @@ export function InvoiceReviewWorkspace({
       if (saved.lines.every((line) => line.match.decision !== "unresolved")) {
         setShowLineApprovalError(false);
       }
-      if (match.decision === "existing") {
-        setNewPartDraft((value) => {
-          const next = { ...value };
-          delete next[lineId];
-          return next;
-        });
-      }
+      setNewPartDraft((value) => {
+        const next = { ...value };
+        delete next[lineId];
+        return next;
+      });
       setCandidates((value) => ({ ...value, [lineId]: [] }));
       setSaveState("saved");
       await onDraftChanged?.();
@@ -881,24 +879,32 @@ export function InvoiceReviewWorkspace({
                         type="button"
                         variant="outline"
                         className="min-h-11"
-                        onClick={() =>
+                        onClick={() => {
+                          const proposed = line.match.proposedNewPart;
                           setNewPartDraft((value) => ({
                             ...value,
                             [line.id]: value[line.id] ?? {
-                              name: line.description ?? "",
-                              partNumber: line.vendorPartNumber ?? "",
+                              name: proposed?.name ?? line.description ?? "",
+                              partNumber:
+                                proposed?.partNumber ??
+                                line.vendorPartNumber ??
+                                "",
                               itemType:
-                                line.classification === "consumable"
+                                proposed?.itemType ??
+                                (line.classification === "consumable"
                                   ? "consumable"
-                                  : "inventory",
-                              category: "",
-                              groupId: "",
-                              subgroupId: "",
+                                  : "inventory"),
+                              category: proposed?.category ?? "",
+                              groupId: proposed?.groupId ?? "",
+                              subgroupId: proposed?.subgroupId ?? "",
                             },
-                          }))
-                        }
+                          }));
+                        }}
                       >
-                        Prepare new part
+                        {line.match.decision === "new" &&
+                        line.match.proposedNewPart
+                          ? "Edit new part"
+                          : "Prepare new part"}
                       </Button>
                     </div>
                   ) : null}

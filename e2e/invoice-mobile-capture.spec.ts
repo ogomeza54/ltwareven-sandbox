@@ -48,6 +48,14 @@ interface MockState {
   reviewHeader: Record<string, string | null>;
   reviewedFields: string[];
   selectedPartId: string | null;
+  proposedNewPart: {
+    name: string;
+    partNumber: string;
+    itemType: "inventory" | "consumable";
+    category: string | null;
+    groupId: string | null;
+    subgroupId: string | null;
+  } | null;
   lineUnitCost: string | null;
   lineClassification: "inventory" | "consumable" | "unknown";
   lineDecision: "draft" | "approved";
@@ -125,6 +133,7 @@ async function mockApplication(
     },
     reviewedFields: [],
     selectedPartId: null,
+    proposedNewPart: null,
     lineUnitCost: null,
     lineClassification: "inventory",
     lineDecision: "draft",
@@ -245,10 +254,14 @@ async function mockApplication(
     ) {
       const body = request.postDataJSON() as {
         revision: number;
-        matches: Array<{ selectedPartId: string | null }>;
+        matches: Array<{
+          selectedPartId: string | null;
+          proposedNewPart: MockState["proposedNewPart"];
+        }>;
       };
       expect(body).not.toHaveProperty("companyId");
       state.selectedPartId = body.matches[0]?.selectedPartId ?? null;
+      state.proposedNewPart = body.matches[0]?.proposedNewPart ?? null;
       state.revision += 1;
       return json(route, reviewWorkspace(state));
     }
@@ -550,7 +563,11 @@ function reviewWorkspace(state: MockState) {
         classification: state.lineClassification,
         proposed: completed.proposal?.lines[0],
         match: {
-          decision: state.selectedPartId ? "existing" : "unresolved",
+          decision: state.selectedPartId
+            ? "existing"
+            : state.proposedNewPart
+              ? "new"
+              : "unresolved",
           selectedPart: state.selectedPartId
             ? {
                 id: state.selectedPartId,
@@ -560,7 +577,7 @@ function reviewWorkspace(state: MockState) {
                 itemType: "inventory",
               }
             : null,
-          proposedNewPart: null,
+          proposedNewPart: state.proposedNewPart,
           originalSuggestion: null,
         },
       },
@@ -884,6 +901,12 @@ test("AI extraction is polled and stops at a human review result without stock w
   await expect(page.getByText("Not linked to stock")).toBeVisible();
   await page.getByRole("button", { name: "Prepare new part" }).click();
   await expect(page.getByLabel("New part name")).toBeVisible();
+  await page.getByLabel("New part reference").fill("NEW-BP-1");
+  await page.getByRole("button", { name: "Save new-part proposal" }).click();
+  await expect(page.getByText("New stock part will be created")).toBeVisible();
+  await expect(page.getByLabel("New part name")).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit new part" }).click();
+  await expect(page.getByLabel("New part reference")).toHaveValue("NEW-BP-1");
   await page.getByRole("button", { name: "Find matches" }).click();
   await expect(page.getByText("Score 95/100")).toBeVisible();
   await page.getByRole("button", { name: "Select" }).click();
@@ -1070,5 +1093,14 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await page.getByRole("button", { name: "Confirm & Update Stock" }).click();
   await expect.poll(() => state.stockConfirmations).toBe(1);
   expect(state.intakeSubmissions).toBe(0);
-  await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  const reopen = page
+    .getByRole("button", { name: "Receive Inventory", exact: true })
+    .first();
+  await expect(reopen).toBeVisible();
+  await reopen.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("page-one.png")).toHaveCount(0);
+  await expect(page.getByText(/Status: completed/)).toHaveCount(0);
+  await expect(page.getByText("0 of 10 pages saved.")).toBeVisible();
 });

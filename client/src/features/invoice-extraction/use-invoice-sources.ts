@@ -75,9 +75,14 @@ export function useInvoiceSources(open: boolean) {
   }, [companyId]);
 
   useEffect(() => {
-    if (!open || mutationCount > 0 || !drafts.data) return;
-    updateDraft(drafts.data);
-  }, [drafts.data, mutationCount, open]);
+    if (!open || mutationCount > 0 || drafts.isLoading) return;
+    if (drafts.data) {
+      updateDraft(drafts.data);
+      return;
+    }
+    draftRef.current = null;
+    setDraft(null);
+  }, [drafts.data, drafts.isLoading, mutationCount, open]);
 
   const runMutation = async <T>(
     operation: () => Promise<T>,

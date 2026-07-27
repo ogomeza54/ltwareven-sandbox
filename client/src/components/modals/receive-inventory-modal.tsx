@@ -95,6 +95,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
   const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
+  const [invoiceSourceSession, setInvoiceSourceSession] = useState(0);
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -342,6 +343,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      queryClient.invalidateQueries({
+        queryKey: ["invoice-drafts-for-receiving"],
+      });
+      setInvoiceSourceSession((session) => session + 1);
       toast({
         title: "Inventory received",
         description: "The reviewed invoice updated stock exactly once.",
@@ -417,6 +422,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           <InvoiceSourceUpload
+            key={invoiceSourceSession}
             open={open}
             onBusyChange={setInvoiceSourceBusy}
             onConfirmationPrepared={applyPreparedInvoice}
@@ -479,7 +485,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     <th className="text-left px-3 py-2 text-foreground font-medium w-16">Qty</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-28">Lot Price</th>
                     <th className="text-right px-3 py-2 text-foreground font-medium w-24">Line Total</th>
-                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Unit cost after proportional tax & delivery allocation">Landed</th>
+                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Per-unit cost after proportional tax and freight allocation">Landed / unit</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -700,7 +706,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
                         {/* Landed Cost */}
                         <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
-                          <span className="font-medium text-amber-500 md:hidden">Landed</span>
+                          <span className="font-medium text-amber-500 md:hidden">Landed / unit</span>
                           {item.partNameSnapshot.trim() ? (
                             <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
                               ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
@@ -724,6 +730,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 </tbody>
               </table>
             </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Landed / unit = (line total + proportional tax and freight) ÷ quantity.
+            </p>
           </div>
 
           {/* Footer — Invoice reference fields + ancillary costs */}
