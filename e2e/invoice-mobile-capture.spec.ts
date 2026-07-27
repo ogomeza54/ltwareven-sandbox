@@ -986,9 +986,12 @@ test("an approved unknown line is identified before final confirmation", async (
   await type.blur();
   await expect.poll(() => state.lineClassification).toBe("inventory");
   await page.getByRole("button", { name: "Approve lines & totals" }).click();
+  await expect(page.locator("#receive-inventory-vendor")).toHaveValue(
+    "Test Vendor",
+  );
   await expect(
     page.getByRole("button", { name: "Prepare confirmation summary" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
 });
 
 test("reviewed invoice confirms stock exactly once through the reserved intent", async ({
@@ -1038,9 +1041,9 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await expect(resolutionError).toHaveCount(0);
   await page.getByRole("button", { name: "Approve lines & totals" }).click();
   await expect.poll(() => state.lineDecision).toBe("approved");
-  await page
-    .getByRole("button", { name: "Prepare confirmation summary" })
-    .click();
+  await expect(
+    page.getByRole("button", { name: "Prepare confirmation summary" }),
+  ).toHaveCount(0);
   await expect(
     page.getByLabel("Invoice confirmation summary"),
   ).toContainText("100.00 USD");

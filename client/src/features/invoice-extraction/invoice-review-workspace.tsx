@@ -132,6 +132,10 @@ export function InvoiceReviewWorkspace({
   }>>({});
   const [confirmationIntent, setConfirmationIntent] =
     useState<InvoiceConfirmationIntentDto | null>(null);
+  const confirmationIntentRef = useRef<InvoiceConfirmationIntentDto | null>(
+    null,
+  );
+  const preparingConfirmationRef = useRef(false);
   const [preparingConfirmation, setPreparingConfirmation] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string | null>(
     null,
@@ -172,6 +176,7 @@ export function InvoiceReviewWorkspace({
 
   useEffect(() => {
     if (confirmationIntent) {
+      confirmationIntentRef.current = confirmationIntent;
       onConfirmationPrepared?.(confirmationIntent);
     }
   }, [confirmationIntent, onConfirmationPrepared]);
@@ -384,8 +389,15 @@ export function InvoiceReviewWorkspace({
 
   const prepareConfirmation = async (): Promise<void> => {
     const current = workspaceRef.current;
-    if (!current) return;
+    if (
+      !current ||
+      confirmationIntentRef.current ||
+      preparingConfirmationRef.current
+    ) {
+      return;
+    }
     confirmationKey.current ??= globalThis.crypto.randomUUID();
+    preparingConfirmationRef.current = true;
     setPreparingConfirmation(true);
     setConfirmationError(null);
     try {
@@ -394,10 +406,10 @@ export function InvoiceReviewWorkspace({
         current,
         confirmationKey.current,
       );
+      confirmationIntentRef.current = intent;
       setConfirmationIntent(intent);
-      onConfirmationPrepared?.(intent);
       setWorkflowNotice(
-        "Confirmation summary is ready. Review it before updating stock.",
+        "Review completed. The confirmation form is ready below.",
       );
       await onDraftChanged?.();
       if (!onConfirmationPrepared) {
@@ -416,6 +428,7 @@ export function InvoiceReviewWorkspace({
           : "Confirmation summary could not be prepared.",
       );
     } finally {
+      preparingConfirmationRef.current = false;
       setPreparingConfirmation(false);
     }
   };
@@ -462,13 +475,9 @@ export function InvoiceReviewWorkspace({
           return;
         }
         setWorkflowNotice(
-          "Header, lines and totals are approved. Continue to final confirmation.",
+          "Header, lines and totals are approved. Preparing the confirmation form…",
         );
-        requestAnimationFrame(() =>
-          document
-            .getElementById("invoice-final-confirmation")
-            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-        );
+        void prepareConfirmation();
       });
       return;
     }
@@ -499,13 +508,9 @@ export function InvoiceReviewWorkspace({
       return;
     }
     setWorkflowNotice(
-      "Header, lines and totals are approved. Continue to final confirmation.",
+      "Header, lines and totals are approved. Preparing the confirmation form…",
     );
-    requestAnimationFrame(() =>
-      document
-        .getElementById("invoice-final-confirmation")
-        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-    );
+    await prepareConfirmation();
   };
 
   const goToIssue = (direction: -1 | 1): void => {
@@ -1156,29 +1161,30 @@ export function InvoiceReviewWorkspace({
               <div>
                 <h4 className="font-medium">Final confirmation</h4>
                 <p className="text-xs text-muted-foreground">
-                  The server recalculates the summary and checks duplicates. This step does not update stock.
+                  The server automatically recalculates the summary and checks duplicates. This does not update stock.
                 </p>
               </div>
-              {!confirmationIntent ? (
-                <Button
-                  type="button"
-                  className="min-h-11"
-                  disabled={preparingConfirmation}
-                  onClick={() => void prepareConfirmation()}
-                >
-                  {preparingConfirmation
-                    ? "Preparing summary…"
-                    : "Prepare confirmation summary"}
-                </Button>
+              {!confirmationIntent && preparingConfirmation ? (
+                <p className="text-sm text-muted-foreground" role="status">
+                  Preparing confirmation form…
+                </p>
               ) : null}
             </div>
             {confirmationError ? (
-              <p
-                role="alert"
-                className="mt-3 rounded border border-destructive p-2 text-sm text-destructive"
-              >
-                {confirmationError}
-              </p>
+              <div className="mt-3 rounded border border-destructive p-2">
+                <p role="alert" className="text-sm text-destructive">
+                  {confirmationError}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 min-h-11"
+                  disabled={preparingConfirmation}
+                  onClick={() => void prepareConfirmation()}
+                >
+                  Retry preparation
+                </Button>
+              </div>
             ) : null}
             {confirmationIntent ? (
               <div
@@ -1244,8 +1250,8 @@ export function InvoiceReviewWorkspace({
                             confirmationIntent,
                             duplicateReason,
                           );
+                          confirmationIntentRef.current = overridden;
                           setConfirmationIntent(overridden);
-                          onConfirmationPrepared?.(overridden);
                         } catch (caught) {
                           setError(caught instanceof Error ? caught.message : "Duplicate override failed.");
                         }
