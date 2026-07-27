@@ -4,22 +4,20 @@ import type { InvoiceQualityDashboard } from "@shared/invoice-extraction/contrac
 import Sidebar from "@/components/layout/sidebar";
 import TopBar from "@/components/layout/top-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle2, Gauge, ScanLine, WandSparkles } from "lucide-react";
+import { AlertTriangle, Gauge, ScanLine, WandSparkles } from "lucide-react";
 
 const percent = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toFixed(1)}%`;
+const completionRate = (
+  accepted: number,
+  systemAdded: number,
+  reviewed: number,
+) => (reviewed === 0 ? null : (accepted + systemAdded) / reviewed);
 const duration = (seconds: number | null) => {
   if (seconds === null) return "—";
   if (seconds < 60) return `${Math.round(seconds)} sec`;
   return `${(seconds / 60).toFixed(1)} min`;
 };
-const outcomeLabel = (key: string) => {
-  if (key === "automatic enrichment") return "Added by the system";
-  if (key === "accepted") return "Accepted unchanged";
-  if (key === "corrected") return "Corrected during review";
-  return key.charAt(0).toUpperCase() + key.slice(1);
-};
-
 export default function InvoiceQuality() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -89,15 +87,13 @@ export default function InvoiceQuality() {
                 </div>
               ) : null}
               <p className="text-sm text-slate-400">
-                Filled by AI shows fields populated from the invoice. Accepted unchanged shows fields kept exactly as proposed. Defaults added by the system and stock matching are measured separately.
+                Automatically completed combines values read correctly from the invoice with values safely completed using inventory data or business rules. Stock matching is measured separately.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 {[
                   ["Invoices reviewed", String(data.totals.documents), `${data.totals.runs} scans`, ScanLine],
-                  ["Filled by AI", percent(data.totals.aiFilledRate), `${data.totals.aiFilledEvents} / ${data.totals.reviewedEvents} fields`, WandSparkles],
+                  ["Automatically completed", percent(completionRate(data.totals.acceptedEvents, data.totals.automaticEnrichmentEvents, data.totals.reviewedEvents)), `${data.totals.acceptedEvents + data.totals.automaticEnrichmentEvents} / ${data.totals.reviewedEvents} fields`, WandSparkles],
                   ["Changed during review", percent(data.totals.correctionRate), `${data.totals.correctedEvents} / ${data.totals.reviewedEvents} fields`, AlertTriangle],
-                  ["Added by the system", percent(data.totals.automaticEnrichmentRate), `${data.totals.automaticEnrichmentEvents} / ${data.totals.reviewedEvents} fields`, Gauge],
-                  ["Accepted unchanged", percent(data.totals.acceptanceRate), `${data.totals.acceptedEvents} / ${data.totals.reviewedEvents} fields`, CheckCircle2],
                   ["Average review", duration(data.totals.averageReviewSeconds), "Confirmed and rejected invoices", Gauge],
                 ].map(([label, value, note, Icon]) => (
                   <Card key={String(label)} className="bg-slate-900 border-slate-800">
@@ -117,14 +113,19 @@ export default function InvoiceQuality() {
 
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <Card className="bg-slate-900 border-slate-800">
-                  <CardHeader><CardTitle className="text-white">Feedback outcomes</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="text-white">Review results</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    {data.byDecision.map((item) => (
-                      <div key={item.key} className="flex justify-between text-sm">
-                        <span className="text-slate-300">{outcomeLabel(item.key)}</span>
-                        <span className="text-slate-400">{item.count} / {item.denominator} · {percent(item.rate)}</span>
-                      </div>
-                    ))}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-300">Automatically completed</span>
+                      <span className="text-slate-400">{data.totals.acceptedEvents + data.totals.automaticEnrichmentEvents} / {data.totals.reviewedEvents} · {percent(completionRate(data.totals.acceptedEvents, data.totals.automaticEnrichmentEvents, data.totals.reviewedEvents))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-300">Changed during review</span>
+                      <span className="text-slate-400">{data.totals.correctedEvents} / {data.totals.reviewedEvents} · {percent(data.totals.correctionRate)}</span>
+                    </div>
+                    <p className="border-t border-slate-800 pt-3 text-xs text-slate-500">
+                      Technical detail: {data.totals.acceptedEvents} extracted values accepted unchanged · {data.totals.automaticEnrichmentEvents} values completed from inventory data or rules.
+                    </p>
                   </CardContent>
                 </Card>
                 <Card className="bg-slate-900 border-slate-800">
@@ -144,10 +145,10 @@ export default function InvoiceQuality() {
                   <CardHeader><CardTitle className="text-white">Engine operations</CardTitle></CardHeader>
                   <CardContent className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="text-left text-slate-500"><tr><th className="pb-2">Version</th><th>Runs</th><th>Failures</th><th>Retries</th><th>Filled by AI</th><th>Changed</th><th>System-added</th></tr></thead>
+                      <thead className="text-left text-slate-500"><tr><th className="pb-2">Version</th><th>Runs</th><th>Failures</th><th>Retries</th><th>Automatically completed</th><th>Changed</th></tr></thead>
                       <tbody>{data.engines.map((engine) => (
                         <tr key={engine.engineVersion} className="border-t border-slate-800 text-slate-300">
-                          <td className="py-3">{engine.engineVersion}</td><td>{engine.runs}</td><td>{engine.failedRuns}</td><td>{engine.retryAttempts}</td><td>{percent(engine.aiFilledRate)}</td><td>{percent(engine.correctionRate)}</td><td>{percent(engine.automaticEnrichmentRate)}</td>
+                          <td className="py-3">{engine.engineVersion}</td><td>{engine.runs}</td><td>{engine.failedRuns}</td><td>{engine.retryAttempts}</td><td>{percent(engine.reviewedEvents === 0 ? null : (engine.reviewedEvents - engine.correctedEvents) / engine.reviewedEvents)}</td><td>{percent(engine.correctionRate)}</td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -159,10 +160,10 @@ export default function InvoiceQuality() {
                 <CardHeader><CardTitle className="text-white">Authorized case drill-down</CardTitle></CardHeader>
                 <CardContent className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="text-left text-slate-500"><tr><th className="pb-2">Supplier</th><th>Status</th><th>Engine</th><th>Filled by AI</th><th>Changed</th><th>System-added</th><th>Review</th><th>Updated</th></tr></thead>
+                    <thead className="text-left text-slate-500"><tr><th className="pb-2">Supplier</th><th>Status</th><th>Engine</th><th>Automatically completed</th><th>Changed</th><th>Review</th><th>Updated</th></tr></thead>
                     <tbody>{data.cases.map((item) => (
                       <tr key={item.draftId} className="border-t border-slate-800 text-slate-300">
-                        <td className="py-3">{item.supplier ?? "Unknown"}</td><td>{item.status}</td><td>{item.engineVersion ?? "—"}</td><td>{item.aiFilledEvents} / {item.reviewedEvents}</td><td>{item.correctedEvents} / {item.reviewedEvents}</td><td>{item.automaticEnrichmentEvents} / {item.reviewedEvents}</td><td>{duration(item.reviewSeconds)}</td><td>{new Date(item.updatedAt).toLocaleDateString()}</td>
+                        <td className="py-3">{item.supplier ?? "Unknown"}</td><td>{item.status}</td><td>{item.engineVersion ?? "—"}</td><td>{item.reviewedEvents - item.correctedEvents} / {item.reviewedEvents}</td><td>{item.correctedEvents} / {item.reviewedEvents}</td><td>{duration(item.reviewSeconds)}</td><td>{new Date(item.updatedAt).toLocaleDateString()}</td>
                       </tr>
                     ))}</tbody>
                   </table>
