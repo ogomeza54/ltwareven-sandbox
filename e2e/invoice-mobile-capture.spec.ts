@@ -49,6 +49,7 @@ interface MockState {
   reviewedFields: string[];
   selectedPartId: string | null;
   lineUnitCost: string | null;
+  lineClassification: "inventory" | "consumable" | "unknown";
   lineDecision: "draft" | "approved";
   confirmationStatus: "reserved" | "completed";
   stockConfirmations: number;
@@ -125,6 +126,7 @@ async function mockApplication(
     reviewedFields: [],
     selectedPartId: null,
     lineUnitCost: null,
+    lineClassification: "inventory",
     lineDecision: "draft",
     confirmationStatus: "reserved",
     stockConfirmations: 0,
@@ -256,9 +258,14 @@ async function mockApplication(
     ) {
       const body = request.postDataJSON() as {
         decision: "draft" | "approved";
-        lines: Array<{ unitCost: string | null }>;
+        lines: Array<{
+          unitCost: string | null;
+          classification: "inventory" | "consumable" | "unknown";
+        }>;
       };
       state.lineUnitCost = body.lines[0]?.unitCost ?? null;
+      state.lineClassification =
+        body.lines[0]?.classification ?? state.lineClassification;
       state.lineDecision = body.decision;
       state.revision += 1;
       return json(route, reviewWorkspace(state));
@@ -540,7 +547,7 @@ function reviewWorkspace(state: MockState) {
         quantity: "2",
         unitCost: state.lineUnitCost,
         calculatedLineTotal: state.lineUnitCost ? "100.00" : null,
-        classification: "inventory",
+        classification: state.lineClassification,
         proposed: completed.proposal?.lines[0],
         match: {
           decision: state.selectedPartId ? "existing" : "unresolved",
@@ -946,6 +953,42 @@ test("a reviewed invoice can be discarded and replaced without changing stock", 
     page.getByText("replacement-after-discard.png saved."),
   ).toBeVisible();
   expect(state.draftCreations).toBe(1);
+});
+
+test("an approved unknown line is identified before final confirmation", async ({
+  page,
+}) => {
+  const state = await mockApplication(page);
+  state.draftStatus = "needs_review";
+  state.reviewDecision = "approved";
+  state.reviewHeader.total = "100.00";
+  state.reviewedFields = ["total"];
+  state.lineUnitCost = "50";
+  state.lineClassification = "unknown";
+  state.lineDecision = "approved";
+  state.selectedPartId = "00000000-0000-4000-8000-000000000030";
+
+  await openReceiveInventory(page);
+  const type = page.getByLabel("Type");
+  await expect(type).toHaveValue("unknown");
+  await expect(
+    page.getByText(
+      "Choose Inventory or Consumable before final confirmation.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Prepare confirmation summary" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Review line issues" }).click();
+  await expect(type).toBeFocused();
+  await type.selectOption("inventory");
+  await type.blur();
+  await expect.poll(() => state.lineClassification).toBe("inventory");
+  await page.getByRole("button", { name: "Approve lines & totals" }).click();
+  await expect(
+    page.getByRole("button", { name: "Prepare confirmation summary" }),
+  ).toBeVisible();
 });
 
 test("reviewed invoice confirms stock exactly once through the reserved intent", async ({

@@ -59,6 +59,33 @@ function issueField(path: string): InvoiceHeaderField | null {
     : null;
 }
 
+type InvoiceReviewLine = InvoiceReviewWorkspaceDto["lines"][number];
+type LineApprovalProblem =
+  | "description"
+  | "quantity"
+  | "unitCost"
+  | "classification"
+  | "match";
+
+function lineApprovalProblems(line: InvoiceReviewLine): LineApprovalProblem[] {
+  const problems: LineApprovalProblem[] = [];
+  if (!line.description?.trim()) problems.push("description");
+  if (!line.quantity) problems.push("quantity");
+  if (!line.unitCost) problems.push("unitCost");
+  if (line.classification === "unknown") problems.push("classification");
+  if (line.match.decision === "unresolved") problems.push("match");
+  return problems;
+}
+
+function lineProblemTarget(
+  line: InvoiceReviewLine,
+  problem: LineApprovalProblem,
+): string {
+  return problem === "match"
+    ? `invoice-line-${line.id}-approval-error`
+    : `review-line-${line.id}-${problem === "unitCost" ? "cost" : problem === "classification" ? "type" : problem}`;
+}
+
 interface Props {
   draftId: string;
   readOnly?: boolean;
@@ -383,9 +410,9 @@ export function InvoiceReviewWorkspace({
   };
 
   const issues = workspace?.issues ?? [];
-  const unresolvedLines = lines.filter(
-    (line) => line.match.decision === "unresolved",
-  );
+  const invalidLines = lines
+    .map((line) => ({ line, problems: lineApprovalProblems(line) }))
+    .filter(({ problems }) => problems.length > 0);
   const activeIssue = issues[Math.min(issueIndex, Math.max(0, issues.length - 1))];
   const currentAsset = workspace?.source.assets[activeAsset];
   const proposed = workspace?.proposedHeader;
@@ -403,10 +430,10 @@ export function InvoiceReviewWorkspace({
   );
 
   const approveLines = (): void => {
-    const unresolved = linesRef.current.filter(
-      (line) => line.match.decision === "unresolved",
-    );
-    if (unresolved.length === 0) {
+    const invalid = linesRef.current
+      .map((line) => ({ line, problems: lineApprovalProblems(line) }))
+      .filter(({ problems }) => problems.length > 0);
+    if (invalid.length === 0) {
       setShowLineApprovalError(false);
       void flushLines("approved").then((approved) => {
         if (!approved) return;
@@ -435,10 +462,10 @@ export function InvoiceReviewWorkspace({
       return;
     }
     setShowLineApprovalError(true);
-    const targetId = unresolved[0].id;
+    const first = invalid[0];
     requestAnimationFrame(() => {
       const target = document.getElementById(
-        `invoice-line-${targetId}-approval-error`,
+        lineProblemTarget(first.line, first.problems[0]),
       );
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
       target?.focus({ preventScroll: true });
@@ -660,6 +687,12 @@ export function InvoiceReviewWorkspace({
         </div>
         <div className="space-y-3">
           {lines.map((line, index) => (
+            (() => {
+              const approvalProblems = lineApprovalProblems(line);
+              const showApprovalProblems =
+                showLineApprovalError ||
+                workspace.reconciliation.decision === "approved";
+              return (
             <article
               key={line.id}
               className="grid gap-2 rounded-lg border border-border p-3 md:grid-cols-2 lg:grid-cols-6"
@@ -668,6 +701,12 @@ export function InvoiceReviewWorkspace({
               <div className="lg:col-span-2">
                 <Label htmlFor={`review-line-${line.id}-description`}>Description</Label>
                 <Input id={`review-line-${line.id}-description`} value={line.description ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { description: event.target.value || null })} onBlur={() => void flushLines()} />
+                {showApprovalProblems &&
+                approvalProblems.includes("description") ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    Enter a description before approving this line.
+                  </p>
+                ) : null}
                 <p className="mt-1 text-xs text-muted-foreground">AI proposed: {line.proposed?.description.normalized ?? line.proposed?.description.observed ?? "Manually added"}</p>
               </div>
               <div>
@@ -677,10 +716,22 @@ export function InvoiceReviewWorkspace({
               <div>
                 <Label htmlFor={`review-line-${line.id}-quantity`}>Quantity</Label>
                 <Input id={`review-line-${line.id}-quantity`} inputMode="decimal" value={line.quantity ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { quantity: event.target.value || null })} onBlur={() => void flushLines()} />
+                {showApprovalProblems &&
+                approvalProblems.includes("quantity") ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    Enter a quantity before approving this line.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <Label htmlFor={`review-line-${line.id}-cost`}>Unit cost</Label>
                 <Input id={`review-line-${line.id}-cost`} inputMode="decimal" value={line.unitCost ?? ""} disabled={readOnly} onChange={(event) => changeLine(line.id, { unitCost: event.target.value || null })} onBlur={() => void flushLines()} />
+                {showApprovalProblems &&
+                approvalProblems.includes("unitCost") ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    Enter a unit cost before approving this line.
+                  </p>
+                ) : null}
                 <p className="mt-1 text-xs text-muted-foreground">Server line total: {line.calculatedLineTotal ?? "Incomplete"}</p>
               </div>
               <div>
@@ -697,6 +748,12 @@ export function InvoiceReviewWorkspace({
                   <option value="consumable">Consumable</option>
                   <option value="unknown">Needs review</option>
                 </select>
+                {showApprovalProblems &&
+                approvalProblems.includes("classification") ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    Choose Inventory or Consumable before final confirmation.
+                  </p>
+                ) : null}
                 {!readOnly ? (
                   <Button
                     type="button"
@@ -754,8 +811,8 @@ export function InvoiceReviewWorkspace({
                     </p>
                   </div>
                 </div>
-                {showLineApprovalError &&
-                line.match.decision === "unresolved" ? (
+                {showApprovalProblems &&
+                approvalProblems.includes("match") ? (
                   <div
                     id={`invoice-line-${line.id}-approval-error`}
                     tabIndex={-1}
@@ -1002,6 +1059,8 @@ export function InvoiceReviewWorkspace({
                 ) : null}
               </div>
             </article>
+              );
+            })()
           ))}
         </div>
 
@@ -1023,6 +1082,14 @@ export function InvoiceReviewWorkspace({
               ? "Amounts reconcile within the configured tolerance."
               : "Correct missing values or the amount difference before approval."}
           </p>
+          {invalidLines.length > 0 &&
+          workspace.reconciliation.decision === "approved" ? (
+            <p className="mt-2 text-sm text-destructive" role="alert">
+              {invalidLines.length} approved invoice line
+              {invalidLines.length === 1 ? " still needs" : "s still need"} a
+              required value before final confirmation.
+            </p>
+          ) : null}
           {!readOnly ? (
             <Button
               type="button"
@@ -1033,27 +1100,32 @@ export function InvoiceReviewWorkspace({
                   : "default"
               }
               disabled={
-                workspace.reconciliation.decision === "approved" ||
+                (workspace.reconciliation.decision === "approved" &&
+                  invalidLines.length === 0) ||
                 !workspace.reconciliation.withinTolerance ||
                 lineSaving.current
               }
               aria-describedby={
-                showLineApprovalError && unresolvedLines.length > 0
-                  ? unresolvedLines
-                      .map(
-                        (line) =>
-                          `invoice-line-${line.id}-approval-error`,
+                showLineApprovalError && invalidLines.length > 0
+                  ? invalidLines
+                      .flatMap(({ line, problems }) =>
+                        problems.map((problem) =>
+                          lineProblemTarget(line, problem),
+                        ),
                       )
                       .join(" ")
                   : undefined
               }
               onClick={approveLines}
             >
-              {workspace.reconciliation.decision === "approved" ? (
+              {workspace.reconciliation.decision === "approved" &&
+              invalidLines.length === 0 ? (
                 <>
                   <Check className="mr-2 h-4 w-4" />
                   Lines & totals approved
                 </>
+              ) : workspace.reconciliation.decision === "approved" ? (
+                "Review line issues"
               ) : (
                 "Approve lines & totals"
               )}
@@ -1064,7 +1136,7 @@ export function InvoiceReviewWorkspace({
         {workspace.decision === "approved" &&
         workspace.reconciliation.decision === "approved" &&
         workspace.lines.length > 0 &&
-        workspace.lines.every((line) => line.match.decision !== "unresolved") ? (
+        invalidLines.length === 0 ? (
           <div
             id="invoice-final-confirmation"
             className="rounded-lg border border-amber-500/50 p-3"
@@ -1218,28 +1290,10 @@ export function InvoiceReviewWorkspace({
             workspace.reconciliation.decision !== "approved") ? (
             <div
               role="status"
-              className="flex flex-wrap items-center justify-between gap-2 rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
+              className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
             >
-              <span>
-                {workflowNotice ??
-                  "Header approved. Next: approve the invoice lines and totals."}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                className="min-h-11"
-                onClick={() =>
-                  document
-                    .getElementById(
-                      workspace.reconciliation.decision === "approved"
-                        ? "invoice-final-confirmation"
-                        : "invoice-lines-approval-section",
-                    )
-                    ?.scrollIntoView({ behavior: "smooth", block: "center" })
-                }
-              >
-                Go to next step
-              </Button>
+              {workflowNotice ??
+                "Header approved. Next: approve the invoice lines and totals."}
             </div>
           ) : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
