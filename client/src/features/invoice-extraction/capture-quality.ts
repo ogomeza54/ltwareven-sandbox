@@ -1,3 +1,5 @@
+import type { PDFDocumentProxy } from "pdfjs-dist";
+
 export const MAX_CAPTURE_ANALYSIS_PIXELS = 1_000_000;
 export const MAX_CAPTURE_SIDE_PIXELS = 20_000;
 
@@ -12,6 +14,14 @@ export interface CaptureQualityWarning {
   code: CaptureQualityWarningCode;
   message: string;
   action: string;
+  page?: number;
+}
+
+export interface PdfPageQualityResult {
+  page: number;
+  width: number;
+  height: number;
+  warnings: CaptureQualityWarning[];
 }
 
 export type CaptureQualityResult =
@@ -20,6 +30,7 @@ export type CaptureQualityResult =
       width: number;
       height: number;
       warnings: CaptureQualityWarning[];
+      pages?: PdfPageQualityResult[];
     }
   | {
       status: "unavailable";
@@ -176,15 +187,123 @@ export function analyzeCapturePixels(
   };
 }
 
+async function analyzePdfFile(file: File): Promise<CaptureQualityResult> {
+  if (typeof document === "undefined") {
+    return {
+      status: "unavailable",
+      reason: "This browser cannot check PDF page quality locally. You can still upload the original.",
+    };
+  }
+
+  let pdf: PDFDocumentProxy | null = null;
+  try {
+    const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
+      import("pdfjs-dist"),
+      import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+    ]);
+    GlobalWorkerOptions.workerSrc = workerModule.default;
+    const loadingTask = getDocument({
+      data: new Uint8Array(await file.arrayBuffer()),
+      isEvalSupported: false,
+      useWorkerFetch: false,
+      stopAtErrors: true,
+    });
+    pdf = await loadingTask.promise;
+    if (pdf.numPages > 10) {
+      return {
+        status: "unavailable",
+        reason: "This PDF has more than 10 pages. Select a document with no more than 10 pages.",
+      };
+    }
+
+    const pages: PdfPageQualityResult[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      try {
+        const inspectionViewport = page.getViewport({ scale: 2 });
+        if (
+          !Number.isFinite(inspectionViewport.width) ||
+          !Number.isFinite(inspectionViewport.height) ||
+          inspectionViewport.width < 1 ||
+          inspectionViewport.height < 1 ||
+          inspectionViewport.width > MAX_CAPTURE_SIDE_PIXELS ||
+          inspectionViewport.height > MAX_CAPTURE_SIDE_PIXELS
+        ) {
+          throw new Error("Unsafe PDF page dimensions");
+        }
+        const scale = Math.min(
+          1,
+          Math.sqrt(
+            MAX_CAPTURE_ANALYSIS_PIXELS /
+              (inspectionViewport.width * inspectionViewport.height),
+          ),
+        );
+        const viewport = page.getViewport({ scale: 2 * scale });
+        const width = Math.max(1, Math.floor(viewport.width));
+        const height = Math.max(1, Math.floor(viewport.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d", {
+          alpha: false,
+          willReadFrequently: true,
+        });
+        if (!context) throw new Error("Canvas unavailable");
+        await page.render({
+          canvas,
+          canvasContext: context,
+          viewport,
+        }).promise;
+        const pixels = context.getImageData(0, 0, width, height);
+        const result = analyzeCapturePixels(
+          pixels.data,
+          width,
+          height,
+          Math.floor(inspectionViewport.width),
+          Math.floor(inspectionViewport.height),
+        );
+        if (result.status !== "available") {
+          throw new Error("Page quality unavailable");
+        }
+        pages.push({
+          page: pageNumber,
+          width: result.width,
+          height: result.height,
+          warnings: result.warnings.map((item) => ({
+            ...item,
+            page: pageNumber,
+          })),
+        });
+      } finally {
+        page.cleanup();
+      }
+    }
+
+    const firstPage = pages[0];
+    if (!firstPage) throw new Error("PDF has no pages");
+    return {
+      status: "available",
+      width: firstPage.width,
+      height: firstPage.height,
+      warnings: pages.flatMap((page) => page.warnings),
+      pages,
+    };
+  } catch {
+    return {
+      status: "unavailable",
+      reason:
+        "PDF quality checks could not be completed locally. Review every rendered page before upload.",
+    };
+  } finally {
+    await pdf?.destroy();
+  }
+}
+
 export async function analyzeInvoiceFile(
   file: File,
 ): Promise<CaptureQualityResult> {
   if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-    return {
-      status: "unavailable",
-      reason:
-        "Automatic image-quality checks are not available for PDF files. Review the rendered page before upload.",
-    };
+    return analyzePdfFile(file);
   }
   if (/hei[cf]$/i.test(file.name)) {
     return {

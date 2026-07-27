@@ -33,6 +33,32 @@ function onePagePdf(): Buffer {
   return Buffer.from(source);
 }
 
+function twoPagePdf(): Buffer {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 5 0 R >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 6 0 R >>",
+    "<< /Length 27 >>\nstream\n0 0 0 RG 72 650 468 72 re S\nendstream",
+    "<< /Length 27 >>\nstream\n0 0 0 RG 72 550 468 72 re S\nendstream",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(source));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(source);
+  source += `xref\n0 ${objects.length + 1}\n`;
+  source += "0000000000 65535 f \n";
+  source += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(source);
+}
+
 interface MockState {
   revision: number;
   draftStatus:
@@ -760,25 +786,25 @@ test("mobile and narrow reflow keep controls reachable without required horizont
   }
 });
 
-test("PDF selection renders its first page locally before upload", async ({
+test("PDF selection renders and checks every page locally before upload", async ({
   page,
 }) => {
   await mockApplication(page);
   await openReceiveInventory(page);
   await page.getByLabel("Choose invoice image or PDF").setInputFiles({
-    name: "local-preview.pdf",
+    name: "local-two-page-preview.pdf",
     mimeType: "application/pdf",
-    buffer: onePagePdf(),
+    buffer: twoPagePdf(),
   });
   await expect(
     page.getByRole("img", { name: "Local preview of the first PDF page" }),
   ).toBeVisible();
-  await expect(page.getByText("Page 1 of 1")).toBeVisible();
+  await expect(page.getByText("Page 1 of 2")).toBeVisible();
+  await expect(page.getByText("2 pages checked")).toBeVisible();
+  await expect(page.getByText(/Page 1:/)).toBeVisible();
+  await expect(page.getByText(/Page 2:/)).toBeVisible();
   await expect(
-    page.getByText(/Automatic image-quality checks are not available/),
-  ).toBeVisible();
-  await expect(
-    page.getByText("A local preview is not available for this format."),
+    page.getByText(/quality checks.*not.*available/i),
   ).toHaveCount(0);
 });
 

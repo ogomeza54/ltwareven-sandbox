@@ -80,7 +80,7 @@ test("quality analysis is bounded and unavailable remains non-blocking", () => {
   assert.equal(result.status, "unavailable");
 });
 
-test("PDF quality guidance expects the rendered local preview", async () => {
+test("PDF quality analysis reports a browser fallback outside the DOM", async () => {
   const result = await analyzeInvoiceFile(
     new File([new Uint8Array([37, 80, 68, 70])], "invoice.pdf", {
       type: "application/pdf",
@@ -89,7 +89,7 @@ test("PDF quality guidance expects the rendered local preview", async () => {
   assert.deepEqual(result, {
     status: "unavailable",
     reason:
-      "Automatic image-quality checks are not available for PDF files. Review the rendered page before upload.",
+      "This browser cannot check PDF page quality locally. You can still upload the original.",
   });
 });
 

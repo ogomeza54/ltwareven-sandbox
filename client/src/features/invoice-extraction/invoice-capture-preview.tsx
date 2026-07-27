@@ -1,6 +1,5 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { AlertTriangle, CheckCircle2, FileText, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PendingInvoiceCapture } from "./capture-quality";
@@ -34,8 +33,11 @@ function LocalPdfPreview({ file }: { file: File }) {
       setStatus("loading");
       setPageCount(null);
       try {
-        const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist");
-        GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
+          import("pdfjs-dist"),
+          import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+        ]);
+        GlobalWorkerOptions.workerSrc = workerModule.default;
         const loadingTask = getDocument({
           data: new Uint8Array(await file.arrayBuffer()),
           isEvalSupported: false,
@@ -168,12 +170,14 @@ export const InvoiceCapturePreview = forwardRef<
           <p className="text-sm text-muted-foreground">
             {formatBytes(capture.file.size)}
             {quality.status === "available"
-              ? ` · ${quality.width} × ${quality.height} pixels`
+              ? quality.pages
+                ? ` · ${quality.pages.length} ${quality.pages.length === 1 ? "page" : "pages"} checked`
+                : ` · ${quality.width} × ${quality.height} pixels`
               : ""}
           </p>
           {quality.status === "checking" ? (
             <p role="status" className="text-sm text-muted-foreground">
-              Checking image quality…
+              Checking document quality…
             </p>
           ) : quality.status === "unavailable" ? (
             <div role="status" className="flex gap-2 text-sm text-amber-500">
@@ -183,9 +187,10 @@ export const InvoiceCapturePreview = forwardRef<
           ) : warnings.length ? (
             <div role="status" aria-label="Image quality warnings" className="space-y-2">
               {warnings.map((item) => (
-                <div key={item.code} className="flex gap-2 text-sm">
+                <div key={`${item.page ?? 0}-${item.code}`} className="flex gap-2 text-sm">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
                   <p>
+                    {item.page ? <span className="font-medium">Page {item.page}: </span> : null}
                     <span className="font-medium">{item.message}</span>{" "}
                     {item.action}
                   </p>
@@ -195,7 +200,9 @@ export const InvoiceCapturePreview = forwardRef<
           ) : (
             <p role="status" className="flex gap-2 text-sm text-foreground">
               <CheckCircle2 className="h-4 w-4 text-green-500" aria-hidden="true" />
-              No obvious image-quality problems were found.
+              {quality.pages
+                ? `No obvious quality problems were found across ${quality.pages.length} PDF ${quality.pages.length === 1 ? "page" : "pages"}.`
+                : "No obvious image-quality problems were found."}
             </p>
           )}
         </div>
