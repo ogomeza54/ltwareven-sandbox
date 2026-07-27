@@ -27,8 +27,12 @@ import type {
   InvoiceHeaderField,
   InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
+import {
+  resolveInvoiceItemType,
+  type InvoiceItemType,
+} from "@/features/invoice-extraction/invoice-item-type";
 
-type ItemType = "inventory" | "consumable" | "adjustment";
+type ItemType = InvoiceItemType;
 
 interface LineItem {
   id: string;
@@ -219,6 +223,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         lotPrice,
         lineTotal: lotPrice,
         itemType: (part.itemType as ItemType) || "inventory",
+        classificationNeedsReview: false,
         groupId: part.groupId || undefined,
         subgroupId: part.subgroupId || undefined,
       };
@@ -274,6 +279,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             )
           : null;
         const proposedPart = line.match.proposedNewPart;
+        const resolvedType = resolveInvoiceItemType({
+          classification: line.classification,
+          selectedPartType: line.match.selectedPart?.itemType,
+          proposedPartType: proposedPart?.itemType,
+        });
         const quantity = Number(line.quantity ?? "1") || 1;
         const lineTotal =
           line.calculatedLineTotal ??
@@ -296,13 +306,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 proposedPart?.partNumber ||
                 line.match.selectedPart?.partNumber ||
                 "",
-          itemType:
-            line.classification === "adjustment"
-              ? "adjustment"
-              : line.classification === "consumable"
-                ? "consumable"
-                : proposedPart?.itemType ?? "inventory",
-          classificationNeedsReview: line.classification === "unknown",
+          itemType: resolvedType.itemType,
+          classificationNeedsReview: resolvedType.needsReview,
           groupId: isAdjustment
             ? undefined
             : existingPart?.groupId || proposedPart?.groupId || undefined,
