@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
 import { InvoiceSourceUpload } from "@/features/invoice-extraction/invoice-source-upload";
+import { confirmInvoiceIntent } from "@/features/invoice-extraction/invoice-source-api";
+import type { InvoiceConfirmationIntentDto } from "@shared/invoice-extraction/contracts";
 
 type ItemType = "inventory" | "consumable";
 
@@ -91,6 +93,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [items, setItems] = useState<LineItem[]>([newLineItem()]);
   const vendorInputRef = useRef<HTMLInputElement>(null);
   const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
+  const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
+    useState<InvoiceConfirmationIntentDto | null>(null);
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -213,7 +217,66 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setItems([newLineItem()]);
     setPartSearch({});
     setSearchFocus(null);
+    setPreparedInvoiceIntent(null);
   };
+
+  const applyPreparedInvoice = useCallback(
+    (intent: InvoiceConfirmationIntentDto) => {
+      const mappedItems: LineItem[] = intent.summary.lines.map((line) => {
+        const existingPart =
+          line.resolution.kind === "existing"
+            ? (allParts as any[]).find(
+                (part: any) => part.id === line.resolution.partId,
+              )
+            : null;
+        const proposedPart =
+          line.resolution.kind === "new"
+            ? line.resolution.proposedPart
+            : null;
+        return {
+          id: `ai-${line.lineId}`,
+          partId:
+            line.resolution.kind === "existing"
+              ? line.resolution.partId
+              : undefined,
+          partNameSnapshot:
+            line.resolution.kind === "existing"
+              ? line.resolution.partName
+              : proposedPart?.name ?? line.description,
+          partNumberSnapshot:
+            line.partNumber || proposedPart?.partNumber || "",
+          itemType: line.itemType,
+          groupId:
+            existingPart?.groupId || proposedPart?.groupId || undefined,
+          subgroupId:
+            existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
+          qty: Number(line.quantity),
+          lotPrice: line.lineTotal,
+          lineTotal: line.lineTotal,
+        };
+      });
+      setPreparedInvoiceIntent(intent);
+      setVendor(intent.summary.vendor);
+      setInvoiceNumber(intent.summary.invoiceNumber ?? "");
+      setInvoiceDate(intent.summary.invoiceDate ?? "");
+      setTaxAmount(intent.summary.tax);
+      setDeliveryFee(intent.summary.freight);
+      setTotalAmount(intent.summary.total);
+      setItems(mappedItems);
+      setPartSearch(
+        Object.fromEntries(
+          mappedItems.map((item) => [item.id, item.partNameSnapshot]),
+        ),
+      );
+      requestAnimationFrame(() =>
+        vendorInputRef.current?.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        }),
+      );
+    },
+    [allParts],
+  );
 
   const handleClose = () => {
     if (invoiceSourceBusy) {
@@ -272,7 +335,42 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     },
   });
 
+  const confirmPreparedMutation = useMutation({
+    mutationFn: async (intent: InvoiceConfirmationIntentDto) =>
+      confirmInvoiceIntent(intent),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      toast({
+        title: "Inventory received",
+        description: "The reviewed invoice updated stock exactly once.",
+      });
+      handleClose();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to confirm invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSubmit = () => {
+    if (preparedInvoiceIntent) {
+      if (preparedInvoiceIntent.duplicateStatus === "suspected") {
+        toast({
+          title: "Possible duplicate",
+          description:
+            "Review or override the duplicate warning before updating stock.",
+          variant: "destructive",
+        });
+        return;
+      }
+      confirmPreparedMutation.mutate(preparedInvoiceIntent);
+      return;
+    }
     if (!vendor.trim()) {
       toast({ title: "Vendor required", description: "Please enter a vendor name.", variant: "destructive" });
       return;
@@ -321,6 +419,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           <InvoiceSourceUpload
             open={open}
             onBusyChange={setInvoiceSourceBusy}
+            onConfirmationPrepared={applyPreparedInvoice}
             onEnterManual={() => {
               vendorInputRef.current?.scrollIntoView({
                 block: "center",
@@ -330,6 +429,20 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             }}
           />
 
+          {preparedInvoiceIntent ? (
+            <div
+              role="status"
+              className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
+            >
+              AI-reviewed invoice loaded below. Verify the traditional form,
+              then confirm once to update stock.
+            </div>
+          ) : null}
+
+          <fieldset
+            disabled={Boolean(preparedInvoiceIntent)}
+            className="contents disabled:opacity-80"
+          >
           {/* Vendor — only field needed before entering items */}
           <div className="max-w-sm space-y-1.5">
             <Label htmlFor="receive-inventory-vendor" className="text-foreground font-medium">Vendor / Supplier *</Label>
@@ -618,8 +731,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             {/* Invoice details row */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-foreground font-medium">Invoice Number</Label>
+                <Label htmlFor="receive-inventory-invoice-number" className="text-foreground font-medium">Invoice Number</Label>
                 <Input
+                  id="receive-inventory-invoice-number"
                   placeholder="e.g., INV-2024-00821"
                   value={invoiceNumber}
                   onChange={e => setInvoiceNumber(e.target.value)}
@@ -650,10 +764,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               <div className="text-foreground font-medium text-right">Parts Subtotal</div>
               <div className="text-foreground text-right font-semibold">${subtotal.toFixed(2)}</div>
 
-              <Label className="text-foreground font-medium text-right self-center">Tax</Label>
+              <Label htmlFor="receive-inventory-tax" className="text-foreground font-medium text-right self-center">Tax</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-tax"
                   type="number"
                   min="0"
                   step="0.01"
@@ -664,10 +779,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 />
               </div>
 
-              <Label className="text-foreground font-medium text-right self-center">Delivery / Freight</Label>
+              <Label htmlFor="receive-inventory-freight" className="text-foreground font-medium text-right self-center">Delivery / Freight</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-freight"
                   type="number"
                   min="0"
                   step="0.01"
@@ -681,10 +797,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               <div className="text-foreground/60 text-right text-sm">Calculated Total</div>
               <div className="text-foreground text-right text-sm">${calculatedTotal.toFixed(2)}</div>
 
-              <Label className="text-foreground font-semibold text-right self-center">Invoice Total</Label>
+              <Label htmlFor="receive-inventory-total" className="text-foreground font-semibold text-right self-center">Invoice Total</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-total"
                   type="number"
                   min="0"
                   step="0.01"
@@ -709,19 +826,24 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             )}
             </div>
           </div>
+          </fieldset>
         </div>
 
         {/* Actions */}
         <div className="flex shrink-0 flex-col-reverse gap-2 border-t bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-6 sm:pb-4">
-          <Button variant="outline" className="min-h-11" onClick={handleClose} disabled={createMutation.isPending || invoiceSourceBusy}>
+          <Button variant="outline" className="min-h-11" onClick={handleClose} disabled={createMutation.isPending || confirmPreparedMutation.isPending || invoiceSourceBusy}>
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMutation.isPending || invoiceSourceBusy}
+            disabled={createMutation.isPending || confirmPreparedMutation.isPending || invoiceSourceBusy}
             className="min-h-11 bg-amber-500 font-semibold text-white hover:bg-amber-600"
           >
-            {createMutation.isPending
+            {confirmPreparedMutation.isPending
+              ? "Confirming..."
+              : preparedInvoiceIntent
+                ? "Confirm & Update Stock"
+                : createMutation.isPending
               ? "Saving..."
               : invoiceSourceBusy
                 ? "Saving invoice source…"

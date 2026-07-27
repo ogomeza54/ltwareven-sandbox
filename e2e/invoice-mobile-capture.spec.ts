@@ -1001,12 +1001,12 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
     page.getByRole("region", { name: "Invoice review workspace" }),
   ).toBeVisible({ timeout: 8_000 });
 
-  await page.getByLabel("Invoice number").fill("INV-E2E-1");
-  await page.getByLabel("Invoice number").blur();
-  await page.getByLabel("Invoice date").fill("2026-07-23");
-  await page.getByLabel("Invoice date").blur();
-  await page.getByLabel("Invoice total").fill("100.00");
-  await page.getByLabel("Invoice total").blur();
+  await page.locator("#invoice-review-invoiceNumber").fill("INV-E2E-1");
+  await page.locator("#invoice-review-invoiceNumber").blur();
+  await page.locator("#invoice-review-invoiceDate").fill("2026-07-23");
+  await page.locator("#invoice-review-invoiceDate").blur();
+  await page.locator("#invoice-review-total").fill("100.00");
+  await page.locator("#invoice-review-total").blur();
   await expect.poll(() => state.reviewedFields.includes("total")).toBe(true);
   await page.getByRole("button", { name: "Approve header" }).click();
   await expect.poll(() => state.reviewDecision).toBe("approved");
@@ -1049,8 +1049,23 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
       "Summary ready. Review these values, then confirm to update stock.",
     ),
   ).toBeVisible();
-  await expect(page.getByLabel("Invoice confirmation summary")).toBeInViewport();
-  await page.getByRole("button", { name: "Confirm & update stock" }).click();
+  await expect(page.locator("#receive-inventory-vendor")).toHaveValue(
+    "Test Vendor",
+  );
+  await expect(page.locator("#receive-inventory-vendor")).toBeInViewport();
+  await expect(
+    page.locator("#receive-inventory-invoice-number"),
+  ).toHaveValue("INV-E2E-1");
+  await expect(page.getByLabel("Part or item name")).toHaveValue(
+    "Brake Pad Catalog",
+  );
+  await expect(page.getByLabel("Part number")).toHaveValue("BP-100");
+  await expect(page.getByLabel("Lot price")).toHaveValue("100.00");
+  await expect(page.locator("#receive-inventory-tax")).toHaveValue("0.00");
+  await expect(page.locator("#receive-inventory-total")).toHaveValue("100.00");
+  expect(state.intakeSubmissions).toBe(0);
+  await page.getByRole("button", { name: "Confirm & Update Stock" }).click();
   await expect.poll(() => state.stockConfirmations).toBe(1);
+  expect(state.intakeSubmissions).toBe(0);
   await expect(page.getByRole("button", { name: "Receive & Update Stock" })).toBeVisible();
 });

@@ -90,12 +90,14 @@ interface Props {
   draftId: string;
   readOnly?: boolean;
   onDraftChanged?: () => Promise<unknown>;
+  onConfirmationPrepared?: (intent: InvoiceConfirmationIntentDto) => void;
 }
 
 export function InvoiceReviewWorkspace({
   draftId,
   readOnly = false,
   onDraftChanged,
+  onConfirmationPrepared,
 }: Props) {
   const [workspace, setWorkspace] = useState<InvoiceReviewWorkspaceDto | null>(null);
   const workspaceRef = useRef<InvoiceReviewWorkspaceDto | null>(null);
@@ -167,6 +169,12 @@ export function InvoiceReviewWorkspace({
       .then((value) => setCatalogTree(Array.isArray(value) ? value : []))
       .catch(() => setCatalogTree([]));
   }, []);
+
+  useEffect(() => {
+    if (confirmationIntent) {
+      onConfirmationPrepared?.(confirmationIntent);
+    }
+  }, [confirmationIntent, onConfirmationPrepared]);
 
   const flush = async (
     decision: "draft" | "approved" = "draft",
@@ -387,17 +395,20 @@ export function InvoiceReviewWorkspace({
         confirmationKey.current,
       );
       setConfirmationIntent(intent);
+      onConfirmationPrepared?.(intent);
       setWorkflowNotice(
         "Confirmation summary is ready. Review it before updating stock.",
       );
       await onDraftChanged?.();
-      requestAnimationFrame(() =>
+      if (!onConfirmationPrepared) {
         requestAnimationFrame(() =>
-          document
-            .getElementById("invoice-confirmation-summary")
-            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-        ),
-      );
+          requestAnimationFrame(() =>
+            document
+              .getElementById("invoice-confirmation-summary")
+              ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+          ),
+        );
+      }
     } catch (caught) {
       setConfirmationError(
         caught instanceof Error
@@ -1229,12 +1240,12 @@ export function InvoiceReviewWorkspace({
                       disabled={duplicateReason.trim().length < 3}
                       onClick={async () => {
                         try {
-                          setConfirmationIntent(
-                            await overrideInvoiceDuplicate(
-                              confirmationIntent,
-                              duplicateReason,
-                            ),
+                          const overridden = await overrideInvoiceDuplicate(
+                            confirmationIntent,
+                            duplicateReason,
                           );
+                          setConfirmationIntent(overridden);
+                          onConfirmationPrepared?.(overridden);
                         } catch (caught) {
                           setError(caught instanceof Error ? caught.message : "Duplicate override failed.");
                         }
@@ -1257,7 +1268,8 @@ export function InvoiceReviewWorkspace({
                   <p className="rounded border border-green-500/50 p-2 text-sm text-green-500">
                     Inventory received exactly once. Intake {confirmationIntent.intakeId}. Use inventory adjustments for later corrections.
                   </p>
-                ) : confirmationIntent.duplicateStatus !== "suspected" ? (
+                ) : confirmationIntent.duplicateStatus !== "suspected" &&
+                  !onConfirmationPrepared ? (
                   <Button
                     type="button"
                     className="min-h-11"
@@ -1273,6 +1285,12 @@ export function InvoiceReviewWorkspace({
                   >
                     Confirm & update stock
                   </Button>
+                ) : onConfirmationPrepared &&
+                  confirmationIntent.duplicateStatus !== "suspected" ? (
+                  <p className="text-sm text-green-500">
+                    Review transferred below. Use the main Confirm &amp; Update
+                    Stock button to complete this receipt.
+                  </p>
                 ) : null}
               </div>
             ) : null}

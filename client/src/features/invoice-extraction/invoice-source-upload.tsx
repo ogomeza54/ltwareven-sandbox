@@ -24,7 +24,10 @@ import {
   privateInvoiceAssetUrl,
   startInvoiceExtraction,
 } from "./invoice-source-api";
-import type { InvoiceExtractionRunDto } from "@shared/invoice-extraction/contracts";
+import type {
+  InvoiceConfirmationIntentDto,
+  InvoiceExtractionRunDto,
+} from "@shared/invoice-extraction/contracts";
 import { useInvoiceSources } from "./use-invoice-sources";
 import { InvoiceReviewWorkspace } from "./invoice-review-workspace";
 import {
@@ -41,12 +44,14 @@ interface InvoiceSourceUploadProps {
   open: boolean;
   onEnterManual: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onConfirmationPrepared?: (intent: InvoiceConfirmationIntentDto) => void;
 }
 
 export function InvoiceSourceUpload({
   open,
   onEnterManual,
   onBusyChange,
+  onConfirmationPrepared,
 }: InvoiceSourceUploadProps) {
   const { companyId } = useCompany();
   const {
@@ -356,6 +361,7 @@ export function InvoiceSourceUpload({
           draftId={draft.id}
           readOnly={draft.status === "rejected"}
           onDraftChanged={refresh}
+          onConfirmationPrepared={onConfirmationPrepared}
         />
       ) : null}
 
