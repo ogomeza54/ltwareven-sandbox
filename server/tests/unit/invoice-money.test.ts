@@ -54,14 +54,16 @@ test("reconciliation uses explicit tolerance and remains incomplete for missing 
   assert.equal(incomplete.withinTolerance, false);
 });
 
-test("numeric validation rejects negative, exponent, excessive precision, zero quantity and overflow", () => {
+test("numeric validation accepts signed nonzero quantities and rejects invalid money", () => {
+  assert.equal(normalizeQuantity("-2"), "-2");
+  assert.equal(centsToDecimal(lineExtensionCents("-2", "45.00")), "-90.00");
   for (const operation of [
     () => normalizeQuantity("0"),
-    () => normalizeQuantity("-1"),
     () => normalizeQuantity("1e3"),
     () => normalizeQuantity("1.1234567"),
     () => normalizeQuantity("123456789012345"),
     () => normalizeUnitCost("1.12345"),
+    () => normalizeUnitCost("-1"),
     () => normalizeUnitCost("NaN"),
   ]) {
     assert.throws(operation, InvoiceNumericError);

@@ -29,7 +29,7 @@ export class InvoiceLineReviewService {
         vendorPartNumber: string | null;
         quantity: string | null;
         unitCost: string | null;
-        classification: "inventory" | "consumable" | "unknown";
+        classification: "inventory" | "consumable" | "adjustment" | "unknown";
       }>;
       decision: "draft" | "approved";
     },

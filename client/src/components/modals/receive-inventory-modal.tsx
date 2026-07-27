@@ -28,7 +28,7 @@ import type {
   InvoiceReviewWorkspaceDto,
 } from "@shared/invoice-extraction/contracts";
 
-type ItemType = "inventory" | "consumable";
+type ItemType = "inventory" | "consumable" | "adjustment";
 
 interface LineItem {
   id: string;
@@ -133,6 +133,12 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const { data: catalogTree = [] } = useQuery<any[]>({ queryKey: ["/api/catalog/tree"] });
 
   const subtotal = sumLines(items);
+  const stockSubtotal = sumLines(
+    items.filter((item) => item.itemType !== "adjustment"),
+  );
+  const adjustmentTotal = sumLines(
+    items.filter((item) => item.itemType === "adjustment"),
+  );
   const taxNum = parseFloat(taxAmount) || 0;
   const deliveryNum = parseFloat(deliveryFee) || 0;
   const calculatedTotal = subtotal + taxNum + deliveryNum;
@@ -261,6 +267,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const applyAiReview = useCallback(
     (workspace: InvoiceReviewWorkspaceDto) => {
       const mappedItems: LineItem[] = workspace.lines.map((line) => {
+        const isAdjustment = line.classification === "adjustment";
         const existingPart = line.match.selectedPart
           ? (allParts as any[]).find(
               (part: any) => part.id === line.match.selectedPart?.id,
@@ -274,26 +281,34 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         return {
           id: `ai-${line.id}`,
           reviewLineId: line.id,
-          partId: line.match.selectedPart?.id,
+          partId: isAdjustment ? undefined : line.match.selectedPart?.id,
           partNameSnapshot:
-            line.match.selectedPart?.name ??
-            proposedPart?.name ??
-            line.description ??
-            "",
+            isAdjustment
+              ? line.description ?? "Financial adjustment"
+              : line.match.selectedPart?.name ??
+                proposedPart?.name ??
+                line.description ??
+                "",
           partNumberSnapshot:
-            line.vendorPartNumber ||
-            proposedPart?.partNumber ||
-            line.match.selectedPart?.partNumber ||
-            "",
+            isAdjustment
+              ? line.vendorPartNumber ?? ""
+              : line.vendorPartNumber ||
+                proposedPart?.partNumber ||
+                line.match.selectedPart?.partNumber ||
+                "",
           itemType:
-            line.classification === "consumable"
-              ? "consumable"
-              : proposedPart?.itemType ?? "inventory",
+            line.classification === "adjustment"
+              ? "adjustment"
+              : line.classification === "consumable"
+                ? "consumable"
+                : proposedPart?.itemType ?? "inventory",
           classificationNeedsReview: line.classification === "unknown",
-          groupId:
-            existingPart?.groupId || proposedPart?.groupId || undefined,
-          subgroupId:
-            existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
+          groupId: isAdjustment
+            ? undefined
+            : existingPart?.groupId || proposedPart?.groupId || undefined,
+          subgroupId: isAdjustment
+            ? undefined
+            : existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
           qty: quantity,
           lotPrice: lineTotal,
           lineTotal,
@@ -445,6 +460,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           current.lines.map((line, index) => {
             const item = itemByReviewId.get(line.id) ?? items[index];
             if (!item) throw new Error("An invoice line could not be resolved.");
+            if (item.itemType === "adjustment") {
+              return {
+                lineId: line.id,
+                decision: "unresolved" as const,
+                selectedPartId: null,
+                proposedNewPart: null,
+              };
+            }
             if (item.partId) {
               return {
                 lineId: line.id,
@@ -633,7 +656,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               role="status"
               className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
             >
-              Invoice scanned · {items.length} line{items.length === 1 ? "" : "s"} detected. Review the highlighted stock links and edit any value directly below.
+              Invoice scanned · {items.length} line{items.length === 1 ? "" : "s"} detected. Review stock links and financial adjustments, then edit any value directly below.
             </div>
           ) : null}
 
@@ -740,7 +763,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         {/* Link status icon */}
                         <td className="mb-2 flex items-center gap-2 md:table-cell md:px-2 md:pt-3">
                           <span className="font-medium md:hidden">Catalog status</span>
-                          {item.partId ? (
+                          {item.itemType === "adjustment" ? (
+                            <span title="Financial adjustment — no stock movement">
+                              <span className={item.lineTotal.startsWith("-") ? "text-red-400" : "text-amber-400"}>±</span>
+                            </span>
+                          ) : item.partId ? (
                             <span title="Linked to existing catalog part">
                               <Link2 className="h-3.5 w-3.5 text-green-500" />
                             </span>
@@ -759,7 +786,29 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         <td className="block space-y-1.5 py-2 md:table-cell md:px-3">
                           <span className="font-medium md:hidden">Type &amp; Category</span>
                           {/* Type toggle */}
-                          <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
+                          {item.itemType === "adjustment" ? (
+                            <div className="space-y-1.5">
+                              <Badge
+                                variant="outline"
+                                className={item.lineTotal.startsWith("-")
+                                  ? "min-h-9 border-red-500/60 text-red-400"
+                                  : "min-h-9 border-amber-500/60 text-amber-400"}
+                              >
+                                {item.lineTotal.startsWith("-") ? "Credit" : "Charge"} · no stock movement
+                              </Badge>
+                              <button
+                                type="button"
+                                className="text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                                onClick={() => updateItem(item.id, {
+                                  itemType: "inventory",
+                                  qty: Math.abs(item.qty) || 1,
+                                  lotPrice: Math.abs(parseFloat(item.lotPrice) || 0).toFixed(2),
+                                })}
+                              >
+                                Treat as stock item
+                              </button>
+                            </div>
+                          ) : <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "inventory", classificationNeedsReview: false })}
@@ -784,7 +833,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             >
                               Consumable
                             </button>
-                          </div>
+                          </div>}
                           {item.classificationNeedsReview ? (
                             <p className="text-xs text-amber-500" role="alert">
                               Choose Inventory or Consumable for this line.
@@ -792,6 +841,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           ) : null}
 
                           {/* Group dropdown */}
+                          {item.itemType !== "adjustment" ? (
+                          <>
                           <select
                             value={item.groupId || ""}
                             onChange={e => updateItem(item.id, { groupId: e.target.value || undefined })}
@@ -820,12 +871,27 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               ))}
                             </select>
                           )}
+                          </>
+                          ) : null}
                         </td>
 
                         {/* Part name search */}
                         <td className="block py-2 md:table-cell md:px-3 md:pt-3">
                           <span className="font-medium md:hidden">Part / Item</span>
-                          <div className="relative">
+                          {item.itemType === "adjustment" ? (
+                            <div>
+                              <input
+                                aria-label="Adjustment description"
+                                className="min-h-11 w-full bg-transparent text-foreground outline-none"
+                                value={item.partNameSnapshot}
+                                onChange={(event) => {
+                                  updateItem(item.id, { partNameSnapshot: event.target.value });
+                                  setPartSearch((previous) => ({ ...previous, [item.id]: event.target.value }));
+                                }}
+                              />
+                              <p className="text-xs text-muted-foreground">Included in invoice totals and landed cost; excluded from stock.</p>
+                            </div>
+                          ) : <div className="relative">
                             <div className="flex items-center gap-1">
                               <Search className="h-3 w-3 text-foreground/50 flex-shrink-0" />
                               <input
@@ -902,7 +968,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 )}
                               </div>
                             )}
-                          </div>
+                          </div>}
                         </td>
 
                         {/* Part number */}
@@ -922,11 +988,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           <span className="font-medium md:hidden">Quantity</span>
                           <input
                             type="number"
-                            min="1"
+                            min={item.itemType === "adjustment" ? undefined : "1"}
                             aria-label="Quantity"
                             className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             value={item.qty}
-                            onChange={e => updateItem(item.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                            onChange={e => updateItem(item.id, {
+                              qty: item.itemType === "adjustment"
+                                ? (Number(e.target.value) || 1)
+                                : Math.max(1, parseInt(e.target.value) || 1),
+                            })}
                           />
                         </td>
 
@@ -962,9 +1032,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         {/* Landed Cost */}
                         <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
                           <span className="font-medium text-amber-500 md:hidden">Landed / unit</span>
-                          {item.partNameSnapshot.trim() ? (
-                            <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
-                              ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
+                          {item.itemType === "adjustment" ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : item.partNameSnapshot.trim() ? (
+                            <span className={`font-semibold tabular-nums ${taxNum + deliveryNum + adjustmentTotal !== 0 ? "text-amber-400" : "text-foreground"}`}>
+                              ${parseFloat(calcLandedCost(item.lineTotal, item.qty, stockSubtotal, taxNum + deliveryNum + adjustmentTotal)).toFixed(4)}
                             </span>
                           ) : (
                             <span className="text-muted-foreground/40">—</span>
@@ -986,7 +1058,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Landed / unit = (line total + proportional tax and freight) ÷ quantity.
+              Landed / unit = (stock line total + proportional tax, freight and financial adjustments) ÷ quantity. Adjustment lines never change stock.
             </p>
           </div>
 

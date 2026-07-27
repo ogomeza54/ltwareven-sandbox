@@ -1,0 +1,4 @@
+ALTER TABLE "invoice_review_lines" DROP CONSTRAINT "invoice_review_lines_quantity_positive";--> statement-breakpoint
+ALTER TABLE "invoice_review_lines" DROP CONSTRAINT "invoice_review_lines_classification_valid";--> statement-breakpoint
+ALTER TABLE "invoice_review_lines" ADD CONSTRAINT "invoice_review_lines_quantity_nonzero" CHECK ("invoice_review_lines"."quantity" is null or "invoice_review_lines"."quantity" <> 0);--> statement-breakpoint
+ALTER TABLE "invoice_review_lines" ADD CONSTRAINT "invoice_review_lines_classification_valid" CHECK ("invoice_review_lines"."classification" in ('inventory', 'consumable', 'adjustment', 'unknown'));

@@ -114,7 +114,7 @@ export class PostgresInvoicePartMatchRepository {
     const line = rows<{
       description: string | null;
       vendor_part_number: string | null;
-      classification: "inventory" | "consumable" | "unknown";
+      classification: "inventory" | "consumable" | "adjustment" | "unknown";
     }>(
       await this.database.execute(sql`
         select line.description, line.vendor_part_number, line.classification
@@ -128,6 +128,7 @@ export class PostgresInvoicePartMatchRepository {
       `),
     )[0];
     if (!line) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+    if (line.classification === "adjustment") return [];
     return rankPartCandidates(
       {
         description: line.description,
@@ -170,7 +171,7 @@ export class PostgresInvoicePartMatchRepository {
         id: string;
         description: string | null;
         vendor_part_number: string | null;
-        classification: "inventory" | "consumable" | "unknown";
+        classification: "inventory" | "consumable" | "adjustment" | "unknown";
       }>(
         await tx.execute(sql`
           select id, description, vendor_part_number, classification
@@ -181,6 +182,15 @@ export class PostgresInvoicePartMatchRepository {
       );
       const lineById = new Map(draftLines.map((line) => [line.id, line]));
       if (matches.some((match) => !lineById.has(match.lineId))) {
+        throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
+      }
+      if (
+        matches.some(
+          (match) =>
+            lineById.get(match.lineId)?.classification === "adjustment" &&
+            match.decision !== "unresolved",
+        )
+      ) {
         throw new InvoiceDomainError("INVOICE_INVALID_REQUEST");
       }
       const selectedIds = matches
@@ -244,15 +254,18 @@ export class PostgresInvoicePartMatchRepository {
       const parts = await this.listParts(actor.effectiveCompanyId);
       for (const match of matches) {
         const line = lineById.get(match.lineId)!;
-        const suggestion = rankPartCandidates(
-          {
-            description: line.description,
-            vendorPartNumber: line.vendor_part_number,
-            classification: line.classification,
-          },
-          parts,
-          1,
-        )[0];
+        const suggestion =
+          line.classification === "adjustment"
+            ? undefined
+            : rankPartCandidates(
+                {
+                  description: line.description,
+                  vendorPartNumber: line.vendor_part_number,
+                  classification: line.classification,
+                },
+                parts,
+                1,
+              )[0];
         const originalSuggestion = suggestion
           ? {
               partId: suggestion.part.id,

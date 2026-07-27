@@ -170,7 +170,7 @@ export class PostgresInvoiceConfirmationRepository {
       vendor_part_number: string | null;
       quantity: string | null;
       unit_cost: string | null;
-      classification: "inventory" | "consumable" | "unknown";
+      classification: "inventory" | "consumable" | "adjustment" | "unknown";
       match_decision: "unresolved" | "existing" | "new" | null;
       selected_part_id: string | null;
       selected_part_name: string | null;
@@ -217,6 +217,17 @@ export class PostgresInvoiceConfirmationRepository {
             lineExtensionCents(line.quantity, line.unit_cost, `lines.${index}`),
           ),
         };
+        if (line.classification === "adjustment") {
+          return {
+            ...common,
+            resolution: {
+              kind: "adjustment" as const,
+              adjustmentType: new Decimal(common.lineTotal).isNegative()
+                ? ("credit" as const)
+                : ("charge" as const),
+            },
+          };
+        }
         if (
           line.match_decision === "existing" &&
           line.selected_part_id &&
@@ -674,6 +685,7 @@ export class PostgresInvoiceConfirmationRepository {
       }
       const partById = new Map(existingParts.map((part) => [part.id, part]));
       for (const line of summary.lines) {
+        if (line.resolution.kind === "adjustment") continue;
         const quantity = new Decimal(line.quantity);
         if (
           !quantity.isInteger() ||
@@ -723,7 +735,13 @@ export class PostgresInvoiceConfirmationRepository {
           externalReferenceNumber: summary.invoiceNumber,
           invoicePhotoUrl: null,
         },
-        items: summary.lines.map((line) => {
+        landedAdjustmentAmount: summary.lines
+          .filter((line) => line.resolution.kind === "adjustment")
+          .reduce((sum, line) => sum.add(line.lineTotal), new Decimal(0))
+          .toFixed(2),
+        items: summary.lines
+          .filter((line) => line.resolution.kind !== "adjustment")
+          .map((line) => {
           const existing =
             line.resolution.kind === "existing"
               ? partById.get(line.resolution.partId)
@@ -744,7 +762,7 @@ export class PostgresInvoiceConfirmationRepository {
             unitCost: line.unitCost,
             lineTotal: line.lineTotal,
           };
-        }),
+          }),
       };
       const intake = await receiveInventoryWithinTransaction(
         tx,
@@ -842,7 +860,7 @@ export class PostgresInvoiceConfirmationRepository {
         unit_cost: string | null;
         classification: string;
         original_suggestion: unknown;
-        decision: "existing" | "new";
+        decision: "unresolved" | "existing" | "new";
         selected_part_id: string | null;
         proposed_new_part: unknown;
       }>(
@@ -915,6 +933,7 @@ export class PostgresInvoiceConfirmationRepository {
             ${supplierNormalized}, ${actor.actorCompanyId}, ${actor.actorUserId}
           )
         `);
+        if (line.classification === "adjustment") continue;
         const finalMatch =
           line.decision === "existing"
             ? { kind: "existing", partId: line.selected_part_id }

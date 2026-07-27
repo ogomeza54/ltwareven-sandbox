@@ -73,7 +73,10 @@ function lineApprovalProblems(line: InvoiceReviewLine): LineApprovalProblem[] {
   if (!line.quantity) problems.push("quantity");
   if (!line.unitCost) problems.push("unitCost");
   if (line.classification === "unknown") problems.push("classification");
-  if (line.match.decision === "unresolved") problems.push("match");
+  if (
+    line.classification !== "adjustment" &&
+    line.match.decision === "unresolved"
+  ) problems.push("match");
   return problems;
 }
 
@@ -363,6 +366,7 @@ export function InvoiceReviewWorkspace({
     const eligible = current.lines.filter(
       (line) =>
         line.match.decision === "unresolved" &&
+        line.classification !== "adjustment" &&
         !line.id.startsWith("new-") &&
         Boolean(line.vendorPartNumber?.trim()),
     );
@@ -1318,7 +1322,9 @@ export function InvoiceReviewWorkspace({
                       {line.quantity} × {line.description} · {line.lineTotal} USD ·{" "}
                       {line.resolution.kind === "existing"
                         ? `existing part ${line.resolution.partName}`
-                        : `new part ${line.resolution.proposedPart.name}`}
+                        : line.resolution.kind === "new"
+                          ? `new part ${line.resolution.proposedPart.name}`
+                          : `${line.resolution.adjustmentType} · no stock movement`}
                     </li>
                   ))}
                 </ul>

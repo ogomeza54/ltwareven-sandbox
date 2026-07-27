@@ -379,8 +379,8 @@ export const invoiceReviewLines = pgTable(
       sql`${table.sourceLineIndex} is null or ${table.sourceLineIndex} >= 0`,
     ),
     check(
-      "invoice_review_lines_quantity_positive",
-      sql`${table.quantity} is null or ${table.quantity} > 0`,
+      "invoice_review_lines_quantity_nonzero",
+      sql`${table.quantity} is null or ${table.quantity} <> 0`,
     ),
     check(
       "invoice_review_lines_unit_cost_nonnegative",
@@ -388,7 +388,7 @@ export const invoiceReviewLines = pgTable(
     ),
     check(
       "invoice_review_lines_classification_valid",
-      sql`${table.classification} in ('inventory', 'consumable', 'unknown')`,
+      sql`${table.classification} in ('inventory', 'consumable', 'adjustment', 'unknown')`,
     ),
     foreignKey({
       columns: [table.companyId, table.draftId],

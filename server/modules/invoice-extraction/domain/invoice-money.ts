@@ -14,11 +14,15 @@ function parseDecimal(
   field: string,
   maxScale: number,
   maxIntegerDigits = 14,
+  allowNegative = false,
 ): Decimal {
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
+  const pattern = allowNegative
+    ? /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/
+    : /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+  if (typeof value !== "string" || !pattern.test(value)) {
     throw new InvoiceNumericError(field);
   }
-  const [integer, fraction = ""] = value.split(".");
+  const [integer, fraction = ""] = value.replace(/^-/, "").split(".");
   if (integer.length > maxIntegerDigits || fraction.length > maxScale) {
     throw new InvoiceNumericError(field);
   }
@@ -30,7 +34,7 @@ export function centsToDecimal(cents: Decimal): string {
 }
 
 export function normalizeQuantity(value: string, field = "quantity"): string {
-  const decimal = parseDecimal(value, field, 6);
+  const decimal = parseDecimal(value, field, 6, 14, true);
   if (decimal.isZero()) throw new InvoiceNumericError(field);
   return value;
 }
@@ -51,12 +55,12 @@ export function lineExtensionCents(
   unitCost: string,
   field = "line",
 ): Decimal {
-  const left = parseDecimal(quantity, `${field}.quantity`, 6);
-  if (left.isZero()) {
+  const signedLeft = parseDecimal(quantity, `${field}.quantity`, 6, 14, true);
+  if (signedLeft.isZero()) {
     throw new InvoiceNumericError(`${field}.quantity`);
   }
   const right = parseDecimal(unitCost, `${field}.unitCost`, 4);
-  return left
+  return signedLeft
     .mul(right)
     .mul(100)
     .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);

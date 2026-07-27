@@ -22,6 +22,8 @@ export interface InventoryReceivingLine {
 export interface InventoryReceivingCommand {
   header: Omit<InsertInventoryIntake, "companyId" | "createdByUserId">;
   items: InventoryReceivingLine[];
+  /** Non-stock invoice charges and credits included in landed cost allocation. */
+  landedAdjustmentAmount?: string;
 }
 
 export interface InventoryReceivingResult {

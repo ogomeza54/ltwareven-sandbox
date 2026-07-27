@@ -165,6 +165,7 @@ export async function receiveInventoryWithinTransaction(
     items,
     header.taxAmount,
     header.deliveryFee,
+    command.landedAdjustmentAmount,
   );
   const hasInventoryItem = items.some(
     (item) => (item.itemType || "inventory") === "inventory",

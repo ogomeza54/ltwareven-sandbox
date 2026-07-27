@@ -14,8 +14,10 @@ import {
   reconcileInvoiceMoney,
   centsToDecimal,
   lineExtensionCents,
+  normalizeQuantity,
   type InvoiceReconciliation,
 } from "../domain/invoice-money";
+import { classifyInvoiceProposalLine } from "../domain/invoice-line-classification";
 
 type InvoiceDatabase = typeof applicationDatabase;
 type TransactionExecutor = Parameters<
@@ -42,7 +44,7 @@ export interface EditableReviewLine {
   vendorPartNumber: string | null;
   quantity: string | null;
   unitCost: string | null;
-  classification: "inventory" | "consumable" | "unknown";
+  classification: "inventory" | "consumable" | "adjustment" | "unknown";
 }
 
 export interface ReviewLineRecord extends Omit<EditableReviewLine, "id"> {
@@ -242,25 +244,47 @@ export class PostgresInvoiceLineReviewRepository {
     )[0];
     if (!totals) return null;
     return {
-      lines: lineRows.map((line) => ({
+      lines: lineRows.map((line) => {
+        const proposed =
+          line.source_line_index === null
+            ? null
+            : proposal.lines[line.source_line_index] ?? null;
+        const detectedClassification = proposed
+          ? classifyInvoiceProposalLine(proposed)
+          : line.classification;
+        const proposedQuantity = proposed
+          ? proposed.quantity.normalized ?? proposed.quantity.observed
+          : null;
+        let quantity = line.quantity;
+        if (
+          detectedClassification === "adjustment" &&
+          proposedQuantity !== null
+        ) {
+          try {
+            quantity = normalizeQuantity(proposedQuantity);
+          } catch {
+            // Keep the persisted review value when the proposal is not numeric.
+          }
+        }
+        return {
         id: line.id,
         sourceLineIndex: line.source_line_index,
         position: line.position,
         description: line.description,
         vendorPartNumber: line.vendor_part_number,
-        quantity: line.quantity,
+        quantity,
         unitCost: line.unit_cost,
         calculatedLineTotal:
-          line.quantity !== null && line.unit_cost !== null
+          quantity !== null && line.unit_cost !== null
             ? centsToDecimal(
                 lineExtensionCents(
-                  line.quantity,
+                  quantity,
                   line.unit_cost,
                   `lines.${line.position - 1}`,
                 ),
               )
             : null,
-        classification: line.classification,
+        classification: detectedClassification,
         match: {
           decision: line.match_decision ?? "unresolved",
           selectedPart:
@@ -284,11 +308,9 @@ export class PostgresInvoiceLineReviewRepository {
             (line.original_suggestion as ReviewLineRecord["match"]["originalSuggestion"]) ??
             null,
         },
-        proposed:
-          line.source_line_index === null
-            ? null
-            : proposal.lines[line.source_line_index] ?? null,
-      })),
+        proposed,
+      };
+      }),
       totals: {
         decision: totals.decision,
         complete: totals.complete,

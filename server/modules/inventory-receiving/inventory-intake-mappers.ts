@@ -75,10 +75,12 @@ export function applyLandedCosts(
   items: InventoryReceivingLine[],
   taxAmount: unknown,
   deliveryFee: unknown,
+  adjustmentAmount: unknown = "0",
 ): InventoryReceivingLine[] {
   const totalAncillary =
     parseFloat((taxAmount as string) || "0") +
-    parseFloat((deliveryFee as string) || "0");
+    parseFloat((deliveryFee as string) || "0") +
+    parseFloat((adjustmentAmount as string) || "0");
   const invoiceSubtotal = items.reduce(
     (sum, item) => sum + parseFloat(item.lineTotal || "0"),
     0,

@@ -84,7 +84,7 @@ interface MockState {
   } | null;
   lineVendorPartNumber: string | null;
   lineUnitCost: string | null;
-  lineClassification: "inventory" | "consumable" | "unknown";
+  lineClassification: "inventory" | "consumable" | "adjustment" | "unknown";
   lineDecision: "draft" | "approved";
   confirmationStatus: "reserved" | "completed";
   stockConfirmations: number;
@@ -94,6 +94,7 @@ interface MockState {
   intakeSubmissions: number;
   draftCreations: number;
   matchRevisionConflicts: number;
+  coreAdjustmentInvoice: boolean;
   freshDraftAssets: string[];
   assets: Array<{
     id: string;
@@ -140,6 +141,7 @@ async function mockApplication(
   commitReorderBeforeAbort = false,
   commitDeleteBeforeAbort = false,
   conflictFirstMatchUpdate = false,
+  coreAdjustmentInvoice = false,
 ) {
   let reorderAborted = false;
   let deleteAborted = false;
@@ -175,6 +177,7 @@ async function mockApplication(
     intakeSubmissions: 0,
     draftCreations: 0,
     matchRevisionConflicts: 0,
+    coreAdjustmentInvoice,
     freshDraftAssets: [],
     assets: [
       {
@@ -319,7 +322,7 @@ async function mockApplication(
         decision: "draft" | "approved";
         lines: Array<{
           unitCost: string | null;
-          classification: "inventory" | "consumable" | "unknown";
+          classification: "inventory" | "consumable" | "adjustment" | "unknown";
         }>;
       };
       state.lineUnitCost = body.lines[0]?.unitCost ?? null;
@@ -578,6 +581,62 @@ function extractionRun(
 function reviewWorkspace(state: MockState) {
   const completed = extractionRun(state, "completed");
   const totalReviewed = state.reviewedFields.includes("total");
+  const coreLines = [
+    {
+      id: "00000000-0000-4000-8000-000000000020",
+      sourceLineIndex: 0,
+      position: 1,
+      description: "BRAKE SHOE KIT 4711 Q PLUS",
+      vendorPartNumber: "104F/ABP MK4711Q 20STAN",
+      quantity: "2",
+      unitCost: "61.8000",
+      calculatedLineTotal: "123.60",
+      classification: "consumable" as const,
+      proposed: null,
+      match: {
+        decision: "unresolved" as const,
+        selectedPart: null,
+        proposedNewPart: null,
+        originalSuggestion: null,
+      },
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000021",
+      sourceLineIndex: 1,
+      position: 2,
+      description: "CORE CHARGE",
+      vendorPartNumber: "104F/ABP MK4711Q 20STAN-CORE",
+      quantity: "2",
+      unitCost: "55.0000",
+      calculatedLineTotal: "110.00",
+      classification: "adjustment" as const,
+      proposed: null,
+      match: {
+        decision: "unresolved" as const,
+        selectedPart: null,
+        proposedNewPart: null,
+        originalSuggestion: null,
+      },
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000022",
+      sourceLineIndex: 2,
+      position: 3,
+      description: "CORE RETURN",
+      vendorPartNumber: "104F/ABP MK4711Q 20STAN-CORE",
+      quantity: "-2",
+      unitCost: "45.0000",
+      calculatedLineTotal: "-90.00",
+      classification: "adjustment" as const,
+      proposed: null,
+      match: {
+        decision: "unresolved" as const,
+        selectedPart: null,
+        proposedNewPart: null,
+        originalSuggestion: null,
+      },
+    },
+  ];
   return {
     draftId,
     draftRevision: state.revision,
@@ -585,7 +644,18 @@ function reviewWorkspace(state: MockState) {
     decision: state.reviewDecision,
     rejectionReason: state.rejectionReason,
     proposedHeader: completed.proposal?.header,
-    finalHeader: state.reviewHeader,
+    finalHeader: state.coreAdjustmentInvoice
+      ? {
+          vendorName: "DOGGETT FREIGHTLINER OF SOUTH TEXAS, LLC",
+          invoiceNumber: "X104654880:01",
+          invoiceDate: "2024-09-09",
+          currency: "USD",
+          subtotal: "143.60",
+          tax: "11.86",
+          freight: "0.00",
+          total: "155.46",
+        }
+      : state.reviewHeader,
     reviewedFields: state.reviewedFields,
     issues: totalReviewed
       ? []
@@ -596,7 +666,7 @@ function reviewWorkspace(state: MockState) {
             message: "Invoice total needs review.",
           },
         ],
-    lines: [
+    lines: state.coreAdjustmentInvoice ? coreLines : [
       {
         id: "00000000-0000-4000-8000-000000000020",
         sourceLineIndex: 0,
@@ -628,7 +698,20 @@ function reviewWorkspace(state: MockState) {
         },
       },
     ],
-    reconciliation: {
+    reconciliation: state.coreAdjustmentInvoice ? {
+      decision: "draft",
+      complete: true,
+      withinTolerance: true,
+      observedSubtotal: "143.60",
+      observedTax: "11.86",
+      observedFreight: null,
+      observedTotal: "155.46",
+      calculatedSubtotal: "143.60",
+      calculatedTax: "11.86",
+      calculatedFreight: "0.00",
+      calculatedTotal: "155.46",
+      difference: "0.00",
+    } : {
       decision: state.lineDecision,
       complete: state.lineUnitCost !== null,
       withinTolerance: state.lineUnitCost === "50",
@@ -1120,4 +1203,22 @@ test("confirmation refreshes and retries once after a draft revision conflict", 
   await expect.poll(() => state.stockConfirmations).toBe(1);
   await expect(page.getByText("Failed to confirm invoice")).toHaveCount(0);
   await expect(page.getByRole("dialog")).toBeHidden();
+});
+
+test("CORE charge and return stay financial adjustments with correct landed cost", async ({
+  page,
+}) => {
+  await mockApplication(page, false, false, false, false, false, true);
+  await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
+
+  await expect(page.getByText(/Invoice scanned · 3 lines detected/)).toBeVisible({
+    timeout: 8_000,
+  });
+  await expect(page.getByText("Charge · no stock movement")).toBeVisible();
+  await expect(page.getByText("Credit · no stock movement")).toBeVisible();
+  await expect(page.getByText("$77.7300")).toBeVisible();
+  await expect(page.getByText("$143.60")).toBeVisible();
+  await expect(page.locator("#receive-inventory-total")).toHaveValue("155.46");
+  await expect(page.getByText("Totals Match")).toBeVisible();
 });

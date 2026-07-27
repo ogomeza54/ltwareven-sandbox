@@ -60,7 +60,7 @@ export const invoiceProposalJsonSchema = {
                 additionalProperties: false,
                 required: ["kind", "confidence"],
                 properties: {
-                  kind: { type: "string", enum: ["inventory", "consumable", "unknown"] },
+                  kind: { type: "string", enum: ["inventory", "consumable", "adjustment", "unknown"] },
                   confidence: { type: ["number", "null"], minimum: 0, maximum: 1 },
                 },
               },
@@ -119,7 +119,7 @@ export class OpenAIInvoiceProvider implements InvoiceExtractionProviderPort {
     const content: OpenAI.Responses.ResponseInputContent[] = [
       {
         type: "input_text",
-        text: `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${request.assets.map((asset) => asset.id).join(", ")}.`,
+        text: `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Preserve visible negative quantities and amounts. Classify credits, returns, deposits, rebates, refunds, CORE charges and CORE returns as adjustment; they are financial lines and not stock receipts. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${request.assets.map((asset) => asset.id).join(", ")}.`,
       },
       ...request.assets.map((asset): OpenAI.Responses.ResponseInputContent =>
         asset.mimeType === "application/pdf"

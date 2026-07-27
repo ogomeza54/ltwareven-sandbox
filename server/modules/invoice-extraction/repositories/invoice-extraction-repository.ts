@@ -17,6 +17,7 @@ import {
   normalizeQuantity,
   normalizeUnitCost,
 } from "../domain/invoice-money";
+import { classifyInvoiceProposalLine } from "../domain/invoice-line-classification";
 import { recalculateReviewTotals } from "./invoice-line-review-repository";
 
 type InvoiceDatabase = typeof applicationDatabase;
@@ -530,7 +531,7 @@ export class PostgresInvoiceExtractionRepository {
             ${companyId}, ${run.draft_id}::uuid, ${proposalId}::uuid,
             ${index}, ${index + 1}, ${description}, ${vendorPartNumber},
             ${quantity}, ${unitCost},
-            ${line.classification?.kind ?? "unknown"}
+            ${classifyInvoiceProposalLine(line)}
           )
           on conflict (company_id, draft_id, source_line_index) do nothing
         `);

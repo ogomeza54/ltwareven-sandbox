@@ -149,7 +149,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 13);
+  assert.equal(journal.rowCount, 14);
   for (const [index, migration] of [
     "0000_brownfield_baseline.sql",
     "0001_invoice_ledger_core.sql",
@@ -164,6 +164,7 @@ test("migration journal is idempotent and ledger constraints are installed", asy
     "0010_invoice_confirmation_completion.sql",
     "0011_invoice_feedback_history.sql",
     "0012_invoice_engine_evaluation.sql",
+    "0013_invoice_adjustment_lines.sql",
   ].entries()) {
     const contents = await readFile(`migrations/${migration}`, "utf8");
     assert.equal(
@@ -212,7 +213,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 13);
+  assert.equal(journal.rows[0].count, 14);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {

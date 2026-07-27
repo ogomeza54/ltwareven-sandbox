@@ -208,6 +208,51 @@ describe(
       assert.equal(intake.quickbooksSyncStatus, "pending_usage");
     });
 
+    test("non-stock CORE adjustments affect landed cost without changing stock", async () => {
+      const [part] = await db
+        .insert(inventoryParts)
+        .values({
+          name: `${prefix}brake-shoe-kit`,
+          partNumber: "104F/ABP-MK4711Q",
+          price: "61.80",
+          quantityInStock: 4,
+          companyId,
+        })
+        .returning();
+      const request = command(
+        [{
+          partId: part.id,
+          partNameSnapshot: part.name,
+          partNumberSnapshot: part.partNumber,
+          itemType: "consumable",
+          qty: 2,
+          unitCost: "61.80",
+          lineTotal: "123.60",
+        }],
+        {
+          subtotal: "143.60",
+          taxAmount: "11.86",
+          deliveryFee: "0.00",
+          totalAmount: "155.46",
+        },
+      );
+      request.landedAdjustmentAmount = "20.00";
+      const intake = await receiveInventory(db, request, { companyId, userId });
+      const [updated] = await db
+        .select()
+        .from(inventoryParts)
+        .where(eq(inventoryParts.id, part.id));
+      const [received] = await db
+        .select()
+        .from(inventoryIntakeItems)
+        .where(eq(inventoryIntakeItems.inventoryIntakeId, intake.id));
+      assert.equal(updated?.quantityInStock, 6);
+      assert.equal(updated?.price, "77.73");
+      assert.equal(received?.landedCost, "77.7300");
+      assert.equal(intake.subtotal, "143.60");
+      assert.equal(intake.totalAmount, "155.46");
+    });
+
     test("new part creates or links catalog entry without overwriting a linked entry", async () => {
       const [unlinked] = await db
         .insert(maintenanceItems)

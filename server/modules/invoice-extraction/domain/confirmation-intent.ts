@@ -40,9 +40,13 @@ export function normalizedInvoiceIdentity(
 }
 
 export function stockUnitDelta(
-  lines: readonly { quantity: string }[],
+  lines: readonly {
+    quantity: string;
+    resolution?: { kind: "existing" | "new" | "adjustment" };
+  }[],
 ): string {
   return lines
+    .filter((line) => line.resolution?.kind !== "adjustment")
     .reduce((sum, line) => sum.add(line.quantity), new Decimal(0))
     .toFixed(6)
     .replace(/\.?0+$/, "");
