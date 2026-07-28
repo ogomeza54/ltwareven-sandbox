@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
+  invoiceQualityCaseDetailSchema,
   invoiceQualityDashboardSchema,
   type InvoiceActorContext,
+  type InvoiceQualityCaseDetail,
   type InvoiceQualityDashboard,
   type InvoiceQualityQuery,
 } from "@shared/invoice-extraction/contracts";
@@ -403,6 +405,187 @@ export class PostgresInvoiceQualityRepository {
         ),
         reviewSeconds: decimal(item.review_seconds),
         updatedAt: new Date(item.updated_at).toISOString(),
+      })),
+    });
+  }
+
+  async detail(
+    actor: InvoiceActorContext,
+    draftId: string,
+  ): Promise<InvoiceQualityCaseDetail | null> {
+    const companyId = actor.effectiveCompanyId;
+    const caseRecord = rows<{
+      draft_id: string;
+      status: string;
+      final_values: Record<string, unknown> | null;
+      engine_version: string | null;
+      updated_at: Date | string;
+    }>(
+      await this.database.execute(sql`
+        select draft.id as draft_id, draft.status, header.final_values,
+               run.engine_version, draft.updated_at
+        from invoice_review_drafts draft
+        left join invoice_review_headers header
+          on header.company_id = draft.company_id and header.draft_id = draft.id
+        left join invoice_extraction_runs run
+          on run.company_id = draft.company_id and run.id = draft.active_run_id
+        where draft.company_id = ${companyId}
+          and draft.id = ${draftId}::uuid
+          and exists (
+            select 1 from invoice_feedback_events feedback
+            where feedback.company_id = draft.company_id
+              and feedback.draft_id = draft.id
+          )
+      `),
+    )[0];
+    if (!caseRecord) return null;
+
+    const [assetResult, fieldResult, matchResult] = await Promise.all([
+      this.database.execute(sql`
+        select asset.id, asset.display_name, asset.detected_type,
+               asset.page_count, asset.position
+        from invoice_source_assets asset
+        where asset.company_id = ${companyId}
+          and asset.draft_id = ${draftId}::uuid
+          and asset.lifecycle = 'attached'
+        order by asset.position, asset.id
+      `),
+      this.database.execute(sql`
+        select feedback.subject_type,
+               case when feedback.subject_type = 'header'
+                 then split_part(feedback.subject_path, '.', 2)
+                 else split_part(feedback.subject_path, '.', 3)
+               end as field,
+               line.id as line_id, line.position as line_position,
+               line.description as line_description,
+               feedback.proposal, feedback.final_value,
+               feedback.decision, feedback.reason
+        from invoice_feedback_events feedback
+        left join invoice_review_lines line
+          on feedback.subject_type = 'line'
+         and line.company_id = feedback.company_id
+         and line.draft_id = feedback.draft_id
+         and line.id::text = split_part(feedback.subject_path, '.', 2)
+        where feedback.company_id = ${companyId}
+          and feedback.draft_id = ${draftId}::uuid
+          and feedback.subject_type in ('header', 'line')
+          and (
+            (
+              feedback.proposal is not null
+              and feedback.proposal <> 'null'::jsonb
+              and not (
+                feedback.subject_path like '%.classification'
+                and feedback.proposal = '"unknown"'::jsonb
+              )
+            )
+            or (
+              feedback.final_value is not null
+              and feedback.final_value <> 'null'::jsonb
+              and not (
+                feedback.subject_path like '%.classification'
+                and feedback.final_value = '"unknown"'::jsonb
+              )
+            )
+          )
+        order by case when feedback.subject_type = 'header' then 0 else 1 end,
+                 line.position nulls first, feedback.subject_path
+      `),
+      this.database.execute(sql`
+        select line.id as line_id, line.position as line_position,
+               line.description as line_description, feedback.decision,
+               feedback.proposal, feedback.final_value
+        from invoice_feedback_events feedback
+        join invoice_review_lines line
+          on line.company_id = feedback.company_id
+         and line.draft_id = feedback.draft_id
+         and line.id::text = split_part(feedback.subject_path, '.', 2)
+        where feedback.company_id = ${companyId}
+          and feedback.draft_id = ${draftId}::uuid
+          and feedback.subject_type = 'match'
+        order by line.position, line.id
+      `),
+    ]);
+
+    const fields = rows<{
+      subject_type: "header" | "line";
+      field: string;
+      line_id: string | null;
+      line_position: number | null;
+      line_description: string | null;
+      proposal: unknown;
+      final_value: unknown;
+      decision: string;
+      reason: string | null;
+    }>(fieldResult).map((field) => ({
+      subjectType: field.subject_type,
+      field: field.field,
+      lineId: field.line_id,
+      linePosition: field.line_position === null ? null : integer(field.line_position),
+      lineDescription: field.line_description,
+      proposal: field.proposal ?? null,
+      finalValue: field.final_value ?? null,
+      result:
+        field.decision === "accepted" || field.reason === "automatic_enrichment"
+          ? ("automatically_completed" as const)
+          : ("changed" as const),
+      origin:
+        field.reason === "automatic_enrichment"
+          ? ("system" as const)
+          : field.decision === "accepted"
+            ? ("ai" as const)
+            : ("review" as const),
+    }));
+    const automaticallyCompletedFields = fields.filter(
+      (field) => field.result === "automatically_completed",
+    ).length;
+
+    const finalValues = caseRecord.final_values ?? {};
+    return invoiceQualityCaseDetailSchema.parse({
+      draftId: caseRecord.draft_id,
+      status: caseRecord.status,
+      supplier:
+        typeof finalValues.vendorName === "string" ? finalValues.vendorName : null,
+      invoiceNumber:
+        typeof finalValues.invoiceNumber === "string"
+          ? finalValues.invoiceNumber
+          : null,
+      invoiceDate:
+        typeof finalValues.invoiceDate === "string" ? finalValues.invoiceDate : null,
+      engineVersion: caseRecord.engine_version,
+      updatedAt: new Date(caseRecord.updated_at).toISOString(),
+      summary: {
+        reviewedFields: fields.length,
+        automaticallyCompletedFields,
+        changedFields: fields.length - automaticallyCompletedFields,
+      },
+      assets: rows<{
+        id: string;
+        display_name: string;
+        detected_type: string;
+        page_count: number;
+        position: number;
+      }>(assetResult).map((asset) => ({
+        id: asset.id,
+        displayName: asset.display_name,
+        detectedType: asset.detected_type,
+        pageCount: integer(asset.page_count),
+        position: integer(asset.position),
+      })),
+      fields,
+      matches: rows<{
+        line_id: string;
+        line_position: number;
+        line_description: string | null;
+        decision: "accepted" | "corrected" | "added";
+        proposal: unknown;
+        final_value: unknown;
+      }>(matchResult).map((match) => ({
+        lineId: match.line_id,
+        linePosition: integer(match.line_position),
+        lineDescription: match.line_description,
+        decision: match.decision,
+        proposal: match.proposal ?? null,
+        finalValue: match.final_value ?? null,
       })),
     });
   }

@@ -1585,6 +1585,17 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
       JSON.stringify(dashboard).includes('"finalValue"'),
     false,
   );
+  const caseDetail = await quality.detail(actorA, draft.id);
+  assert.equal(caseDetail.draftId, draft.id);
+  assert.equal(caseDetail.status, "confirmed");
+  assert.ok(caseDetail.assets.some((asset) => asset.displayName === "invoice.png"));
+  assert.ok(caseDetail.fields.length > 0);
+  assert.equal(
+    caseDetail.summary.reviewedFields,
+    caseDetail.summary.automaticallyCompletedFields +
+      caseDetail.summary.changedFields,
+  );
+  assert.ok(caseDetail.matches.length > 0);
   await assert.rejects(
     quality.dashboard(actorB, { limit: 20, offset: 0 }),
     (error: unknown) =>
@@ -1600,6 +1611,13 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
   assert.equal(
     otherTenantDashboard.cases.some((entry) => entry.draftId === draft.id),
     false,
+  );
+  await assert.rejects(
+    quality.detail({ ...actorB, role: "admin" }, draft.id),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "INVOICE_DRAFT_NOT_FOUND",
   );
   const { InvoiceEvaluationService } =
     await import("../../modules/invoice-extraction/services/invoice-evaluation-service");

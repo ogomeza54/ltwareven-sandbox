@@ -91,6 +91,27 @@ export function registerInvoiceReviewRoutes(
     },
   );
   app.get(
+    "/api/invoice-quality/:draftId",
+    isAuthenticated,
+    withCompanyContext,
+    async (request, response) => {
+      try {
+        const draftId = invoiceDraftIdSchema.safeParse(request.params.draftId);
+        if (!draftId.success) {
+          throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
+        }
+        response.json(
+          await qualityService.detail(
+            invoiceActorFromRequest(request),
+            draftId.data,
+          ),
+        );
+      } catch (error) {
+        sendError(error, request, response);
+      }
+    },
+  );
+  app.get(
     "/api/invoice-history",
     isAuthenticated,
     withCompanyContext,

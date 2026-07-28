@@ -4,7 +4,8 @@ import type { InvoiceQualityDashboard } from "@shared/invoice-extraction/contrac
 import Sidebar from "@/components/layout/sidebar";
 import TopBar from "@/components/layout/top-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, Gauge, ScanLine, WandSparkles } from "lucide-react";
+import { InvoiceQualityDetailDialog } from "@/features/invoice-extraction/invoice-quality-detail-dialog";
+import { AlertTriangle, ChevronRight, Gauge, ScanLine, WandSparkles } from "lucide-react";
 
 const percent = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -25,6 +26,7 @@ export default function InvoiceQuality() {
   const [subjectType, setSubjectType] = useState("");
   const [decision, setDecision] = useState("");
   const [engineVersion, setEngineVersion] = useState("");
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const filters = {
     from: from ? new Date(`${from}T00:00:00.000Z`).toISOString() : undefined,
     to: to ? new Date(`${to}T23:59:59.999Z`).toISOString() : undefined,
@@ -157,13 +159,22 @@ export default function InvoiceQuality() {
               </div>
 
               <Card className="bg-slate-900 border-slate-800">
-                <CardHeader><CardTitle className="text-white">Authorized case drill-down</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle className="text-white">Invoice review history</CardTitle>
+                  <p className="text-sm text-slate-400">Select an invoice to see the original document, the recognized values and every change made during review.</p>
+                </CardHeader>
                 <CardContent className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="text-left text-slate-500"><tr><th className="pb-2">Supplier</th><th>Status</th><th>Engine</th><th>Automatically completed</th><th>Changed</th><th>Review</th><th>Updated</th></tr></thead>
+                    <thead className="text-left text-slate-500"><tr><th className="pb-2">Invoice</th><th>Status</th><th>Engine</th><th>Automatically completed</th><th>Changed</th><th>Review</th><th>Updated</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>{data.cases.map((item) => (
-                      <tr key={item.draftId} className="border-t border-slate-800 text-slate-300">
-                        <td className="py-3">{item.supplier ?? "Unknown"}</td><td>{item.status}</td><td>{item.engineVersion ?? "—"}</td><td>{item.reviewedEvents - item.correctedEvents} / {item.reviewedEvents}</td><td>{item.correctedEvents} / {item.reviewedEvents}</td><td>{duration(item.reviewSeconds)}</td><td>{new Date(item.updatedAt).toLocaleDateString()}</td>
+                      <tr key={item.draftId} className="group border-t border-slate-800 text-slate-300 hover:bg-slate-800/40">
+                        <td className="py-3 pr-4">
+                          <button type="button" onClick={() => setSelectedDraftId(item.draftId)} className="min-h-10 text-left font-medium text-slate-100 underline-offset-4 hover:text-amber-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+                            {item.supplier ?? "Unknown supplier"}
+                            <span className="mt-0.5 block text-xs font-normal text-slate-500">View the original invoice and review details</span>
+                          </button>
+                        </td><td>{item.status}</td><td>{item.engineVersion ?? "—"}</td><td>{item.reviewedEvents - item.correctedEvents} / {item.reviewedEvents}</td><td>{item.correctedEvents} / {item.reviewedEvents}</td><td>{duration(item.reviewSeconds)}</td><td>{new Date(item.updatedAt).toLocaleDateString()}</td>
+                        <td><button type="button" aria-label={`View details for ${item.supplier ?? "invoice"}`} onClick={() => setSelectedDraftId(item.draftId)} className="flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-slate-800 hover:text-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"><ChevronRight className="h-5 w-5" /></button></td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -173,6 +184,13 @@ export default function InvoiceQuality() {
           )}
         </main>
       </div>
+      <InvoiceQualityDetailDialog
+        draftId={selectedDraftId}
+        open={selectedDraftId !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setSelectedDraftId(null);
+        }}
+      />
     </div>
   );
 }

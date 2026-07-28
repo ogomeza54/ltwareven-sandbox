@@ -703,6 +703,56 @@ export type InvoiceQualityDashboard = z.infer<
   typeof invoiceQualityDashboardSchema
 >;
 
+export const invoiceQualityCaseDetailSchema = z.object({
+  draftId: z.string().uuid(),
+  status: invoiceDraftStatusSchema,
+  supplier: z.string().nullable(),
+  invoiceNumber: z.string().nullable(),
+  invoiceDate: z.string().nullable(),
+  engineVersion: z.string().nullable(),
+  updatedAt: z.string().datetime(),
+  summary: z.object({
+    reviewedFields: z.number().int().nonnegative(),
+    automaticallyCompletedFields: z.number().int().nonnegative(),
+    changedFields: z.number().int().nonnegative(),
+  }),
+  assets: z.array(
+    z.object({
+      id: z.string().uuid(),
+      displayName: z.string(),
+      detectedType: z.string(),
+      pageCount: z.number().int().positive(),
+      position: z.number().int().positive(),
+    }),
+  ),
+  fields: z.array(
+    z.object({
+      subjectType: z.enum(["header", "line"]),
+      field: z.string(),
+      lineId: z.string().uuid().nullable(),
+      linePosition: z.number().int().positive().nullable(),
+      lineDescription: z.string().nullable(),
+      proposal: z.unknown().nullable(),
+      finalValue: z.unknown().nullable(),
+      result: z.enum(["automatically_completed", "changed"]),
+      origin: z.enum(["ai", "system", "review"]),
+    }),
+  ),
+  matches: z.array(
+    z.object({
+      lineId: z.string().uuid(),
+      linePosition: z.number().int().positive(),
+      lineDescription: z.string().nullable(),
+      decision: z.enum(["accepted", "corrected", "added"]),
+      proposal: z.unknown().nullable(),
+      finalValue: z.unknown().nullable(),
+    }),
+  ),
+});
+export type InvoiceQualityCaseDetail = z.infer<
+  typeof invoiceQualityCaseDetailSchema
+>;
+
 const evaluationHeaderSchema = z
   .object({
     vendorName: z.string().nullable(),
