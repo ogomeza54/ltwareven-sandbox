@@ -238,6 +238,32 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const deliveryNum = parseFloat(deliveryFee) || 0;
   const calculatedTotal = subtotal + taxNum + deliveryNum;
   const reconciliation = getReconciliation(subtotal, taxNum, deliveryNum, totalAmount);
+  const hasFilledItems = items.some((item) => item.partNameSnapshot.trim());
+  const hasUnreviewedClassification = items.some(
+    (item) => item.classificationNeedsReview,
+  );
+  const hasMissingNewPartReference = items.some(
+    (item) =>
+      item.itemType !== "adjustment" &&
+      !item.partId &&
+      item.partNameSnapshot.trim() &&
+      !item.partNumberSnapshot.trim(),
+  );
+  const hasUnresolvedStockSuggestion = items.some(
+    (item) =>
+      item.itemType !== "adjustment" &&
+      !item.partId &&
+      !dismissedPartSuggestions.has(item.id) &&
+      rankStockPartSuggestions(item, allParts as any[]).length > 0,
+  );
+  const isAiAssistedInvoice = Boolean(aiReviewWorkspace || preparedInvoiceIntent);
+  const reviewIsIncomplete =
+    isAiAssistedInvoice &&
+    (reconciliation !== "matched" ||
+      hasUnreviewedClassification ||
+      hasMissingNewPartReference ||
+      hasUnresolvedStockSuggestion ||
+      preparedInvoiceIntent?.duplicateStatus === "suspected");
   const aiIssueFor = (field: string) =>
     aiReviewWorkspace?.issues.find(
       (issue) => issue.path === `header.${field}`,
@@ -708,6 +734,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       });
     },
   });
+
+  const confirmationIsDisabled =
+    createMutation.isPending ||
+    confirmPreparedMutation.isPending ||
+    invoiceSourceBusy ||
+    !vendor.trim() ||
+    !hasFilledItems ||
+    reviewIsIncomplete;
 
   const handleSubmit = () => {
     if (!vendor.trim()) {
@@ -1488,8 +1522,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMutation.isPending || confirmPreparedMutation.isPending || invoiceSourceBusy}
-            className="min-h-11 bg-amber-500 font-semibold text-white hover:bg-amber-600"
+            disabled={confirmationIsDisabled}
+            title={reviewIsIncomplete ? "Review the highlighted invoice details before updating stock." : undefined}
+            className="min-h-11 bg-amber-500 font-semibold text-white hover:bg-amber-600 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
           >
             {confirmPreparedMutation.isPending
               ? "Confirming..."
