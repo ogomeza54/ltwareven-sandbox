@@ -44,6 +44,35 @@ export function normalizeUnitCost(value: string, field = "unitCost"): string {
   return value;
 }
 
+export function deriveUnitCostFromLineTotal(
+  quantity: string,
+  lineTotal: string,
+  field = "line",
+): string {
+  const parsedQuantity = parseDecimal(
+    quantity,
+    `${field}.quantity`,
+    6,
+    14,
+    true,
+  );
+  if (parsedQuantity.isZero()) {
+    throw new InvoiceNumericError(`${field}.quantity`);
+  }
+  const parsedLineTotal = parseDecimal(
+    lineTotal,
+    `${field}.lineTotal`,
+    2,
+    14,
+    true,
+  );
+  const derived = parsedLineTotal.div(parsedQuantity);
+  if (derived.isNegative()) {
+    throw new InvoiceNumericError(`${field}.lineTotal`);
+  }
+  return derived.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed();
+}
+
 export function moneyToCents(value: string, field: string): Decimal {
   return parseDecimal(value, field, 2)
     .mul(100)

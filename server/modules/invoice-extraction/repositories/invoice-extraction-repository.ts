@@ -12,6 +12,7 @@ import { db as applicationDatabase } from "../../../db";
 import type { InvoiceConfig } from "../config/invoice-config";
 import type { InvoiceProviderResult } from "../providers/extraction-provider";
 import {
+  deriveUnitCostFromLineTotal,
   InvoiceNumericError,
   moneyToCents,
   normalizeQuantity,
@@ -520,10 +521,23 @@ export class PostgresInvoiceExtractionRepository {
           line.quantity.normalized ?? line.quantity.observed,
           "quantity",
         );
-        const unitCost = numericOrNull(
+        let unitCost = numericOrNull(
           line.unitCost.normalized ?? line.unitCost.observed,
           "unitCost",
         );
+        const extractedLineTotal =
+          line.lineTotal.normalized ?? line.lineTotal.observed;
+        if (unitCost === null && quantity !== null && extractedLineTotal !== null) {
+          try {
+            unitCost = deriveUnitCostFromLineTotal(
+              quantity,
+              extractedLineTotal,
+              `lines.${index}`,
+            );
+          } catch (error) {
+            if (!(error instanceof InvoiceNumericError)) throw error;
+          }
+        }
         await tx.execute(sql`
           insert into invoice_review_lines (
             company_id, draft_id, proposal_id, source_line_index, position,

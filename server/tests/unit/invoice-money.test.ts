@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  deriveUnitCostFromLineTotal,
   InvoiceNumericError,
   lineExtensionCents,
   centsToDecimal,
@@ -8,6 +9,17 @@ import {
   normalizeUnitCost,
   reconcileInvoiceMoney,
 } from "../../modules/invoice-extraction/domain/invoice-money";
+
+test("missing unit cost is derived from a visible line total", () => {
+  assert.equal(deriveUnitCostFromLineTotal("1", "93.00"), "93");
+  assert.equal(deriveUnitCostFromLineTotal("2", "110.00"), "55");
+  assert.equal(deriveUnitCostFromLineTotal("3", "1.00"), "0.3333");
+  assert.equal(deriveUnitCostFromLineTotal("-2", "-90.00"), "45");
+  assert.throws(
+    () => deriveUnitCostFromLineTotal("2", "-90.00"),
+    InvoiceNumericError,
+  );
+});
 
 test("invoice money rounds each line half-up before summing", () => {
   assert.equal(centsToDecimal(lineExtensionCents("3", "10.005")), "30.02");
