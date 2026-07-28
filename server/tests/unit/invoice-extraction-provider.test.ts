@@ -6,7 +6,10 @@ import {
   startInvoiceExtractionSchema,
   updateInvoiceHeaderReviewSchema,
 } from "@shared/invoice-extraction/contracts";
-import { invoiceProposalJsonSchema } from "../../modules/invoice-extraction/providers/openai-invoice-provider";
+import {
+  buildInvoiceExtractionInstructions,
+  invoiceProposalJsonSchema,
+} from "../../modules/invoice-extraction/providers/openai-invoice-provider";
 import {
   getInvoiceExtractionRun,
   startInvoiceExtraction,
@@ -51,6 +54,14 @@ test("proposal contract keeps observed, normalized, provenance and uncertainty d
     false,
   );
   assert.equal(invoiceProposalJsonSchema.additionalProperties, false);
+});
+
+test("provider uses a visible quote or transaction number when no invoice number exists", () => {
+  const instructions = buildInvoiceExtractionInstructions([id]);
+  assert.match(instructions, /no invoice number is present/i);
+  assert.match(instructions, /quote number, order number, ticket number/i);
+  assert.match(instructions, /header\.invoiceNumber/);
+  assert.match(instructions, /Do not invent a fallback reference/);
 });
 
 test("start command rejects tenant and provider fields", () => {

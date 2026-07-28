@@ -31,6 +31,7 @@ import {
   resolveInvoiceItemType,
   type InvoiceItemType,
 } from "@/features/invoice-extraction/invoice-item-type";
+import { linkInvoiceLineToStock } from "@/features/invoice-extraction/invoice-line-linking";
 
 type ItemType = InvoiceItemType;
 
@@ -353,22 +354,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.id !== id));
 
   const selectPart = (itemId: string, part: any) => {
-    // Lot price = unit price × current qty
+    // Linking identifies the stock item only. The invoice price remains the
+    // source of truth for this receipt and must not be replaced by catalog cost.
     setItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
-      const lotPrice = ((parseFloat(part.price || "0")) * item.qty).toFixed(2);
-      return {
-        ...item,
-        partId: part.id,
-        partNameSnapshot: part.name,
-        partNumberSnapshot: part.partNumber || "",
-        lotPrice,
-        lineTotal: lotPrice,
-        itemType: (part.itemType as ItemType) || "inventory",
-        classificationNeedsReview: false,
-        groupId: part.groupId || undefined,
-        subgroupId: part.subgroupId || undefined,
-      };
+      return linkInvoiceLineToStock(item, part);
     }));
     setPartSearch(prev => ({ ...prev, [itemId]: part.name }));
     setLineReferenceErrors((previous) => {
@@ -1412,10 +1402,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             {/* Invoice details row */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="receive-inventory-invoice-number" className="text-foreground font-medium">Invoice Number</Label>
+                <Label htmlFor="receive-inventory-invoice-number" className="text-foreground font-medium">Invoice / Quote Number</Label>
                 <Input
                   id="receive-inventory-invoice-number"
-                  placeholder="e.g., INV-2024-00821"
+                  placeholder="e.g., INV-2024-00821 or quote number"
                   value={invoiceNumber}
                   onChange={e => setInvoiceNumber(e.target.value)}
                   className={`text-foreground placeholder:text-foreground/50 ${aiIssueFor("invoiceNumber") ? "border-amber-500" : ""}`}

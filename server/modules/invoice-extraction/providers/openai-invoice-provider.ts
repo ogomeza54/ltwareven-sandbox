@@ -98,6 +98,12 @@ function completedProposal(outputText: string): InvoiceProposal | null {
   }
 }
 
+export function buildInvoiceExtractionInstructions(
+  sourceAssetIds: readonly string[],
+): string {
+  return `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Examine every supplied page before producing the final result. If no invoice number is present but the document clearly displays a labeled quote number, order number, ticket number, or equivalent transaction reference, return that visible reference in header.invoiceNumber and add an ambiguity uncertainty explaining the original label. Do not invent a fallback reference. A multi-page file may repeat the same item on a quote, order, invoice, or parts ticket. Consolidate repeated occurrences by exact vendor part reference: keep quantities and prices from the authoritative transaction page, but use the longest complete visible description from any page whose reference and commercial values match. Do not return a visibly truncated description when another page shows the complete description for that exact reference. Preserve the chosen description's source page and asset provenance. Preserve visible negative quantities and amounts. Do not classify a line from product-specific keywords. Treat a quantity-bearing return or exchange as a financial adjustment only when the document contains an opposite-sign line for the same vendor part reference and product description; otherwise classify it as unknown for human review. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${sourceAssetIds.join(", ")}.`;
+}
+
 export class OpenAIInvoiceProvider implements InvoiceExtractionProviderPort {
   readonly name = "openai" as const;
   private readonly client: OpenAI | null;
@@ -122,7 +128,9 @@ export class OpenAIInvoiceProvider implements InvoiceExtractionProviderPort {
     const content: OpenAI.Responses.ResponseInputContent[] = [
       {
         type: "input_text",
-        text: `Extract only values visible in the supplied invoice. Use null for anything not present. Do not infer or fabricate part numbers, quantities, prices, dates, or totals. Examine every supplied page before producing the final result. A multi-page file may repeat the same item on a quote, order, invoice, or parts ticket. Consolidate repeated occurrences by exact vendor part reference: keep quantities and prices from the authoritative transaction page, but use the longest complete visible description from any page whose reference and commercial values match. Do not return a visibly truncated description when another page shows the complete description for that exact reference. Preserve the chosen description's source page and asset provenance. Preserve visible negative quantities and amounts. Do not classify a line from product-specific keywords. Treat a quantity-bearing return or exchange as a financial adjustment only when the document contains an opposite-sign line for the same vendor part reference and product description; otherwise classify it as unknown for human review. Return confidence only when supported by the document and list every ambiguity. Provenance sourceAssetId must be one of these opaque identifiers or null: ${request.assets.map((asset) => asset.id).join(", ")}.`,
+        text: buildInvoiceExtractionInstructions(
+          request.assets.map((asset) => asset.id),
+        ),
       },
       ...request.assets.map((asset): OpenAI.Responses.ResponseInputContent =>
         asset.mimeType === "application/pdf"
