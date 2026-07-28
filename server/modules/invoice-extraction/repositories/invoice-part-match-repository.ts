@@ -114,7 +114,7 @@ export class PostgresInvoicePartMatchRepository {
     const line = rows<{
       description: string | null;
       vendor_part_number: string | null;
-      classification: "inventory" | "consumable" | "adjustment" | "unknown";
+      classification: "inventory" | "consumable" | "service" | "direct_expense" | "adjustment" | "unknown";
     }>(
       await this.database.execute(sql`
         select line.description, line.vendor_part_number, line.classification
@@ -128,7 +128,11 @@ export class PostgresInvoicePartMatchRepository {
       `),
     )[0];
     if (!line) throw new InvoiceDomainError("INVOICE_DRAFT_NOT_FOUND");
-    if (line.classification === "adjustment") return [];
+    if (
+      line.classification === "adjustment" ||
+      line.classification === "service" ||
+      line.classification === "direct_expense"
+    ) return [];
     return rankPartCandidates(
       {
         description: line.description,
@@ -171,7 +175,7 @@ export class PostgresInvoicePartMatchRepository {
         id: string;
         description: string | null;
         vendor_part_number: string | null;
-        classification: "inventory" | "consumable" | "adjustment" | "unknown";
+        classification: "inventory" | "consumable" | "service" | "direct_expense" | "adjustment" | "unknown";
       }>(
         await tx.execute(sql`
           select id, description, vendor_part_number, classification
@@ -187,7 +191,9 @@ export class PostgresInvoicePartMatchRepository {
       if (
         matches.some(
           (match) =>
-            lineById.get(match.lineId)?.classification === "adjustment" &&
+            (lineById.get(match.lineId)?.classification === "adjustment" ||
+              lineById.get(match.lineId)?.classification === "service" ||
+              lineById.get(match.lineId)?.classification === "direct_expense") &&
             match.decision !== "unresolved",
         )
       ) {
@@ -255,7 +261,9 @@ export class PostgresInvoicePartMatchRepository {
       for (const match of matches) {
         const line = lineById.get(match.lineId)!;
         const suggestion =
-          line.classification === "adjustment"
+          line.classification === "adjustment" ||
+          line.classification === "service" ||
+          line.classification === "direct_expense"
             ? undefined
             : rankPartCandidates(
                 {

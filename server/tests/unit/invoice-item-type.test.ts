@@ -55,3 +55,17 @@ test("financial adjustments never require an inventory type decision", () => {
     { itemType: "adjustment", needsReview: false },
   );
 });
+
+test("service and labor lines never require a stock type decision", () => {
+  assert.deepEqual(
+    resolveInvoiceItemType({ classification: "service" }),
+    { itemType: "service", needsReview: false },
+  );
+});
+
+test("direct expenses never require a stock type decision", () => {
+  assert.deepEqual(
+    resolveInvoiceItemType({ classification: "direct_expense" }),
+    { itemType: "direct_expense", needsReview: false },
+  );
+});

@@ -165,7 +165,7 @@ export class PostgresInvoiceConfirmationRepository {
       vendor_part_number: string | null;
       quantity: string | null;
       unit_cost: string | null;
-      classification: "inventory" | "consumable" | "adjustment" | "unknown";
+      classification: "inventory" | "consumable" | "service" | "direct_expense" | "adjustment" | "unknown";
       match_decision: "unresolved" | "existing" | "new" | null;
       selected_part_id: string | null;
       selected_part_name: string | null;
@@ -221,6 +221,18 @@ export class PostgresInvoiceConfirmationRepository {
                 ? ("credit" as const)
                 : ("charge" as const),
             },
+          };
+        }
+        if (line.classification === "service") {
+          return {
+            ...common,
+            resolution: { kind: "service" as const },
+          };
+        }
+        if (line.classification === "direct_expense") {
+          return {
+            ...common,
+            resolution: { kind: "direct_expense" as const },
           };
         }
         if (
@@ -680,7 +692,11 @@ export class PostgresInvoiceConfirmationRepository {
       }
       const partById = new Map(existingParts.map((part) => [part.id, part]));
       for (const line of summary.lines) {
-        if (line.resolution.kind === "adjustment") continue;
+        if (
+          line.resolution.kind === "adjustment" ||
+          line.resolution.kind === "service" ||
+          line.resolution.kind === "direct_expense"
+        ) continue;
         const quantity = new Decimal(line.quantity);
         if (
           !quantity.isInteger() ||
@@ -737,6 +753,20 @@ export class PostgresInvoiceConfirmationRepository {
         items: summary.lines
           .filter((line) => line.resolution.kind !== "adjustment")
           .map((line) => {
+          if (
+            line.resolution.kind === "service" ||
+            line.resolution.kind === "direct_expense"
+          ) {
+            return {
+              partId: undefined,
+              partNameSnapshot: line.description,
+              partNumberSnapshot: line.partNumber,
+              itemType: line.resolution.kind,
+              qty: Number(line.quantity),
+              unitCost: line.unitCost,
+              lineTotal: line.lineTotal,
+            };
+          }
           const existing =
             line.resolution.kind === "existing"
               ? partById.get(line.resolution.partId)
@@ -749,7 +779,11 @@ export class PostgresInvoiceConfirmationRepository {
             partId: existing?.id,
             partNameSnapshot: existing?.name ?? proposed!.name,
             partNumberSnapshot: existing?.part_number ?? proposed!.partNumber,
-            itemType: existing ? line.itemType : proposed!.itemType,
+            itemType: existing
+              ? line.itemType === "consumable"
+                ? "consumable"
+                : "inventory"
+              : proposed!.itemType,
             category: proposed?.category ?? undefined,
             groupId: proposed?.groupId ?? undefined,
             subgroupId: proposed?.subgroupId ?? undefined,
@@ -777,6 +811,7 @@ export class PostgresInvoiceConfirmationRepository {
           from inventory_intake_items
           where company_id = ${actor.effectiveCompanyId}
             and inventory_intake_id = ${intake.id}
+            and part_id is not null
         `),
       );
       for (const received of receivedLines) {
@@ -950,7 +985,11 @@ export class PostgresInvoiceConfirmationRepository {
             )
           `);
         }
-        if (line.classification === "adjustment") continue;
+        if (
+          line.classification === "adjustment" ||
+          line.classification === "service" ||
+          line.classification === "direct_expense"
+        ) continue;
         const finalMatch =
           line.decision === "existing"
             ? { kind: "existing", partId: line.selected_part_id }

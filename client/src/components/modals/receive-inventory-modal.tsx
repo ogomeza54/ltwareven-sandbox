@@ -230,7 +230,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
 
   const subtotal = sumLines(items);
   const stockSubtotal = sumLines(
-    items.filter((item) => item.itemType !== "adjustment"),
+    items.filter(
+      (item) =>
+        item.itemType === "inventory" || item.itemType === "consumable",
+    ),
   );
   const adjustmentTotal = sumLines(
     items.filter((item) => item.itemType === "adjustment"),
@@ -246,6 +249,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const hasMissingNewPartReference = items.some(
     (item) =>
       item.itemType !== "adjustment" &&
+      item.itemType !== "service" &&
+      item.itemType !== "direct_expense" &&
       !item.partId &&
       item.partNameSnapshot.trim() &&
       !item.partNumberSnapshot.trim(),
@@ -253,6 +258,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const hasUnresolvedStockSuggestion = items.some(
     (item) =>
       item.itemType !== "adjustment" &&
+      item.itemType !== "service" &&
+      item.itemType !== "direct_expense" &&
       !item.partId &&
       !dismissedPartSuggestions.has(item.id) &&
       rankStockPartSuggestions(item, allParts as any[]).length > 0,
@@ -433,7 +440,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const applyAiReview = useCallback(
     (workspace: InvoiceReviewWorkspaceDto) => {
       const mappedItems: LineItem[] = workspace.lines.map((line) => {
-        const isAdjustment = line.classification === "adjustment";
+        const isNonStock =
+          line.classification === "adjustment" ||
+          line.classification === "service" ||
+          line.classification === "direct_expense";
         const existingPart = line.match.selectedPart
           ? (allParts as any[]).find(
               (part: any) => part.id === line.match.selectedPart?.id,
@@ -452,16 +462,21 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         return {
           id: `ai-${line.id}`,
           reviewLineId: line.id,
-          partId: isAdjustment ? undefined : line.match.selectedPart?.id,
+          partId: isNonStock ? undefined : line.match.selectedPart?.id,
           partNameSnapshot:
-            isAdjustment
-              ? line.description ?? "Financial adjustment"
+            isNonStock
+              ? line.description ??
+                (line.classification === "service"
+                  ? "Service / Labor"
+                  : line.classification === "direct_expense"
+                    ? "Direct Expense"
+                    : "Financial adjustment")
               : line.match.selectedPart?.name ??
                 proposedPart?.name ??
                 line.description ??
                 "",
           partNumberSnapshot:
-            isAdjustment
+            isNonStock
               ? line.vendorPartNumber ?? ""
               : line.vendorPartNumber ||
                 proposedPart?.partNumber ||
@@ -469,10 +484,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 "",
           itemType: resolvedType.itemType,
           classificationNeedsReview: resolvedType.needsReview,
-          groupId: isAdjustment
+          groupId: isNonStock
             ? undefined
             : existingPart?.groupId || proposedPart?.groupId || undefined,
-          subgroupId: isAdjustment
+          subgroupId: isNonStock
             ? undefined
             : existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
           qty: quantity,
@@ -628,7 +643,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           current.lines.map((line, index) => {
             const item = itemByReviewId.get(line.id) ?? items[index];
             if (!item) throw new Error("An invoice line could not be resolved.");
-            if (item.itemType === "adjustment") {
+            if (
+              item.itemType === "adjustment" ||
+              item.itemType === "service" ||
+              item.itemType === "direct_expense"
+            ) {
               return {
                 lineId: line.id,
                 decision: "unresolved" as const,
@@ -759,7 +778,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     if (aiReviewWorkspace && classificationIssue) {
       toast({
         title: "Part type needs review",
-        description: `Choose Inventory or Consumable for ${classificationIssue.partNameSnapshot || "the highlighted line"}.`,
+        description: `Choose Inventory, Consumable, Service / Labor, or Direct Expense for ${classificationIssue.partNameSnapshot || "the highlighted line"}.`,
         variant: "destructive",
       });
       return;
@@ -767,6 +786,8 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     const missingReference = items.find(
       (item) =>
         item.itemType !== "adjustment" &&
+        item.itemType !== "service" &&
+        item.itemType !== "direct_expense" &&
         !item.partId &&
         item.partNameSnapshot.trim() &&
         !item.partNumberSnapshot.trim(),
@@ -961,11 +982,18 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     const subgroups = item.groupId ? getSubgroups(item.groupId) : [];
                     const searchValue = partSearch[item.id] ?? item.partNameSnapshot;
                     const likelyStockMatch =
-                      !item.partId && !dismissedPartSuggestions.has(item.id)
+                      item.itemType !== "service" &&
+                      item.itemType !== "adjustment" &&
+                      item.itemType !== "direct_expense" &&
+                      !item.partId &&
+                      !dismissedPartSuggestions.has(item.id)
                         ? rankStockPartSuggestions(item, allParts as any[])[0]
                         : undefined;
                     const showDropdown =
-                      item.itemType !== "adjustment" && searchFocus === item.id;
+                      item.itemType !== "adjustment" &&
+                      item.itemType !== "service" &&
+                      item.itemType !== "direct_expense" &&
+                      searchFocus === item.id;
 
                     return (
                       <tr key={item.id} className="block rounded-lg border border-border p-3 align-top hover:bg-muted/20 md:table-row md:rounded-none md:border-0 md:p-0">
@@ -975,6 +1003,14 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                           {item.itemType === "adjustment" ? (
                             <span title="Financial adjustment — no stock movement">
                               <span className={item.lineTotal.startsWith("-") ? "text-red-400" : "text-amber-400"}>±</span>
+                            </span>
+                          ) : item.itemType === "service" ? (
+                            <span title="Service / Labor — no stock movement">
+                              <span className="text-violet-400">S</span>
+                            </span>
+                          ) : item.itemType === "direct_expense" ? (
+                            <span title="Direct Expense — no stock movement">
+                              <span className="text-cyan-400">$</span>
                             </span>
                           ) : item.partId ? (
                             <span title="Linked to existing catalog part">
@@ -1017,7 +1053,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 Treat as stock item
                               </button>
                             </div>
-                          ) : <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
+                          ) : <div className="grid grid-cols-2 overflow-hidden rounded-md border border-border text-xs font-medium">
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "inventory", classificationNeedsReview: false })}
@@ -1042,15 +1078,67 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             >
                               Consumable
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateItem(item.id, {
+                                  itemType: "service",
+                                  partId: undefined,
+                                  groupId: undefined,
+                                  subgroupId: undefined,
+                                  classificationNeedsReview: false,
+                                });
+                                setLineReferenceErrors((previous) => {
+                                  const next = { ...previous };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                              }}
+                              aria-pressed={item.itemType === "service"}
+                              className={`min-h-11 px-1.5 py-1 transition-colors border-l border-border ${
+                                item.itemType === "service"
+                                  ? "bg-violet-600 text-white"
+                                  : "bg-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Service / Labor
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateItem(item.id, {
+                                  itemType: "direct_expense",
+                                  partId: undefined,
+                                  groupId: undefined,
+                                  subgroupId: undefined,
+                                  classificationNeedsReview: false,
+                                });
+                                setLineReferenceErrors((previous) => {
+                                  const next = { ...previous };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                              }}
+                              aria-pressed={item.itemType === "direct_expense"}
+                              className={`min-h-11 border-l border-t border-border px-1.5 py-1 transition-colors ${
+                                item.itemType === "direct_expense"
+                                  ? "bg-cyan-700 text-white"
+                                  : "bg-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Direct Expense
+                            </button>
                           </div>}
                           {item.classificationNeedsReview ? (
                             <p className="text-xs text-amber-500" role="alert">
-                              Choose Inventory or Consumable for this line.
+                              Choose Inventory, Consumable, Service / Labor, or Direct Expense for this line.
                             </p>
                           ) : null}
 
                           {/* Group dropdown */}
-                          {item.itemType !== "adjustment" ? (
+                          {item.itemType !== "adjustment" &&
+                          item.itemType !== "service" &&
+                          item.itemType !== "direct_expense" ? (
                           <>
                           <select
                             value={item.groupId || ""}
@@ -1099,6 +1187,48 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 }}
                               />
                               <p className="text-xs text-muted-foreground">Included in invoice totals and landed cost; excluded from stock.</p>
+                            </div>
+                          ) : item.itemType === "service" ? (
+                            <div>
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-violet-500/50 bg-violet-500/10 px-2 text-[11px] font-medium text-violet-300"
+                              >
+                                Service / Labor · no stock movement
+                              </Badge>
+                              <input
+                                aria-label="Service or labor description"
+                                className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3 text-foreground outline-none focus:border-violet-500"
+                                value={item.partNameSnapshot}
+                                onChange={(event) => {
+                                  updateItem(item.id, { partNameSnapshot: event.target.value });
+                                  setPartSearch((previous) => ({ ...previous, [item.id]: event.target.value }));
+                                }}
+                              />
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Included in invoice totals only. No part will be created and stock will not change.
+                              </p>
+                            </div>
+                          ) : item.itemType === "direct_expense" ? (
+                            <div>
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-cyan-500/50 bg-cyan-500/10 px-2 text-[11px] font-medium text-cyan-300"
+                              >
+                                Direct Expense · no stock movement
+                              </Badge>
+                              <input
+                                aria-label="Direct expense description"
+                                className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3 text-foreground outline-none focus:border-cyan-500"
+                                value={item.partNameSnapshot}
+                                onChange={(event) => {
+                                  updateItem(item.id, { partNameSnapshot: event.target.value });
+                                  setPartSearch((previous) => ({ ...previous, [item.id]: event.target.value }));
+                                }}
+                              />
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Included in invoice totals only. No part will be created and stock will not change.
+                              </p>
                             </div>
                           ) : <div className="relative">
                             {!item.partId && item.partNameSnapshot.trim() ? (
@@ -1286,7 +1416,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         {/* Part number */}
                         <td className="block py-2 md:table-cell md:px-3 md:pt-3">
                           <span className="font-medium md:hidden">Part number</span>
-                          <input
+                          {item.itemType === "service" || item.itemType === "direct_expense" ? (
+                            <span className="text-muted-foreground">Not required</span>
+                          ) : <input
                             ref={(element) => {
                               partNumberInputRefs.current[item.id] = element;
                             }}
@@ -1306,7 +1438,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 });
                               }
                             }}
-                          />
+                          />}
                           {lineReferenceErrors[item.id] ? (
                             <p
                               id={`part-number-error-${item.id}`}
@@ -1367,7 +1499,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         {/* Landed Cost */}
                         <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
                           <span className="font-medium text-amber-500 md:hidden">Landed Cost / unit</span>
-                          {item.itemType === "adjustment" ? (
+                          {item.itemType === "adjustment" ||
+                          item.itemType === "service" ||
+                          item.itemType === "direct_expense" ? (
                             <span className="text-muted-foreground">—</span>
                           ) : item.partNameSnapshot.trim() ? (
                             <span className={`font-semibold tabular-nums ${taxNum + deliveryNum + adjustmentTotal !== 0 ? "text-amber-400" : "text-foreground"}`}>

@@ -43,6 +43,8 @@ test("stock delta uses decimal arithmetic rather than binary floats", () => {
   assert.equal(
     stockUnitDelta([
       { quantity: "2", resolution: { kind: "existing" } },
+      { quantity: "3", resolution: { kind: "service" } },
+      { quantity: "4", resolution: { kind: "direct_expense" } },
       { quantity: "2", resolution: { kind: "adjustment" } },
       { quantity: "-2", resolution: { kind: "adjustment" } },
     ]),

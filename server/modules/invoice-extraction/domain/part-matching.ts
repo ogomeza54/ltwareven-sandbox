@@ -66,7 +66,7 @@ export function rankPartCandidates(
   input: {
     description: string | null;
     vendorPartNumber: string | null;
-    classification: "inventory" | "consumable" | "adjustment" | "unknown";
+    classification: "inventory" | "consumable" | "service" | "direct_expense" | "adjustment" | "unknown";
     query?: string | null;
   },
   parts: readonly MatchablePart[],

@@ -81,15 +81,22 @@ export function applyLandedCosts(
     parseFloat((taxAmount as string) || "0") +
     parseFloat((deliveryFee as string) || "0") +
     parseFloat((adjustmentAmount as string) || "0");
-  const invoiceSubtotal = items.reduce(
+  const stockItems = items.filter(
+    (item) =>
+      item.itemType !== "service" && item.itemType !== "direct_expense",
+  );
+  const stockSubtotal = stockItems.reduce(
     (sum, item) => sum + parseFloat(item.lineTotal || "0"),
     0,
   );
 
   return items.map((item) => {
+    if (item.itemType === "service" || item.itemType === "direct_expense") {
+      return { ...item, landedCost: undefined };
+    }
     const lineTotal = parseFloat(item.lineTotal || "0");
     const qty = item.qty || 1;
-    const weight = invoiceSubtotal > 0 ? lineTotal / invoiceSubtotal : 0;
+    const weight = stockSubtotal > 0 ? lineTotal / stockSubtotal : 0;
     const ancillaryShare = weight * totalAncillary;
     return {
       ...item,

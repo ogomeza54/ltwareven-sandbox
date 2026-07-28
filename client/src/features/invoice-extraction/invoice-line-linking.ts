@@ -2,7 +2,7 @@ export interface LinkableInvoiceLine {
   partId?: string;
   partNameSnapshot: string;
   partNumberSnapshot: string;
-  itemType: "inventory" | "consumable" | "adjustment";
+  itemType: "inventory" | "consumable" | "service" | "direct_expense" | "adjustment";
   classificationNeedsReview?: boolean;
   groupId?: string;
   subgroupId?: string;

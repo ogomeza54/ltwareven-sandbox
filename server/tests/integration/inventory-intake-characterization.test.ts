@@ -253,6 +253,89 @@ describe(
       assert.equal(intake.totalAmount, "155.46");
     });
 
+    test("service lines remain on the intake without creating stock or affecting landed cost", async () => {
+      const [part] = await db
+        .insert(inventoryParts)
+        .values({
+          name: `${prefix}fuel-pump`,
+          partNumber: "FP-1",
+          price: "100.00",
+          quantityInStock: 3,
+          companyId,
+        })
+        .returning();
+      const beforePartCount = (await db
+        .select({ id: inventoryParts.id })
+        .from(inventoryParts)
+        .where(eq(inventoryParts.companyId, companyId))).length;
+      const intake = await receiveInventory(
+        db,
+        command(
+          [
+            {
+              partId: part.id,
+              partNameSnapshot: part.name,
+              partNumberSnapshot: part.partNumber,
+              itemType: "inventory",
+              qty: 1,
+              unitCost: "100.00",
+              lineTotal: "100.00",
+            },
+            {
+              partNameSnapshot: "Fuel pump installation",
+              partNumberSnapshot: "",
+              itemType: "service",
+              qty: 1,
+              unitCost: "200.00",
+              lineTotal: "200.00",
+            },
+            {
+              partNameSnapshot: "Shop supplies",
+              partNumberSnapshot: "",
+              itemType: "direct_expense",
+              qty: 1,
+              unitCost: "50.00",
+              lineTotal: "50.00",
+            },
+          ],
+          {
+            subtotal: "350.00",
+            taxAmount: "10.00",
+            deliveryFee: "0.00",
+            totalAmount: "360.00",
+          },
+        ),
+        { companyId, userId },
+      );
+      const [updated] = await db
+        .select()
+        .from(inventoryParts)
+        .where(eq(inventoryParts.id, part.id));
+      const received = await db
+        .select()
+        .from(inventoryIntakeItems)
+        .where(eq(inventoryIntakeItems.inventoryIntakeId, intake.id));
+      const afterPartCount = (await db
+        .select({ id: inventoryParts.id })
+        .from(inventoryParts)
+        .where(eq(inventoryParts.companyId, companyId))).length;
+      const stockLine = received.find((line) => line.itemType === "inventory");
+      const serviceLine = received.find((line) => line.itemType === "service");
+      const directExpenseLine = received.find(
+        (line) => line.itemType === "direct_expense",
+      );
+      assert.equal(updated?.quantityInStock, 4);
+      assert.equal(updated?.price, "110.00");
+      assert.equal(stockLine?.landedCost, "110.0000");
+      assert.equal(serviceLine?.partId, null);
+      assert.equal(serviceLine?.landedCost, null);
+      assert.equal(directExpenseLine?.partId, null);
+      assert.equal(directExpenseLine?.landedCost, null);
+      assert.equal(afterPartCount, beforePartCount);
+      assert.equal(intake.subtotal, "350.00");
+      assert.equal(intake.totalAmount, "360.00");
+    });
+
     test("new part creates or links catalog entry without overwriting a linked entry", async () => {
       const [unlinked] = await db
         .insert(maintenanceItems)

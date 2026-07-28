@@ -388,7 +388,7 @@ export const invoiceReviewLines = pgTable(
     ),
     check(
       "invoice_review_lines_classification_valid",
-      sql`${table.classification} in ('inventory', 'consumable', 'adjustment', 'unknown')`,
+      sql`${table.classification} in ('inventory', 'consumable', 'service', 'direct_expense', 'adjustment', 'unknown')`,
     ),
     foreignKey({
       columns: [table.companyId, table.draftId],

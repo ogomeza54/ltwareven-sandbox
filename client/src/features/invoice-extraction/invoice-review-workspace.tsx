@@ -75,6 +75,8 @@ function lineApprovalProblems(line: InvoiceReviewLine): LineApprovalProblem[] {
   if (line.classification === "unknown") problems.push("classification");
   if (
     line.classification !== "adjustment" &&
+    line.classification !== "service" &&
+    line.classification !== "direct_expense" &&
     line.match.decision === "unresolved"
   ) problems.push("match");
   return problems;
@@ -367,6 +369,8 @@ export function InvoiceReviewWorkspace({
       (line) =>
         line.match.decision === "unresolved" &&
         line.classification !== "adjustment" &&
+        line.classification !== "service" &&
+        line.classification !== "direct_expense" &&
         !line.id.startsWith("new-") &&
         Boolean(line.vendorPartNumber?.trim()),
     );
@@ -854,12 +858,14 @@ export function InvoiceReviewWorkspace({
                 >
                   <option value="inventory">Inventory</option>
                   <option value="consumable">Consumable</option>
+                  <option value="service">Service / Labor</option>
+                  <option value="direct_expense">Direct Expense</option>
                   <option value="unknown">Needs review</option>
                 </select>
                 {showApprovalProblems &&
                 approvalProblems.includes("classification") ? (
                   <p role="alert" className="mt-1 text-xs text-destructive">
-                    Choose Inventory or Consumable before final confirmation.
+                    Choose Inventory, Consumable, Service / Labor, or Direct Expense before final confirmation.
                   </p>
                 ) : null}
                 {!readOnly ? (
@@ -881,6 +887,17 @@ export function InvoiceReviewWorkspace({
                   </Button>
                 ) : null}
               </div>
+              {line.classification === "service" ||
+              line.classification === "direct_expense" ? (
+                <div className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3 md:col-span-2 lg:col-span-6">
+                  <p className="text-sm font-semibold text-violet-200">
+                    {line.classification === "service" ? "Service / Labor" : "Direct Expense"} · no stock movement
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This charge remains in the invoice total. It will not create a part, update stock, or be added to part landed costs.
+                  </p>
+                </div>
+              ) : (
               <div className="space-y-2 border-t border-border pt-2 md:col-span-2 lg:col-span-6">
                 <div
                   id={`invoice-line-${line.id}-resolution`}
@@ -1182,6 +1199,7 @@ export function InvoiceReviewWorkspace({
                   </div>
                 ) : null}
               </div>
+              )}
             </article>
               );
             })()
@@ -1324,7 +1342,11 @@ export function InvoiceReviewWorkspace({
                         ? `existing part ${line.resolution.partName}`
                         : line.resolution.kind === "new"
                           ? `new part ${line.resolution.proposedPart.name}`
-                          : `${line.resolution.adjustmentType} · no stock movement`}
+                          : line.resolution.kind === "service"
+                            ? "service / labor · no stock movement"
+                            : line.resolution.kind === "direct_expense"
+                              ? "direct expense · no stock movement"
+                            : `${line.resolution.adjustmentType} · no stock movement`}
                     </li>
                   ))}
                 </ul>

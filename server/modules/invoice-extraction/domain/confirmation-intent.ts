@@ -42,11 +42,16 @@ export function normalizedInvoiceIdentity(
 export function stockUnitDelta(
   lines: readonly {
     quantity: string;
-    resolution?: { kind: "existing" | "new" | "adjustment" };
+    resolution?: { kind: "existing" | "new" | "service" | "direct_expense" | "adjustment" };
   }[],
 ): string {
   return lines
-    .filter((line) => line.resolution?.kind !== "adjustment")
+    .filter(
+      (line) =>
+        line.resolution?.kind !== "adjustment" &&
+        line.resolution?.kind !== "service" &&
+        line.resolution?.kind !== "direct_expense",
+    )
     .reduce((sum, line) => sum.add(line.quantity), new Decimal(0))
     .toFixed(6)
     .replace(/\.?0+$/, "");

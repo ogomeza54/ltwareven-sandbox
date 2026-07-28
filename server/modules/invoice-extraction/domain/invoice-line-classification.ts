@@ -3,6 +3,8 @@ import type { InvoiceProposal } from "@shared/invoice-extraction/contracts";
 export type InvoiceLineClassification =
   | "inventory"
   | "consumable"
+  | "service"
+  | "direct_expense"
   | "adjustment"
   | "unknown";
 

@@ -198,6 +198,14 @@ export async function receiveInventoryWithinTransaction(
 
   const resolvedItems = await Promise.all(
     itemsWithLanded.map(async (item) => {
+      if (item.itemType === "service" || item.itemType === "direct_expense") {
+        return {
+          ...item,
+          partId: undefined,
+          groupId: undefined,
+          subgroupId: undefined,
+        };
+      }
       if (item.partId) return item;
 
       const [newPart] = await tx
@@ -256,6 +264,7 @@ export async function receiveInventoryWithinTransaction(
     );
 
   for (const item of resolvedItems) {
+    if (item.itemType === "service" || item.itemType === "direct_expense") continue;
     if (!item.partId) continue;
     const updates: {
       quantityInStock: ReturnType<typeof sql>;

@@ -9,7 +9,7 @@ export interface InventoryReceivingLine {
   partId?: string;
   partNameSnapshot: string;
   partNumberSnapshot: string;
-  itemType?: string;
+  itemType?: "inventory" | "consumable" | "service" | "direct_expense";
   category?: string;
   groupId?: string;
   subgroupId?: string;

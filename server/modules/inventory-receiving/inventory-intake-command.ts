@@ -36,10 +36,12 @@ export function normalizeInventoryIntakeRequest(
     if (
       item.itemType &&
       item.itemType !== "consumable" &&
-      item.itemType !== "inventory"
+      item.itemType !== "inventory" &&
+      item.itemType !== "service" &&
+      item.itemType !== "direct_expense"
     ) {
       throw new InventoryIntakeRequestValidationError(
-        "itemType must be 'consumable' or 'inventory'",
+        "itemType must be 'consumable', 'inventory', 'service' or 'direct_expense'",
       );
     }
     for (const key of ["partId", "groupId", "subgroupId"] as const) {
@@ -57,7 +59,10 @@ export function normalizeInventoryIntakeRequest(
       partNumberSnapshot:
         item.partNumberSnapshot == null ? "" : String(item.partNumberSnapshot),
       itemType:
-        item.itemType === "consumable" || item.itemType === "inventory"
+        item.itemType === "consumable" ||
+        item.itemType === "inventory" ||
+        item.itemType === "service" ||
+        item.itemType === "direct_expense"
           ? item.itemType
           : undefined,
       groupId: item.groupId || undefined,

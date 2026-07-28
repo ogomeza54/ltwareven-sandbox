@@ -64,6 +64,15 @@ test("provider uses a visible quote or transaction number when no invoice number
   assert.match(instructions, /Do not invent a fallback reference/);
 });
 
+test("provider separates service work from stock and leaves shop supplies for review", () => {
+  const instructions = buildInvoiceExtractionInstructions([id]);
+  assert.match(instructions, /labor, installation, repair work, service fees/i);
+  assert.match(instructions, /Service lines remain part of invoice totals but never represent stock/i);
+  assert.match(instructions, /shop supplies/i);
+  assert.match(instructions, /return unknown so a user must choose/i);
+  assert.match(instructions, /Do not automatically classify direct expenses/i);
+});
+
 test("start command rejects tenant and provider fields", () => {
   assert.equal(startInvoiceExtractionSchema.safeParse({ revision: 4 }).success, true);
   assert.equal(

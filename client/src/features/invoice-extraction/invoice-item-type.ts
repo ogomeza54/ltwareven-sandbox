@@ -1,4 +1,4 @@
-export type InvoiceItemType = "inventory" | "consumable" | "adjustment";
+export type InvoiceItemType = "inventory" | "consumable" | "service" | "direct_expense" | "adjustment";
 export type InvoiceLineClassification = InvoiceItemType | "unknown";
 
 interface ResolveInvoiceItemTypeInput {
@@ -21,8 +21,12 @@ export function resolveInvoiceItemType({
   selectedPartType,
   proposedPartType,
 }: ResolveInvoiceItemTypeInput): ResolvedInvoiceItemType {
-  if (classification === "adjustment") {
-    return { itemType: "adjustment", needsReview: false };
+  if (
+    classification === "adjustment" ||
+    classification === "service" ||
+    classification === "direct_expense"
+  ) {
+    return { itemType: classification, needsReview: false };
   }
   if (selectedPartType === "inventory" || selectedPartType === "consumable") {
     return { itemType: selectedPartType, needsReview: false };

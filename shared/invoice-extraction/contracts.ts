@@ -274,7 +274,7 @@ export const invoiceProposalSchema = z.object({
       lineTotal: nullableObservedString,
       classification: z
         .object({
-          kind: z.enum(["inventory", "consumable", "adjustment", "unknown"]),
+          kind: z.enum(["inventory", "consumable", "service", "direct_expense", "adjustment", "unknown"]),
           confidence: z.number().min(0).max(1).nullable(),
         })
         .nullable(),
@@ -367,7 +367,7 @@ export const invoiceReviewWorkspaceDtoSchema = z.object({
       quantity: z.string().nullable(),
       unitCost: z.string().nullable(),
       calculatedLineTotal: z.string().nullable(),
-      classification: z.enum(["inventory", "consumable", "adjustment", "unknown"]),
+      classification: z.enum(["inventory", "consumable", "service", "direct_expense", "adjustment", "unknown"]),
       proposed: invoiceProposalSchema.shape.lines.element.nullable(),
       match: z.object({
         decision: z.enum(["unresolved", "existing", "new"]),
@@ -428,7 +428,7 @@ const invoiceEditableLineSchema = z
     vendorPartNumber: z.string().trim().max(160).nullable(),
     quantity: z.string().max(40).nullable(),
     unitCost: z.string().max(40).nullable(),
-    classification: z.enum(["inventory", "consumable", "adjustment", "unknown"]),
+    classification: z.enum(["inventory", "consumable", "service", "direct_expense", "adjustment", "unknown"]),
   })
   .strict();
 
@@ -539,7 +539,7 @@ export const invoiceConfirmationIntentDtoSchema = z.object({
         lineId: z.string().uuid(),
         description: z.string(),
         partNumber: z.string(),
-        itemType: z.enum(["inventory", "consumable", "adjustment"]),
+        itemType: z.enum(["inventory", "consumable", "service", "direct_expense", "adjustment"]),
         quantity: z.string(),
         unitCost: z.string(),
         lineTotal: z.string(),
@@ -563,6 +563,12 @@ export const invoiceConfirmationIntentDtoSchema = z.object({
           z.object({
             kind: z.literal("adjustment"),
             adjustmentType: z.enum(["charge", "credit"]),
+          }),
+          z.object({
+            kind: z.literal("service"),
+          }),
+          z.object({
+            kind: z.literal("direct_expense"),
           }),
         ]),
       }),

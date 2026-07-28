@@ -66,12 +66,48 @@ describe("normalizeInventoryIntakeRequest", () => {
             {
               partNameSnapshot: "Filter",
               qty: 1,
-              itemType: "service",
+              itemType: "labor",
             },
           ],
         }),
       /itemType must be/,
     );
+  });
+
+  test("accepts service lines without a stock reference", () => {
+    const command = normalizeInventoryIntakeRequest({
+      ...validBody,
+      items: [
+        {
+          partNameSnapshot: "Installation labor",
+          partNumberSnapshot: "",
+          itemType: "service",
+          qty: 1,
+          unitCost: "10",
+          lineTotal: "10",
+        },
+      ],
+    });
+    assert.equal(command.items[0]?.itemType, "service");
+    assert.equal(command.items[0]?.partId, undefined);
+  });
+
+  test("accepts direct expenses without a stock reference", () => {
+    const command = normalizeInventoryIntakeRequest({
+      ...validBody,
+      items: [
+        {
+          partNameSnapshot: "Shop supplies",
+          partNumberSnapshot: "",
+          itemType: "direct_expense",
+          qty: 1,
+          unitCost: "10",
+          lineTotal: "10",
+        },
+      ],
+    });
+    assert.equal(command.items[0]?.itemType, "direct_expense");
+    assert.equal(command.items[0]?.partId, undefined);
   });
 
   test("whitelists tenant, actor, stock and QB fields", () => {

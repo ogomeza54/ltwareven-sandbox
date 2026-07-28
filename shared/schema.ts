@@ -215,7 +215,7 @@ export const inventoryIntakeItems = pgTable("inventory_intake_items", {
   partId: varchar("part_id").references(() => inventoryParts.id),
   partNameSnapshot: text("part_name_snapshot").notNull(),
   partNumberSnapshot: text("part_number_snapshot").notNull().default(""),
-  // "consumable" | "inventory" — mirrors the classification on the part itself
+  // "consumable" | "inventory" | "service" | "direct_expense" — non-stock lines have no part link or stock movement
   itemType: text("item_type").notNull().default("inventory"),
   // Catalog placement — stored at intake time for auditability
   groupId: varchar("group_id").references(() => maintenanceGroups.id),
