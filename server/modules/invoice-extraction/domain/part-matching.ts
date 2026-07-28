@@ -26,9 +26,34 @@ function compactReference(value: string | null | undefined): string {
   return normalizeMatchText(value).replace(/\s/g, "");
 }
 
+function editSimilarity(left: string, right: string): number {
+  if (!left || !right) return 0;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return 1 - previous[right.length] / Math.max(left.length, right.length);
+}
+
+function canonicalName(value: string): string {
+  return normalizeMatchText(value)
+    .split(" ")
+    .map((token) => (token === "kit" ? "kt" : token))
+    .join(" ");
+}
+
 function tokenSimilarity(left: string, right: string): number {
-  const leftTokens = new Set(normalizeMatchText(left).split(" ").filter(Boolean));
-  const rightTokens = new Set(normalizeMatchText(right).split(" ").filter(Boolean));
+  const leftTokens = new Set(canonicalName(left).split(" ").filter(Boolean));
+  const rightTokens = new Set(canonicalName(right).split(" ").filter(Boolean));
   if (!leftTokens.size || !rightTokens.size) return 0;
   let intersection = 0;
   leftTokens.forEach((token) => {
@@ -57,6 +82,12 @@ export function rankPartCandidates(
       if (reference && reference === partReference) {
         score += 70;
         signals.push("Exact part reference");
+      } else if (reference.length >= 8 && partReference.length >= 8) {
+        const similarity = editSimilarity(reference, partReference);
+        if (similarity >= 0.72) {
+          score += Math.round(similarity * 45);
+          signals.push(`Similar part reference ${Math.round(similarity * 100)}%`);
+        }
       }
       const aliasReference = part.aliases.some(
         (alias) =>

@@ -54,6 +54,90 @@ interface ReceiveInventoryModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface StockPartSuggestion {
+  part: any;
+  score: number;
+  exactReference: boolean;
+  similarReference: boolean;
+  similarName: boolean;
+}
+
+function normalizePartText(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function canonicalPartName(value: string | null | undefined): string {
+  return normalizePartText(value)
+    .split(" ")
+    .map((token) => (token === "kit" ? "kt" : token))
+    .join(" ");
+}
+
+function compactPartReference(value: string | null | undefined): string {
+  return normalizePartText(value).replace(/\s/g, "");
+}
+
+function textEditSimilarity(left: string, right: string): number {
+  if (!left || !right) return 0;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return 1 - previous[right.length] / Math.max(left.length, right.length);
+}
+
+function tokenOverlap(left: string, right: string): number {
+  const leftTokens = new Set(canonicalPartName(left).split(" ").filter(Boolean));
+  const rightTokens = new Set(canonicalPartName(right).split(" ").filter(Boolean));
+  if (!leftTokens.size || !rightTokens.size) return 0;
+  let shared = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) shared += 1;
+  });
+  return shared / (leftTokens.size + rightTokens.size - shared);
+}
+
+function rankStockPartSuggestions(item: LineItem, parts: readonly any[]): StockPartSuggestion[] {
+  const reference = compactPartReference(item.partNumberSnapshot);
+  return parts
+    .map((part) => {
+      const partReference = compactPartReference(part.partNumber);
+      const exactReference = Boolean(reference && reference === partReference);
+      const referenceSimilarity =
+        reference.length >= 8 && partReference.length >= 8
+          ? textEditSimilarity(reference, partReference)
+          : 0;
+      const similarReference = !exactReference && referenceSimilarity >= 0.72;
+      const nameSimilarity = tokenOverlap(item.partNameSnapshot, part.name ?? "");
+      const similarName = nameSimilarity >= 0.6;
+      const score =
+        (exactReference ? 100 : similarReference ? Math.round(referenceSimilarity * 55) : 0) +
+        (similarName ? Math.round(nameSimilarity * 40) : 0);
+      return { part, score, exactReference, similarReference, similarName };
+    })
+    .filter((suggestion) => suggestion.score >= 35)
+    .sort((left, right) =>
+      right.score - left.score ||
+      String(left.part.partNumber ?? "").localeCompare(String(right.part.partNumber ?? "")),
+    )
+    .slice(0, 5);
+}
+
 function newLineItem(): LineItem {
   return {
     id: Math.random().toString(36).slice(2),
@@ -134,6 +218,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const confirmationKeyRef = useRef<string | null>(null);
   const [duplicateReason, setDuplicateReason] = useState("");
   const [lineReferenceErrors, setLineReferenceErrors] = useState<Record<string, string>>({});
+  const [dismissedPartSuggestions, setDismissedPartSuggestions] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
@@ -199,9 +286,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     if (item.subgroupId) {
       pool = pool.filter((p: any) => p.subgroupId === item.subgroupId);
     }
-    return pool.filter((p: any) =>
+    const directMatches = pool.filter((p: any) =>
       p.name?.toLowerCase().includes(q) || p.partNumber?.toLowerCase().includes(q)
-    ).slice(0, 8);
+    );
+    const likelyMatches = rankStockPartSuggestions(item, pool).map(({ part }) => part);
+    return [...likelyMatches, ...directMatches]
+      .filter((part, index, matches) =>
+        matches.findIndex((candidate) => candidate.id === part.id) === index,
+      )
+      .slice(0, 8);
   };
 
   // Catalog item name suggestions (not yet linked to a part) for the selected subgroup
@@ -258,6 +351,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       return next;
     });
     setSearchFocus(null);
+    setDismissedPartSuggestions((previous) => {
+      const next = new Set(previous);
+      next.delete(itemId);
+      return next;
+    });
   };
 
   // Select a catalog item (maintenanceItem) that has a linked part → fill from that part
@@ -289,6 +387,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     });
     setPartSearch((previous) => ({ ...previous, [item.id]: name }));
     setSearchFocus(null);
+    setDismissedPartSuggestions((previous) => new Set(previous).add(item.id));
     if (!item.partNumberSnapshot.trim()) {
       requestAnimationFrame(() => {
         partNumberInputRefs.current[item.id]?.focus();
@@ -311,6 +410,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setAiReviewWorkspace(null);
     setDuplicateReason("");
     setLineReferenceErrors({});
+    setDismissedPartSuggestions(new Set());
     confirmationKeyRef.current = null;
   };
 
@@ -386,6 +486,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       );
       setItems(mappedItems);
       setLineReferenceErrors({});
+      setDismissedPartSuggestions(new Set());
       setPartSearch(
         Object.fromEntries(
           mappedItems.map((item) => [item.id, item.partNameSnapshot]),
@@ -835,6 +936,10 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     const catalogSuggestions = getCatalogSuggestions(item);
                     const subgroups = item.groupId ? getSubgroups(item.groupId) : [];
                     const searchValue = partSearch[item.id] ?? item.partNameSnapshot;
+                    const likelyStockMatch =
+                      !item.partId && !dismissedPartSuggestions.has(item.id)
+                        ? rankStockPartSuggestions(item, allParts as any[])[0]
+                        : undefined;
                     const showDropdown =
                       item.itemType !== "adjustment" && searchFocus === item.id;
 
@@ -1029,6 +1134,50 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                   ? "Matched to existing stock"
                                   : "Choose a stock item or create a new part."}
                               </p>
+                            ) : null}
+                            {likelyStockMatch ? (
+                              <div className="mt-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-amber-300">Possible stock match</p>
+                                    <p className="mt-1 truncate font-medium text-foreground">
+                                      {likelyStockMatch.part.name}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Part #{likelyStockMatch.part.partNumber || "No reference"}
+                                      {likelyStockMatch.part.quantityInStock != null
+                                        ? ` · ${Number(likelyStockMatch.part.quantityInStock)} in stock`
+                                        : ""}
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-200/80">
+                                      {likelyStockMatch.exactReference
+                                        ? "Same part number found in stock."
+                                        : likelyStockMatch.similarReference
+                                          ? "The part number and name are similar. Check before choosing."
+                                          : "The part name is very similar. Check the part number before choosing."}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="min-h-10 bg-amber-500 text-white hover:bg-amber-600"
+                                    onClick={() => selectPart(item.id, likelyStockMatch.part)}
+                                  >
+                                    Use this stock item
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="min-h-10"
+                                    onClick={() => prepareNewPart(item)}
+                                  >
+                                    Create new part instead
+                                  </Button>
+                                </div>
+                              </div>
                             ) : null}
                             {showDropdown && (
                               <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border border-slate-600 bg-slate-950 shadow-xl md:w-80">
