@@ -116,3 +116,27 @@ test("near OCR reference and KIT abbreviation suggest an existing part without a
   assert.ok(result[0].signals.includes("Similar part reference 73%"));
   assert.equal(result[0].signals.includes("Exact part reference"), false);
 });
+
+test("near OCR reference suggests the same-named turbocharger mounting bolt", () => {
+  const result = rankPartCandidates(
+    {
+      description: "MOUNTING BOLT, TURBOCHARGER",
+      vendorPartNumber: "DDE A0219900107",
+      classification: "unknown",
+    },
+    [
+      {
+        id: "00000000-0000-4000-8000-000000000104",
+        name: "MOUNTING BOLT, TURBOCHARGER",
+        partNumber: "DDE A0219901101",
+        category: "Engine",
+        itemType: "inventory",
+        aliases: [],
+      },
+    ],
+  );
+  assert.equal(result.length, 1);
+  assert.ok(result[0].signals.includes("Name similarity 100%"));
+  assert.ok(result[0].signals.some((signal) => signal.startsWith("Similar part reference ")));
+  assert.equal(result[0].signals.includes("Exact part reference"), false);
+});
