@@ -163,9 +163,9 @@ export function InvoiceSourceUpload({
   }, [cameraOpen, cameraStream]);
 
   useEffect(() => {
-    onBusyChange?.(mutating);
+    onBusyChange?.(mutating || extractionBusy);
     return () => onBusyChange?.(false);
-  }, [mutating, onBusyChange]);
+  }, [extractionBusy, mutating, onBusyChange]);
 
   useEffect(() => {
     setReplacementAsset(null);
@@ -366,7 +366,9 @@ export function InvoiceSourceUpload({
     );
   };
 
-  const useDocument = async (): Promise<void> => {
+  const saveDocument = async (
+    nextAction: "analyze" | "capture-another-page",
+  ): Promise<void> => {
     const selected = pendingRef.current;
     if (!selected) return;
     const savedAsset = await upload(
@@ -379,7 +381,20 @@ export function InvoiceSourceUpload({
     setLocalError(null);
     setPending(null);
     const latestDraft = await refresh().catch(() => null);
-    if (latestDraft) await analyze(latestDraft);
+    if (!latestDraft) return;
+    if (nextAction === "analyze") {
+      await analyze(latestDraft);
+      return;
+    }
+    const latestPageCount = latestDraft.source?.assets.reduce(
+      (sum, asset) => sum + (asset.pageCount ?? 0),
+      0,
+    ) ?? 0;
+    if (latestPageCount >= 10) {
+      setLocalError("The maximum of 10 invoice pages has been reached. Analyze the invoice to continue.");
+      return;
+    }
+    await openCamera();
   };
 
   const retakeSaved = (asset: (typeof assets)[number]): void => {
@@ -595,7 +610,13 @@ export function InvoiceSourceUpload({
             setPending(null);
             (pending.source === "camera" ? cameraInput : fileInput).current?.focus();
           }}
-          onUse={() => void useDocument()}
+          onAddAnotherPage={
+            pending.source === "camera" && !replacementAsset
+              ? () => void saveDocument("capture-another-page")
+              : undefined
+          }
+          useLabel={pending.source === "camera" ? "Analyze invoice" : undefined}
+          onUse={() => void saveDocument("analyze")}
         />
       ) : null}
       {replacementAsset ? (

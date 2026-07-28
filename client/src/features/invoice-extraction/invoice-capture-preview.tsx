@@ -11,6 +11,8 @@ interface InvoiceCapturePreviewProps {
   onRetake: () => void;
   onRemove: () => void;
   onUse: () => void;
+  onAddAnotherPage?: () => void;
+  useLabel?: string;
 }
 
 function LocalPdfPreview({ file }: { file: File }) {
@@ -116,7 +118,16 @@ export const InvoiceCapturePreview = forwardRef<
   HTMLDivElement,
   InvoiceCapturePreviewProps
 >(function InvoiceCapturePreview(
-  { capture, uploading, retrying, onRetake, onRemove, onUse },
+  {
+    capture,
+    uploading,
+    retrying,
+    onRetake,
+    onRemove,
+    onUse,
+    onAddAnotherPage,
+    useLabel,
+  },
   ref,
 ) {
   const quality = capture.quality;
@@ -223,20 +234,31 @@ export const InvoiceCapturePreview = forwardRef<
             A portrait photo is required for document scanning.
           </p>
         ) : (
-          <Button
-            type="button"
-            className="min-h-12 bg-amber-500 text-white hover:bg-amber-600"
-            disabled={uploading || quality.status === "checking"}
-            onClick={onUse}
-          >
-            {uploading
-              ? "Uploading…"
-              : retrying
-                ? "Retry upload"
-              : requiresReview
-                ? "Continue anyway"
-                : "Continue"}
-          </Button>
+          <>
+            {onAddAnotherPage ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-12"
+                disabled={uploading || quality.status === "checking"}
+                onClick={onAddAnotherPage}
+              >
+                Scan another page
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              className="min-h-12 bg-amber-500 text-white hover:bg-amber-600"
+              disabled={uploading || quality.status === "checking"}
+              onClick={onUse}
+            >
+              {uploading
+                ? "Uploading…"
+                : retrying
+                  ? "Retry upload"
+                  : useLabel ?? (requiresReview ? "Continue anyway" : "Continue")}
+            </Button>
+          </>
         )}
       </div>
     </div>
