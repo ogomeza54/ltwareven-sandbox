@@ -65,8 +65,8 @@ const warningText: Record<
     action: "Hold the phone steady, tap to focus, and retake the photo.",
   },
   "landscape-orientation": {
-    message: "The invoice may be sideways.",
-    action: "Check that the document is upright before continuing.",
+    message: "This photo is landscape.",
+    action: "Hold the phone upright and retake it so the full invoice is in portrait.",
   },
 };
 
@@ -176,7 +176,7 @@ export function analyzeCapturePixels(
   if (mean < 55) warnings.push(warning("dark"));
   if (contrast < 18) warnings.push(warning("low-contrast"));
   if (sharpness < 60 && contrast >= 18) warnings.push(warning("blurred"));
-  if (originalWidth > originalHeight * 1.45) {
+  if (originalWidth > originalHeight * 1.1) {
     warnings.push(warning("landscape-orientation"));
   }
   return {
@@ -357,19 +357,27 @@ export async function analyzeInvoiceFile(
       resizeHeight: height,
       resizeQuality: "high",
     });
+    const orientationWasApplied =
+      (bitmap.width > bitmap.height) !== (dimensions.width > dimensions.height);
+    const orientedOriginalWidth = orientationWasApplied
+      ? dimensions.height
+      : dimensions.width;
+    const orientedOriginalHeight = orientationWasApplied
+      ? dimensions.width
+      : dimensions.height;
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("Canvas unavailable");
-    context.drawImage(bitmap, 0, 0, width, height);
-    const pixels = context.getImageData(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
+    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height);
     return analyzeCapturePixels(
       pixels.data,
-      width,
-      height,
-      dimensions.width,
-      dimensions.height,
+      bitmap.width,
+      bitmap.height,
+      orientedOriginalWidth,
+      orientedOriginalHeight,
     );
   } catch {
     return {

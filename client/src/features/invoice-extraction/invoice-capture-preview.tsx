@@ -121,6 +121,9 @@ export const InvoiceCapturePreview = forwardRef<
 ) {
   const quality = capture.quality;
   const warnings = quality.status === "available" ? quality.warnings : [];
+  const portraitRetakeRequired =
+    capture.source === "camera" &&
+    warnings.some((warning) => warning.code === "landscape-orientation");
   const requiresReview =
     quality.status === "unavailable" || warnings.length > 0;
   const previewable =
@@ -210,25 +213,31 @@ export const InvoiceCapturePreview = forwardRef<
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" className="min-h-12" disabled={uploading} onClick={onRetake}>
-          Retake
+          {portraitRetakeRequired ? "Retake in portrait" : "Retake"}
         </Button>
         <Button type="button" variant="ghost" className="min-h-12" disabled={uploading} onClick={onRemove}>
           Remove
         </Button>
-        <Button
-          type="button"
-          className="min-h-12 bg-amber-500 text-white hover:bg-amber-600"
-          disabled={uploading || quality.status === "checking"}
-          onClick={onUse}
-        >
-          {uploading
-            ? "Uploading…"
-            : retrying
-              ? "Retry upload"
-            : requiresReview
-              ? "Continue anyway"
-              : "Continue"}
-        </Button>
+        {portraitRetakeRequired ? (
+          <p role="alert" className="flex min-h-12 items-center text-sm font-medium text-amber-400">
+            A portrait photo is required for document scanning.
+          </p>
+        ) : (
+          <Button
+            type="button"
+            className="min-h-12 bg-amber-500 text-white hover:bg-amber-600"
+            disabled={uploading || quality.status === "checking"}
+            onClick={onUse}
+          >
+            {uploading
+              ? "Uploading…"
+              : retrying
+                ? "Retry upload"
+              : requiresReview
+                ? "Continue anyway"
+                : "Continue"}
+          </Button>
+        )}
       </div>
     </div>
   );

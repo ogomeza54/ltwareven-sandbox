@@ -71,6 +71,26 @@ test("quality analysis reports dimensions, resolution and cautious orientation",
   }
 });
 
+test("quality analysis flags a standard landscape camera frame", () => {
+  const landscape = analyzeCapturePixels(
+    pixels(40, 30, (x, y) => ((x + y) % 2 ? 245 : 10)),
+    40,
+    30,
+    4032,
+    3024,
+  );
+  assert.deepEqual(codes(landscape), ["landscape-orientation"]);
+
+  const portrait = analyzeCapturePixels(
+    pixels(30, 40, (x, y) => ((x + y) % 2 ? 245 : 10)),
+    30,
+    40,
+    3024,
+    4032,
+  );
+  assert.deepEqual(codes(portrait), []);
+});
+
 test("quality analysis is bounded and unavailable remains non-blocking", () => {
   const result = analyzeCapturePixels(
     new Uint8ClampedArray(4),

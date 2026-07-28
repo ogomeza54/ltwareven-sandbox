@@ -289,7 +289,8 @@ export function InvoiceSourceUpload({
         video: {
           facingMode: { ideal: "environment" },
           width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          height: { ideal: 2560 },
+          aspectRatio: { ideal: 0.75 },
         },
       });
       if (cameraRequestRef.current !== requestId) {
@@ -318,14 +319,36 @@ export function InvoiceSourceUpload({
     }
 
     const canvas = document.createElement("canvas");
-    canvas.width = source.videoWidth;
-    canvas.height = source.videoHeight;
+    const portraitRatio = 3 / 4;
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = source.videoWidth;
+    let sourceHeight = source.videoHeight;
+    if (sourceWidth / sourceHeight > portraitRatio) {
+      sourceWidth = sourceHeight * portraitRatio;
+      sourceX = (source.videoWidth - sourceWidth) / 2;
+    } else {
+      sourceHeight = sourceWidth / portraitRatio;
+      sourceY = (source.videoHeight - sourceHeight) / 2;
+    }
+    canvas.width = Math.round(sourceWidth);
+    canvas.height = Math.round(sourceHeight);
     const context = canvas.getContext("2d");
     if (!context) {
       setCameraError("The photo could not be captured by this browser.");
       return;
     }
-    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    context.drawImage(
+      source,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
     canvas.toBlob(
       (blob) => {
         if (!blob) {
@@ -732,16 +755,20 @@ export function InvoiceSourceUpload({
               Place the full invoice inside the frame and make sure the text is readable.
             </DialogDescription>
           </DialogHeader>
-          <div className="relative flex min-h-64 items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-black sm:min-h-96">
+          <div className="relative mx-auto flex aspect-[3/4] max-h-[65vh] w-full max-w-sm items-center justify-center overflow-hidden rounded-lg border border-amber-500/70 bg-black">
             <video
               ref={video}
               autoPlay
               muted
               playsInline
               aria-label="Live camera preview"
-              className="max-h-[65vh] w-full object-contain"
+              className="h-full w-full object-cover"
               onCanPlay={() => setCameraReady(true)}
             />
+            <div className="pointer-events-none absolute inset-3 rounded border border-dashed border-white/80" aria-hidden="true" />
+            <p className="pointer-events-none absolute bottom-4 rounded bg-slate-950/80 px-3 py-1.5 text-xs text-white">
+              Hold your phone upright and fit the full invoice inside the frame
+            </p>
             {cameraStarting ? (
               <p className="absolute text-sm text-slate-300" role="status">
                 Opening camera…
