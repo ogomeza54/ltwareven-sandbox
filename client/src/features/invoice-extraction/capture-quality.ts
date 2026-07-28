@@ -115,6 +115,54 @@ export function readRasterDimensions(
   return null;
 }
 
+export function readJpegExifOrientation(bytes: Uint8Array): number | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 2 > bytes.length) return null;
+    const segmentLength = view.getUint16(offset, false);
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) return null;
+    const dataOffset = offset + 2;
+    const isExif =
+      marker === 0xe1 &&
+      segmentLength >= 16 &&
+      bytes[dataOffset] === 0x45 &&
+      bytes[dataOffset + 1] === 0x78 &&
+      bytes[dataOffset + 2] === 0x69 &&
+      bytes[dataOffset + 3] === 0x66 &&
+      bytes[dataOffset + 4] === 0 &&
+      bytes[dataOffset + 5] === 0;
+    if (isExif) {
+      const tiffOffset = dataOffset + 6;
+      if (tiffOffset + 8 > bytes.length) return null;
+      const byteOrder = view.getUint16(tiffOffset, false);
+      const littleEndian = byteOrder === 0x4949;
+      if (!littleEndian && byteOrder !== 0x4d4d) return null;
+      if (view.getUint16(tiffOffset + 2, littleEndian) !== 42) return null;
+      const ifdOffset = tiffOffset + view.getUint32(tiffOffset + 4, littleEndian);
+      if (ifdOffset + 2 > bytes.length) return null;
+      const entryCount = view.getUint16(ifdOffset, littleEndian);
+      for (let index = 0; index < entryCount; index += 1) {
+        const entryOffset = ifdOffset + 2 + index * 12;
+        if (entryOffset + 12 > bytes.length) return null;
+        if (view.getUint16(entryOffset, littleEndian) !== 0x0112) continue;
+        const orientation = view.getUint16(entryOffset + 8, littleEndian);
+        return orientation >= 1 && orientation <= 8 ? orientation : null;
+      }
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
 export function analyzeCapturePixels(
   rgba: Uint8ClampedArray,
   sampledWidth: number,
@@ -328,6 +376,7 @@ export async function analyzeInvoiceFile(
       await file.slice(0, Math.min(file.size, 524_288)).arrayBuffer(),
     );
     const dimensions = readRasterDimensions(header);
+    const exifOrientation = readJpegExifOrientation(header);
     if (!dimensions?.width || !dimensions.height) {
       throw new Error("Unsupported preview dimensions");
     }
@@ -357,8 +406,13 @@ export async function analyzeInvoiceFile(
       resizeHeight: height,
       resizeQuality: "high",
     });
+    const exifSwapsAxes =
+      exifOrientation !== null && [5, 6, 7, 8].includes(exifOrientation);
     const orientationWasApplied =
-      (bitmap.width > bitmap.height) !== (dimensions.width > dimensions.height);
+      exifSwapsAxes ||
+      (exifOrientation === null &&
+        (bitmap.width > bitmap.height) !==
+          (dimensions.width > dimensions.height));
     const orientedOriginalWidth = orientationWasApplied
       ? dimensions.height
       : dimensions.width;

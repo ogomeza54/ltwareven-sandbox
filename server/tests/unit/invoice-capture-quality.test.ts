@@ -4,6 +4,7 @@ import {
   analyzeInvoiceFile,
   analyzeCapturePixels,
   MAX_CAPTURE_ANALYSIS_PIXELS,
+  readJpegExifOrientation,
   readRasterDimensions,
   replacePendingCapture,
 } from "../../../client/src/features/invoice-extraction/capture-quality";
@@ -124,6 +125,24 @@ test("image dimensions are read from bounded PNG headers before decoding", () =>
     height: 4032,
   });
   assert.equal(readRasterDimensions(new Uint8Array([1, 2, 3, 4])), null);
+});
+
+test("JPEG EXIF orientation distinguishes stored pixels from displayed portrait", () => {
+  const jpeg = new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xe1, 0x00, 0x22,
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x01, 0x00,
+    0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x06, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0xff, 0xd9,
+  ]);
+  assert.equal(readJpegExifOrientation(jpeg), 6);
+  jpeg[30] = 1;
+  assert.equal(readJpegExifOrientation(jpeg), 1);
+  assert.equal(readJpegExifOrientation(new Uint8Array([1, 2, 3, 4])), null);
 });
 
 test("pending capture replacement revokes every displaced object URL", () => {
