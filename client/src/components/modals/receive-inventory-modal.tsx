@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { 
-  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink
+  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink, ChevronDown
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
 import { InvoiceSourceUpload } from "@/features/invoice-extraction/invoice-source-upload";
@@ -278,6 +278,22 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const clearPart = (itemId: string) => {
     updateItem(itemId, { partId: undefined, partNameSnapshot: "", partNumberSnapshot: "" });
     setPartSearch(prev => ({ ...prev, [itemId]: "" }));
+  };
+
+  const prepareNewPart = (item: LineItem) => {
+    const name = (partSearch[item.id] ?? item.partNameSnapshot).trim();
+    if (!name) return;
+    updateItem(item.id, {
+      partId: undefined,
+      partNameSnapshot: name,
+    });
+    setPartSearch((previous) => ({ ...previous, [item.id]: name }));
+    setSearchFocus(null);
+    if (!item.partNumberSnapshot.trim()) {
+      requestAnimationFrame(() => {
+        partNumberInputRefs.current[item.id]?.focus();
+      });
+    }
   };
 
   const resetForm = () => {
@@ -818,7 +834,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                     const filteredParts = getFilteredParts(item);
                     const catalogSuggestions = getCatalogSuggestions(item);
                     const subgroups = item.groupId ? getSubgroups(item.groupId) : [];
-                    const showDropdown = searchFocus === item.id && (filteredParts.length > 0 || catalogSuggestions.length > 0);
+                    const searchValue = partSearch[item.id] ?? item.partNameSnapshot;
+                    const showDropdown =
+                      item.itemType !== "adjustment" && searchFocus === item.id;
 
                     return (
                       <tr key={item.id} className="block rounded-lg border border-border p-3 align-top hover:bg-muted/20 md:table-row md:rounded-none md:border-0 md:p-0">
@@ -954,8 +972,31 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               <p className="text-xs text-muted-foreground">Included in invoice totals and landed cost; excluded from stock.</p>
                             </div>
                           ) : <div className="relative">
-                            <div className="flex items-center gap-1">
-                              <Search className="h-3 w-3 text-foreground/50 flex-shrink-0" />
+                            {!item.partId && item.partNameSnapshot.trim() ? (
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-amber-500/50 bg-amber-500/10 px-2 text-[11px] font-medium text-amber-400"
+                              >
+                                Not linked
+                              </Badge>
+                            ) : item.partId ? (
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-green-500/50 bg-green-500/10 px-2 text-[11px] font-medium text-green-400"
+                              >
+                                Linked to stock
+                              </Badge>
+                            ) : null}
+                            <div
+                              className={`flex min-h-11 items-center gap-2 rounded-md border bg-slate-950 px-3 transition-colors ${
+                                searchFocus === item.id
+                                  ? "border-amber-500 ring-1 ring-amber-500/40"
+                                  : item.partId
+                                    ? "border-green-500/50"
+                                    : "border-slate-600 hover:border-amber-500/70"
+                              }`}
+                            >
+                              <Search className="h-4 w-4 flex-shrink-0 text-foreground/60" />
                               <input
                                 aria-label="Part or item name"
                                 className="min-h-11 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-foreground/50"
@@ -973,6 +1014,12 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                   <X className="h-3 w-3" />
                                 </button>
                               )}
+                              {!item.partId ? (
+                                <ChevronDown
+                                  className={`h-4 w-4 flex-shrink-0 text-foreground/50 transition-transform ${searchFocus === item.id ? "rotate-180" : ""}`}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
                             </div>
                             {aiReviewWorkspace ? (
                               <p
@@ -980,54 +1027,84 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               >
                                 {item.partId
                                   ? "Matched to existing stock"
-                                  : "New stock part — verify its name and reference"}
+                                  : "Choose a stock item or create a new part."}
                               </p>
                             ) : null}
                             {showDropdown && (
-                              <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover shadow-lg md:w-80">
-                                {/* Existing parts */}
-                                {filteredParts.length > 0 && (
-                                  <>
-                                    {item.subgroupId && (
-                                      <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border">
-                                        Parts in this subgroup
-                                      </div>
-                                    )}
-                                    {filteredParts.map((part: any) => (
-                                      <button
-                                        key={part.id}
-                                        type="button"
-                                        className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
-                                        onMouseDown={() => selectPart(item.id, part)}
-                                      >
-                                        <span className="font-medium">{part.name}</span>
-                                        <span className="text-foreground/60 text-xs ml-2">{part.partNumber}</span>
-                                      </button>
-                                    ))}
-                                  </>
-                                )}
-                                {/* Catalog item name suggestions (not linked to a part) */}
-                                {catalogSuggestions.filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId)).length > 0 && (
-                                  <>
-                                    <div className="px-3 py-1 text-xs text-muted-foreground border-t border-border">
-                                      Catalog suggestions
-                                    </div>
-                                    {catalogSuggestions
-                                      .filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId))
-                                      .map((ci: any) => (
+                              <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border border-slate-600 bg-slate-950 shadow-xl md:w-80">
+                                <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+                                  Choose a stock item
+                                </div>
+                                <div className="max-h-56 overflow-y-auto">
+                                  {/* Existing parts */}
+                                  {filteredParts.length > 0 && (
+                                    <>
+                                      {item.subgroupId && (
+                                        <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border">
+                                          Parts in this subgroup
+                                        </div>
+                                      )}
+                                      {filteredParts.map((part: any) => (
                                         <button
-                                          key={ci.id}
+                                          key={part.id}
                                           type="button"
-                                          className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
-                                          onMouseDown={() => selectCatalogItem(item.id, ci)}
+                                          className="flex min-h-14 w-full items-center justify-between gap-4 border-b border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                                          onMouseDown={() => selectPart(item.id, part)}
                                         >
-                                          <span>{ci.name}</span>
-                                          <span className="text-amber-500 text-xs ml-2">catalog</span>
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-medium">{part.name}</span>
+                                            <span className="block truncate text-xs text-muted-foreground">{part.partNumber || "No part number"}</span>
+                                          </span>
+                                          <span className="shrink-0 text-right text-xs">
+                                            <span className="block text-muted-foreground">In stock</span>
+                                            <span className="font-medium text-green-400">{Number(part.quantityInStock ?? 0)}</span>
+                                          </span>
                                         </button>
-                                      ))
-                                    }
-                                  </>
-                                )}
+                                      ))}
+                                    </>
+                                  )}
+                                  {/* Catalog item name suggestions (not linked to a part) */}
+                                  {catalogSuggestions.filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId)).length > 0 && (
+                                    <>
+                                      <div className="px-3 py-1 text-xs text-muted-foreground border-t border-border">
+                                        Catalog suggestions
+                                      </div>
+                                      {catalogSuggestions
+                                        .filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId))
+                                        .map((ci: any) => (
+                                          <button
+                                            key={ci.id}
+                                            type="button"
+                                            className="flex min-h-12 w-full items-center justify-between border-b border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                                            onMouseDown={() => selectCatalogItem(item.id, ci)}
+                                          >
+                                            <span>{ci.name}</span>
+                                            <span className="text-amber-500 text-xs ml-2">catalog</span>
+                                          </button>
+                                        ))
+                                      }
+                                    </>
+                                  )}
+                                  {searchValue.trim() &&
+                                  filteredParts.length === 0 &&
+                                  catalogSuggestions.length === 0 ? (
+                                    <p className="border-b border-border px-3 py-3 text-sm text-muted-foreground">
+                                      No matching stock items found.
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={!searchValue.trim()}
+                                  className="flex min-h-12 w-full items-center gap-2 border-t border-border bg-slate-950 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    prepareNewPart(item);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                                  Create new part
+                                </button>
                               </div>
                             )}
                           </div>}
