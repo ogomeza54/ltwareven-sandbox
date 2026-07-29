@@ -114,6 +114,11 @@ test("client starts a fresh draft when the previous invoice is terminal or under
       false,
       status,
     );
+    assert.equal(
+      selectResumableInvoiceDraft([{ ...draft, status }]),
+      null,
+      `${status} must not reopen in Receive Inventory`,
+    );
   }
   assert.equal(
     invoiceDraftAcceptsSourceUpload({

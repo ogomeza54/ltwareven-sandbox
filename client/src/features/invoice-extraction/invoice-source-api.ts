@@ -100,7 +100,7 @@ export function selectResumableInvoiceDraft(
 ): InvoiceDraftDto | null {
   const candidates = drafts.filter(
     (candidate) =>
-      ["draft", "uploaded", "needs_review"].includes(candidate.status),
+      ["draft", "uploaded"].includes(candidate.status),
   );
   return (
     candidates.find((candidate) => candidate.source?.assets.length) ??
