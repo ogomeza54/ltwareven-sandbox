@@ -1055,12 +1055,12 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 Treat as stock item
                               </button>
                             </div>
-                          ) : <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-xs font-medium">
+                          ) : <div className="flex flex-wrap gap-1 rounded-md border border-border p-1 text-xs font-medium">
                             <button
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "inventory", classificationNeedsReview: false })}
                               aria-pressed={item.itemType === "inventory"}
-                              className={`min-h-11 flex-1 px-1.5 py-1 transition-colors ${
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
                                 item.itemType === "inventory"
                                   ? "bg-blue-600 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -1072,7 +1072,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               type="button"
                               onClick={() => updateItem(item.id, { itemType: "consumable", classificationNeedsReview: false })}
                               aria-pressed={item.itemType === "consumable"}
-                              className={`min-h-11 flex-1 px-1.5 py-1 transition-colors border-l border-border ${
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
                                 item.itemType === "consumable"
                                   ? "bg-amber-500 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -1097,7 +1097,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 });
                               }}
                               aria-pressed={item.itemType === "service"}
-                              className={`min-h-11 px-1.5 py-1 transition-colors border-l border-border ${
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
                                 item.itemType === "service"
                                   ? "bg-violet-600 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
