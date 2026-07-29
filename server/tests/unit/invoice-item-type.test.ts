@@ -66,6 +66,6 @@ test("service and labor lines never require a stock type decision", () => {
 test("direct expenses never require a stock type decision", () => {
   assert.deepEqual(
     resolveInvoiceItemType({ classification: "direct_expense" }),
-    { itemType: "direct_expense", needsReview: false },
+    { itemType: "service", needsReview: false },
   );
 });

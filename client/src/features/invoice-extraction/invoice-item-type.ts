@@ -21,11 +21,12 @@ export function resolveInvoiceItemType({
   selectedPartType,
   proposedPartType,
 }: ResolveInvoiceItemTypeInput): ResolvedInvoiceItemType {
-  if (
-    classification === "adjustment" ||
-    classification === "service" ||
-    classification === "direct_expense"
-  ) {
+  if (classification === "direct_expense") {
+    // Keep backward compatibility with drafts created while Direct Expense was
+    // exposed, but present all non-stock business charges as Service now.
+    return { itemType: "service", needsReview: false };
+  }
+  if (classification === "adjustment" || classification === "service") {
     return { itemType: classification, needsReview: false };
   }
   if (selectedPartType === "inventory" || selectedPartType === "consumable") {

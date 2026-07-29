@@ -70,7 +70,8 @@ test("provider separates service work from stock and leaves shop supplies for re
   assert.match(instructions, /Service lines remain part of invoice totals but never represent stock/i);
   assert.match(instructions, /shop supplies/i);
   assert.match(instructions, /return unknown so a user must choose/i);
-  assert.match(instructions, /Do not automatically classify direct expenses/i);
+  assert.match(instructions, /choose inventory, consumable, or service/i);
+  assert.doesNotMatch(instructions, /direct expense/i);
 });
 
 test("start command rejects tenant and provider fields", () => {

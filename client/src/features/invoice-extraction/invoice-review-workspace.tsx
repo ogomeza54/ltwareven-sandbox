@@ -851,21 +851,20 @@ export function InvoiceReviewWorkspace({
                 <select
                   id={`review-line-${line.id}-type`}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={line.classification}
+                  value={line.classification === "direct_expense" ? "service" : line.classification}
                   disabled={readOnly}
                   onChange={(event) => changeLine(line.id, { classification: event.target.value as typeof line.classification })}
                   onBlur={() => void flushLines()}
                 >
                   <option value="inventory">Inventory</option>
                   <option value="consumable">Consumable</option>
-                  <option value="service">Service / Labor</option>
-                  <option value="direct_expense">Direct Expense</option>
+                  <option value="service">Service</option>
                   <option value="unknown">Needs review</option>
                 </select>
                 {showApprovalProblems &&
                 approvalProblems.includes("classification") ? (
                   <p role="alert" className="mt-1 text-xs text-destructive">
-                    Choose Inventory, Consumable, Service / Labor, or Direct Expense before final confirmation.
+                    Choose Inventory, Consumable, or Service before final confirmation.
                   </p>
                 ) : null}
                 {!readOnly ? (
@@ -891,7 +890,7 @@ export function InvoiceReviewWorkspace({
               line.classification === "direct_expense" ? (
                 <div className="rounded-md border border-violet-500/40 bg-violet-500/10 p-3 md:col-span-2 lg:col-span-6">
                   <p className="text-sm font-semibold text-violet-200">
-                    {line.classification === "service" ? "Service / Labor" : "Direct Expense"} · no stock movement
+                    Service · no stock movement
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     This charge remains in the invoice total. It will not create a part, update stock, or be added to part landed costs.
@@ -1343,9 +1342,9 @@ export function InvoiceReviewWorkspace({
                         : line.resolution.kind === "new"
                           ? `new part ${line.resolution.proposedPart.name}`
                           : line.resolution.kind === "service"
-                            ? "service / labor · no stock movement"
+                            ? "service · no stock movement"
                             : line.resolution.kind === "direct_expense"
-                              ? "direct expense · no stock movement"
+                              ? "service · no stock movement"
                             : `${line.resolution.adjustmentType} · no stock movement`}
                     </li>
                   ))}
