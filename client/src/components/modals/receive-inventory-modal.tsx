@@ -724,6 +724,13 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      // A confirmed draft is terminal and must never be restored when the
+      // receiving modal opens for the next invoice. Clear the cached draft
+      // before remounting the source uploader so it cannot repopulate the form.
+      queryClient.setQueriesData(
+        { queryKey: ["invoice-drafts-for-receiving"] },
+        null,
+      );
       queryClient.invalidateQueries({
         queryKey: ["invoice-drafts-for-receiving"],
       });
