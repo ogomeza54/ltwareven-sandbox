@@ -22,6 +22,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createClientUuid } from "@/lib/client-uuid";
 import {
   getInvoiceReview,
   createInvoiceConfirmationIntent,
@@ -489,7 +490,7 @@ export function InvoiceReviewWorkspace({
     ) {
       return;
     }
-    confirmationKey.current ??= globalThis.crypto.randomUUID();
+    confirmationKey.current ??= createClientUuid();
     preparingConfirmationRef.current = true;
     setPreparingConfirmation(true);
     setConfirmationError(null);

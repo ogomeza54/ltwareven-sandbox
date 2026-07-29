@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { createClientUuid } from "@/lib/client-uuid";
 import { 
   PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink, ChevronDown
 } from "lucide-react";
@@ -682,7 +683,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
           }),
         );
         setAiReviewWorkspace(current);
-        confirmationKeyRef.current ??= globalThis.crypto.randomUUID();
+        confirmationKeyRef.current ??= createClientUuid();
         return createInvoiceConfirmationIntent(
           current,
           confirmationKeyRef.current,
