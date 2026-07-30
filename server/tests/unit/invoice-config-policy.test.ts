@@ -33,16 +33,16 @@ test("invoice pilot configuration has validated safe defaults", () => {
     pilotCurrency: "USD",
     workerMaxAttempts: 3,
     workerLeaseSeconds: 120,
-    workerPollSeconds: 15,
+    workerPollSeconds: 3,
     reconciliationToleranceCents: 1,
     provider: "openai",
     openaiApiKey: undefined,
     openaiWebhookSecret: undefined,
-    openaiModel: "gpt-5.6-terra",
+    openaiModel: "gpt-5.6-luna",
     reasoningEffort: "none",
     engineVersion: "invoice-v1",
     proposalSchemaVersion: "invoice-proposal-v1",
-    executionMode: "background",
+    executionMode: "synchronous",
     storeResponse: true,
     privacyProfile: "standard",
     storageBackend: "filesystem",
@@ -127,6 +127,18 @@ test("invoice configuration fails closed and ignores remote database settings", 
       INVOICE_ALLOWED_ORIGIN: "https://haulmaster.example",
     }).storageBackend,
     "replit",
+  );
+  assert.throws(
+    () =>
+      loadInvoiceConfig({
+        NODE_ENV: "production",
+        OPENAI_API_KEY: "test-key",
+        INVOICE_OPENAI_EXECUTION_MODE: "background",
+        INVOICE_STORAGE_BACKEND: "replit",
+        REPLIT_OBJECT_STORAGE_BUCKET: "private-invoices",
+        INVOICE_ALLOWED_ORIGIN: "https://haulmaster.example",
+      }),
+    /background OpenAI extraction requires a webhook secret/,
   );
   assert.throws(
     () =>

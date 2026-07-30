@@ -1,5 +1,5 @@
 #!/bin/bash
 set -e
 npm install
-echo "Schema delivery requires the guarded, reviewed migration workflow; db:push is disabled."
-exit 1
+echo "Dependencies installed. Database migrations are not run automatically."
+echo "After review and backup, run: INVOICE_MIGRATION_APPROVED=true npm run db:migrate"

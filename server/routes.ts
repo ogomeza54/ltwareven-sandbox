@@ -341,6 +341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -375,6 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/switch-company", isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "super_admin") {
@@ -427,6 +429,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/admin/audit-log", isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
       if (!user || user.role !== "super_admin") {
         return res.status(403).json({ message: "Only super admins can view the audit log" });

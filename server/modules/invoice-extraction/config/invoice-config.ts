@@ -27,7 +27,7 @@ const invoiceConfigSchema = z.object({
   pilotCurrency: z.literal("USD").default("USD"),
   workerMaxAttempts: positiveInteger(3).pipe(z.number().max(10)),
   workerLeaseSeconds: positiveInteger(120).pipe(z.number().max(3600)),
-  workerPollSeconds: positiveInteger(15).pipe(z.number().max(300)),
+  workerPollSeconds: positiveInteger(3).pipe(z.number().max(300)),
   reconciliationToleranceCents: z.coerce
     .number()
     .int()
@@ -37,13 +37,13 @@ const invoiceConfigSchema = z.object({
   provider: z.literal("openai").default("openai"),
   openaiApiKey: z.string().min(1).optional(),
   openaiWebhookSecret: z.string().min(1).optional(),
-  openaiModel: z.string().min(1).default("gpt-5.6-terra"),
+  openaiModel: z.string().min(1).default("gpt-5.6-luna"),
   reasoningEffort: z
     .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
     .default("none"),
   engineVersion: z.string().min(1).default("invoice-v1"),
   proposalSchemaVersion: z.literal("invoice-proposal-v1").default("invoice-proposal-v1"),
-  executionMode: z.enum(["background", "synchronous"]).default("background"),
+  executionMode: z.enum(["background", "synchronous"]).default("synchronous"),
   storeResponse: environmentBoolean(true),
   privacyProfile: z.enum(["standard", "zdr"]).default("standard"),
   storageBackend: z.enum(["filesystem", "replit"]).default("filesystem"),
@@ -107,9 +107,12 @@ export function loadInvoiceConfig(
   if (
     config.nodeEnvironment === "production" &&
     config.openaiApiKey &&
+    config.executionMode === "background" &&
     !config.openaiWebhookSecret
   ) {
-    throw new Error("Production OpenAI extraction requires a webhook secret.");
+    throw new Error(
+      "Production background OpenAI extraction requires a webhook secret.",
+    );
   }
   if (
     config.nodeEnvironment === "production" &&

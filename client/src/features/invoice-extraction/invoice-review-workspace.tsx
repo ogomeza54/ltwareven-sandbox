@@ -418,7 +418,11 @@ export function InvoiceReviewWorkspace({
       linesRef.current = saved.lines;
       setLines(saved.lines);
       setAutoMatchedLineIds(
-        (value) => new Set([...value, ...exactMatches.map((match) => match.lineId)]),
+        (value) =>
+          new Set([
+            ...Array.from(value),
+            ...exactMatches.map((match) => match.lineId),
+          ]),
       );
       setWorkflowNotice(
         `${exactMatches.length} line${exactMatches.length === 1 ? "" : "s"} automatically linked by exact stock reference. Review before approving lines and totals.`,

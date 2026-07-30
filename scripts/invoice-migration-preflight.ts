@@ -487,7 +487,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
     const sourceJournal = await client.query<{ applied: boolean }>(
       `select exists (
          select 1 from drizzle.__drizzle_migrations
-          where created_at = 1784764802000
+          where created_at in (1784764802000, 1784764900000)
        ) as applied`,
     );
     if (sourceTables.rowCount && !sourceJournal.rows[0]?.applied) {
@@ -503,7 +503,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
     const recorded = await client.query<{ applied: boolean }>(
       `select exists (
          select 1 from drizzle.__drizzle_migrations
-          where created_at = 1784764801000
+          where created_at in (1784764801000, 1784764900000)
        ) as applied`,
     );
     if (recorded.rows[0]?.applied && premature.rowCount !== 5) {
@@ -515,13 +515,13 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
       const extractionRecorded = await client.query<{ applied: boolean }>(
         `select exists (
            select 1 from drizzle.__drizzle_migrations
-            where created_at = 1784764803000
+            where created_at in (1784764803000, 1784764900000)
          ) as applied`,
       );
       const feedbackRecorded = await client.query<{ applied: boolean }>(
         `select exists (
            select 1 from drizzle.__drizzle_migrations
-            where created_at = 1784764811000
+            where created_at in (1784764811000, 1784764900000)
          ) as applied`,
       );
       const extractionLedgerColumns = extractionRecorded.rows[0]?.applied
@@ -723,7 +723,7 @@ export async function assertBrownfieldBaseline(client: Client): Promise<void> {
       const sourceRecorded = await client.query<{ applied: boolean }>(
         `select exists (
            select 1 from drizzle.__drizzle_migrations
-            where created_at = 1784764802000
+            where created_at in (1784764802000, 1784764900000)
          ) as applied`,
       );
       if (sourceRecorded.rows[0]?.applied) {

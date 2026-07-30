@@ -11,6 +11,8 @@ vite.config.ts.*
 *.tar.gz
 test-results/
 playwright-report/
+output/
+tmp/
 
 # BMAD Method — local installation, skills, and generated artifacts
 _bmad/

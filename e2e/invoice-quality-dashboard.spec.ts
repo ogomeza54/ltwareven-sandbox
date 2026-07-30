@@ -48,6 +48,7 @@ test("authorized quality dashboard exposes denominators, low-sample context and 
             reviewedEvents: 12,
             correctedEvents: 3,
             acceptedEvents: 9,
+            automaticEnrichmentEvents: 0,
             correctionRate: 0.25,
             acceptanceRate: 0.75,
             averageReviewSeconds: 90,
@@ -61,6 +62,7 @@ test("authorized quality dashboard exposes denominators, low-sample context and 
           bySubject: [
             { key: "header", count: 12, denominator: 12, rate: 1 },
           ],
+          byMatchDecision: [],
           engines: [
             {
               engineVersion: "invoice-v1",
@@ -80,6 +82,7 @@ test("authorized quality dashboard exposes denominators, low-sample context and 
               supplier: "Synthetic Vendor",
               engineVersion: "invoice-v1",
               feedbackEvents: 4,
+              reviewedEvents: 4,
               correctedEvents: 1,
               reviewSeconds: 90,
               updatedAt: "2026-07-23T12:00:00.000Z",
@@ -97,7 +100,7 @@ test("authorized quality dashboard exposes denominators, low-sample context and 
 
   await page.goto("/invoice-quality");
   await expect(page.getByRole("heading", { name: "Invoice AI Quality" })).toBeVisible();
-  await expect(page.getByText("3 / 12 reviewed")).toBeVisible();
+  await expect(page.getByText("3 / 12 fields")).toBeVisible();
   await expect(page.getByText(/Low sample: 12 reviewed observations/)).toBeVisible();
   await expect(page.getByText("Synthetic Vendor")).toBeVisible();
   await page.getByLabel("Supplier filter").fill("Synthetic");

@@ -223,6 +223,8 @@ export class DatabaseStorage implements IStorage {
         profileImageUrl: users.profileImageUrl,
         role: users.role,
         companyId: users.companyId,
+        passwordHash: users.passwordHash,
+        mustChangePassword: users.mustChangePassword,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
         companyName: companies.name,

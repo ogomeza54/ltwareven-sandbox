@@ -149,31 +149,16 @@ test("migration journal is idempotent and ledger constraints are installed", asy
   const journal = await client.query(
     "select hash, created_at from drizzle.__drizzle_migrations order by created_at",
   );
-  assert.equal(journal.rowCount, 16);
-  for (const [index, migration] of [
-    "0000_brownfield_baseline.sql",
-    "0001_invoice_ledger_core.sql",
-    "0002_invoice_private_sources.sql",
-    "0003_invoice_extraction_proposals.sql",
-    "0004_invoice_attempt_ownership.sql",
-    "0005_invoice_header_review.sql",
-    "0006_invoice_header_review_state.sql",
-    "0007_invoice_line_review.sql",
-    "0008_invoice_part_matching.sql",
-    "0009_invoice_confirmation_intents.sql",
-    "0010_invoice_confirmation_completion.sql",
-    "0011_invoice_feedback_history.sql",
-    "0012_invoice_engine_evaluation.sql",
-    "0013_invoice_adjustment_lines.sql",
-    "0014_invoice_service_lines.sql",
-    "0015_invoice_direct_expense_lines.sql",
-  ].entries()) {
-    const contents = await readFile(`migrations/${migration}`, "utf8");
-    assert.equal(
-      journal.rows[index].hash,
-      createHash("sha256").update(contents).digest("hex"),
-    );
-  }
+  assert.equal(journal.rowCount, 1);
+  const contents = await readFile(
+    "migrations/0000_invoice_recognition_module.sql",
+    "utf8",
+  );
+  assert.equal(
+    journal.rows[0].hash,
+    createHash("sha256").update(contents).digest("hex"),
+  );
+  assert.equal(journal.rows[0].created_at, "1784764900000");
   const trigger = await client.query(
     `select 1 from pg_trigger
       where tgname = 'invoice_audit_events_append_only' and not tgisinternal`,
@@ -215,7 +200,7 @@ test("overlapping migration runners serialize and remain idempotent", async () =
   const journal = await client.query(
     "select count(*)::int as count from drizzle.__drizzle_migrations",
   );
-  assert.equal(journal.rows[0].count, 16);
+  assert.equal(journal.rows[0].count, 1);
 });
 
 test("private source lifecycle preserves tenant, page, order and fingerprint invariants", async () => {
@@ -1120,7 +1105,7 @@ test("durable extraction publishes only a tenant-owned current proposal", async 
     }),
   );
   assert.equal(run.status, "queued");
-  assert.equal(run.model, "gpt-5.6-terra");
+  assert.equal(run.model, "gpt-5.6-luna");
   assert.equal(await extractions.get(actorB, run.id), null);
 
   const claimed = await extractions.claimNext("worker-a", 120);

@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "invoice_confirmation_intents_completed_draft_unique" ON "invoice_confirmation_intents" USING btree ("company_id","draft_id") WHERE "invoice_confirmation_intents"."status" = 'completed';

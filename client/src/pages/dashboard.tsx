@@ -21,11 +21,18 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Link } from "wouter";
 
+type DashboardStats = {
+  activeOrders: number;
+  availableMechanics: number;
+  lowStockItems: number;
+  monthlyRevenue: number;
+};
+
 export default function Dashboard() {
   const [showIntakeModal, setShowIntakeModal] = useState(false);
   const { user } = useAuth();
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
   });
 

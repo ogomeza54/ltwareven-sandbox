@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import sharp from "sharp";
 
 const draftId = "00000000-0000-4000-8000-000000000001";
 const freshDraftId = "00000000-0000-4000-8000-000000000101";
@@ -8,6 +9,30 @@ const png = Buffer.from(
   "base64",
 );
 const pngChecksum = createHash("sha256").update(png).digest("hex");
+
+async function portraitInvoicePng(): Promise<Buffer> {
+  return sharp({
+    create: {
+      width: 1000,
+      height: 1400,
+      channels: 3,
+      background: "white",
+    },
+  })
+    .composite([
+      {
+        input: Buffer.from(
+          '<svg width="800" height="1000"><rect width="800" height="1000" fill="white"/><rect x="40" y="40" width="720" height="80" fill="black"/><g stroke="black" stroke-width="12">' +
+            Array.from({ length: 14 }, (_, index) => `<line x1="50" y1="${180 + index * 55}" x2="750" y2="${180 + index * 55}"/>`).join("") +
+            "</g></svg>",
+        ),
+        left: 100,
+        top: 180,
+      },
+    ])
+    .png()
+    .toBuffer();
+}
 
 function onePagePdf(): Buffer {
   const objects = [
@@ -807,7 +832,7 @@ test("Take photo requests the device camera and explains denied permission", asy
   await expect(page.getByRole("button", { name: "Choose an image instead" })).toBeVisible();
 });
 
-test("capture previews before upload, retries, reorders, resumes and enters manual mode", async ({
+test("capture previews before upload, retries, reorders and enters manual mode", async ({
   page,
 }, testInfo) => {
   const state = await mockApplication(page, true);
@@ -819,8 +844,8 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
 
   const camera = page.getByLabel("Take invoice photo with rear camera");
   await expect(camera).toHaveAttribute("capture", "environment");
-  await expect(page.getByLabel("Choose invoice image or PDF")).toBeVisible();
-  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+  await expect(page.getByLabel("Choose an invoice document")).toBeVisible();
+  await page.getByLabel("Choose an invoice document").setInputFiles({
     name: "phone-invoice.png",
     mimeType: "image/png",
     buffer: png,
@@ -828,17 +853,17 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
   await expect(
     page.getByRole("img", { name: "Local preview of selected invoice" }),
   ).toBeVisible();
-  await expect(page.getByText("Complete review before upload")).toBeVisible();
+  await expect(page.getByText("Before continuing")).toBeVisible();
   expect(state.uploadAttempts).toBe(0);
 
-  await page.getByRole("button", { name: /Use document/ }).click();
+  await page.getByRole("button", { name: /Continue/ }).click();
   await expect(page.getByRole("button", { name: "Retry upload" })).toBeVisible();
   expect(state.assets).toHaveLength(2);
   await page.getByRole("button", { name: "Retry upload" }).click();
   await expect(page.getByText("phone-invoice.png saved.")).toBeVisible();
   expect(state.assets).toHaveLength(3);
   await expect(
-    page.getByRole("progressbar", { name: "AI processing progress" }),
+    page.getByRole("progressbar", { name: "Invoice reading progress" }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Enter manually" }).click();
@@ -846,8 +871,8 @@ test("capture previews before upload, retries, reorders, resumes and enters manu
 
   await page.reload();
   await openReceiveInventory(page);
-  await expect(page.getByText("phone-invoice.png").first()).toBeVisible();
-  await expect(page.getByText(/position 1 of 3/).first()).toBeVisible();
+  await expect(page.getByText("phone-invoice.png")).toHaveCount(0);
+  await expect(page.getByText("Add up to 10 photos or pages.")).toBeVisible();
 
   if (testInfo.project.name !== "desktop-chromium") {
     await page.setViewportSize({ width: 844, height: 390 });
@@ -892,18 +917,17 @@ test("PDF selection renders and checks every page locally before upload", async 
 }) => {
   await mockApplication(page);
   await openReceiveInventory(page);
-  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+  await page.getByLabel("Choose an invoice document").setInputFiles({
     name: "local-two-page-preview.pdf",
     mimeType: "application/pdf",
     buffer: twoPagePdf(),
   });
   await expect(
-    page.getByRole("img", { name: "Local preview of the first PDF page" }),
+    page.getByRole("img", { name: "Preview of the first invoice page" }),
   ).toBeVisible();
   await expect(page.getByText("Page 1 of 2")).toBeVisible();
-  await expect(page.getByText("2 pages checked")).toBeVisible();
-  await expect(page.getByText(/Page 1:/)).toBeVisible();
-  await expect(page.getByText(/Page 2:/)).toBeVisible();
+  await expect(page.getByText("2 pages ready to review")).toBeVisible();
+  await expect(page.getByText("Before continuing")).toBeVisible();
   await expect(
     page.getByText(/quality checks.*not.*available/i),
   ).toHaveCount(0);
@@ -915,7 +939,7 @@ test("saved retake preserves the original until replacement succeeds", async ({
   const state = await mockApplication(page);
   await openReceiveInventory(page);
   const firstPage = page
-    .getByRole("article", { name: /Saved page 1: page-one\.png/ });
+    .getByRole("article", { name: /Invoice document 1: page-one\.png/ });
   await firstPage.getByRole("button", { name: "Retake saved page 1" }).click();
   await expect(page.getByRole("heading", { name: "Take invoice photo" })).toBeVisible();
   expect(state.assets.some((asset) => asset.displayName === "page-one.png")).toBe(
@@ -924,9 +948,9 @@ test("saved retake preserves the original until replacement succeeds", async ({
   await page.getByLabel("Take invoice photo with rear camera").setInputFiles({
     name: "replacement.png",
     mimeType: "image/png",
-    buffer: png,
+    buffer: await portraitInvoicePng(),
   });
-  await page.getByRole("button", { name: /Use document/ }).click();
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
   await expect(page.getByText("replacement.png saved.")).toBeVisible();
   expect(state.assets.some((asset) => asset.displayName === "page-one.png")).toBe(
     false,
@@ -952,7 +976,7 @@ test("saved retake remains available at the ten-page limit", async ({
     });
   }
   await openReceiveInventory(page);
-  await expect(page.getByText("10 of 10 pages saved.")).toBeVisible();
+  await expect(page.getByText("10 pages added. You can add up to 10.")).toBeVisible();
 
   await page
     .getByRole("button", { name: "Retake saved page 1", exact: true })
@@ -961,9 +985,9 @@ test("saved retake remains available at the ten-page limit", async ({
   await page.getByLabel("Take invoice photo with rear camera").setInputFiles({
     name: "limit-replacement.png",
     mimeType: "image/png",
-    buffer: png,
+    buffer: await portraitInvoicePng(),
   });
-  await page.getByRole("button", { name: /Use document/ }).click();
+  await page.getByRole("button", { name: "Analyze invoice" }).click();
 
   await expect(page.getByText("limit-replacement.png saved.")).toBeVisible();
   expect(state.assets).toHaveLength(10);
@@ -975,12 +999,12 @@ test("a committed upload with a lost response is recovered without retry duplica
 }) => {
   const state = await mockApplication(page, true, true);
   await openReceiveInventory(page);
-  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+  await page.getByLabel("Choose an invoice document").setInputFiles({
     name: "recovered.png",
     mimeType: "image/png",
     buffer: png,
   });
-  await page.getByRole("button", { name: /Use document/ }).click();
+  await page.getByRole("button", { name: /Continue/ }).click();
   await expect(
     page.getByText("recovered.png saved after reconnecting."),
   ).toBeVisible();
@@ -1031,27 +1055,28 @@ test("AI extraction populates the existing intake form without stock writes", as
 }) => {
   const state = await mockApplication(page);
   await openReceiveInventory(page);
-  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText("1 line items ready for review."),
+    page.getByText("1 items found. Check them below."),
   ).toBeVisible({ timeout: 8_000 });
   const progress = page.getByRole("status", {
     name: "Invoice analysis progress",
   });
-  await expect(progress).toContainText("AI processing completed");
+  await expect(progress).toContainText("Invoice ready");
   await expect(progress).toContainText("1.8 s");
   await expect(progress).not.toContainText("Queue");
   await expect(progress).not.toContainText("Total");
-  await expect(page.getByRole("progressbar", { name: "AI processing progress" })).toHaveAttribute("aria-valuenow", "100");
+  await expect(page.getByRole("progressbar", { name: "Invoice reading progress" })).toHaveAttribute("aria-valuenow", "100");
   await expect(
     page.getByRole("region", { name: "Invoice review workspace" }),
   ).toHaveCount(0);
-  await expect(page.getByText(/Invoice scanned · 1 line detected/)).toBeVisible();
+  await expect(page.getByText(/Invoice ready · 1 item found/)).toBeVisible();
   const vendor = page.getByLabel("Vendor / Supplier *", { exact: true });
   await expect(vendor).toHaveValue("Test Vendor");
   await vendor.fill("Corrected Vendor");
   await expect(vendor).toHaveValue("Corrected Vendor");
-  await expect(page.getByText("New stock part — verify its name and reference")).toBeVisible();
+  await expect(page.getByText("Not linked")).toBeVisible();
+  await expect(page.getByText("Choose a stock item or create a new part.")).toBeVisible();
   expect(state.intakeSubmissions).toBe(0);
   expect(state.stockConfirmations).toBe(0);
   await expect(page.getByRole("button", { name: "Confirm & Update Stock" })).toBeVisible();
@@ -1061,13 +1086,13 @@ test("an exact stock reference is linked automatically but still waits for final
   page,
 }) => {
   const state = await mockApplication(page);
-  state.draftStatus = "needs_review";
   state.lineVendorPartNumber = "BP-100";
 
   await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText("Matched to existing stock"),
-  ).toBeVisible();
+    page.getByText("Linked to stock"),
+  ).toBeVisible({ timeout: 8_000 });
   await expect(page.getByLabel("Part or item name")).toHaveValue(
     "Brake Pad Catalog",
   );
@@ -1083,9 +1108,9 @@ test("a reviewed invoice can be discarded and replaced without changing stock", 
 }) => {
   const state = await mockApplication(page);
   await openReceiveInventory(page);
-  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText(/Invoice scanned · 1 line detected/),
+    page.getByText(/Invoice ready · 1 item found/),
   ).toBeVisible({ timeout: 8_000 });
 
   page.once("dialog", async (dialog) => {
@@ -1107,12 +1132,12 @@ test("a reviewed invoice can be discarded and replaced without changing stock", 
   expect(state.draftStatus).toBe("canceled");
   expect(state.stockConfirmations).toBe(0);
 
-  await page.getByLabel("Choose invoice image or PDF").setInputFiles({
+  await page.getByLabel("Choose an invoice document").setInputFiles({
     name: "replacement-after-discard.png",
     mimeType: "image/png",
     buffer: png,
   });
-  await page.getByRole("button", { name: /Use document/ }).click();
+  await page.getByRole("button", { name: /Continue/ }).click();
   await expect(
     page.getByText("replacement-after-discard.png saved."),
   ).toBeVisible();
@@ -1123,22 +1148,22 @@ test("an unknown line classification is highlighted inline", async ({
   page,
 }) => {
   const state = await mockApplication(page);
-  state.draftStatus = "needs_review";
   state.reviewDecision = "approved";
   state.reviewHeader.total = "100.00";
   state.reviewedFields = ["total"];
   state.lineUnitCost = "50";
   state.lineClassification = "unknown";
   state.lineDecision = "approved";
-  state.selectedPartId = "00000000-0000-4000-8000-000000000030";
+  state.selectedPartId = null;
 
   await openReceiveInventory(page);
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText("Choose Inventory or Consumable for this line."),
-  ).toBeVisible();
+    page.getByText("Choose Inventory, Consumable, or Service for this line."),
+  ).toBeVisible({ timeout: 8_000 });
   await page.getByRole("button", { name: "Inventory", exact: true }).click();
   await expect(
-    page.getByText("Choose Inventory or Consumable for this line."),
+    page.getByText("Choose Inventory, Consumable, or Service for this line."),
   ).toHaveCount(0);
 });
 
@@ -1148,11 +1173,11 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   const state = await mockApplication(page);
   state.lineVendorPartNumber = "BP-100";
   await openReceiveInventory(page);
-  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText(/Invoice scanned · 1 line detected/),
+    page.getByText(/Invoice ready · 1 item found/),
   ).toBeVisible({ timeout: 8_000 });
-  await expect(page.getByText("Matched to existing stock")).toBeVisible();
+  await expect(page.getByText("Linked to stock")).toBeVisible();
   await expect(page.locator("#receive-inventory-vendor")).toHaveValue(
     "Test Vendor",
   );
@@ -1179,7 +1204,7 @@ test("reviewed invoice confirms stock exactly once through the reserved intent",
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText("page-one.png")).toHaveCount(0);
   await expect(page.getByText(/Status: completed/)).toHaveCount(0);
-  await expect(page.getByText("0 of 10 pages saved.")).toBeVisible();
+  await expect(page.getByText("Add up to 10 photos or pages.")).toBeVisible();
 });
 
 test("confirmation refreshes and retries once after a draft revision conflict", async ({
@@ -1188,11 +1213,11 @@ test("confirmation refreshes and retries once after a draft revision conflict", 
   const state = await mockApplication(page, false, false, false, false, true);
   state.lineVendorPartNumber = "BP-100";
   await openReceiveInventory(page);
-  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await page.getByRole("button", { name: "Read invoice" }).click();
   await expect(
-    page.getByText(/Invoice scanned · 1 line detected/),
+    page.getByText(/Invoice ready · 1 item found/),
   ).toBeVisible({ timeout: 8_000 });
-  await expect(page.getByText("Matched to existing stock")).toBeVisible();
+  await expect(page.getByText("Linked to stock")).toBeVisible();
   await page.locator("#receive-inventory-invoice-number").fill("INV-CONFLICT-1");
   await page.locator("#receive-inventory-total").fill("100.00");
   await page.getByLabel("Lot price").fill("100.00");
@@ -1210,9 +1235,9 @@ test("CORE charge and return stay financial adjustments with correct landed cost
 }) => {
   await mockApplication(page, false, false, false, false, false, true);
   await openReceiveInventory(page);
-  await page.getByRole("button", { name: "Analyze invoice" }).click();
+  await page.getByRole("button", { name: "Read invoice" }).click();
 
-  await expect(page.getByText(/Invoice scanned · 3 lines detected/)).toBeVisible({
+  await expect(page.getByText(/Invoice ready · 3 items found/)).toBeVisible({
     timeout: 8_000,
   });
   await expect(page.getByText("Charge · no stock movement")).toBeVisible();

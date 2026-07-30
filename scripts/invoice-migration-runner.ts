@@ -4,24 +4,12 @@ import { join } from "node:path";
 import type { Client } from "pg";
 import { assertBrownfieldBaseline } from "./invoice-migration-preflight";
 
-const migrations = [
-  "0000_brownfield_baseline.sql",
-  "0001_invoice_ledger_core.sql",
-  "0002_invoice_private_sources.sql",
-  "0003_invoice_extraction_proposals.sql",
-  "0004_invoice_attempt_ownership.sql",
-  "0005_invoice_header_review.sql",
-  "0006_invoice_header_review_state.sql",
-  "0007_invoice_line_review.sql",
-  "0008_invoice_part_matching.sql",
-  "0009_invoice_confirmation_intents.sql",
-  "0010_invoice_confirmation_completion.sql",
-  "0011_invoice_feedback_history.sql",
-  "0012_invoice_engine_evaluation.sql",
-  "0013_invoice_adjustment_lines.sql",
-  "0014_invoice_service_lines.sql",
-  "0015_invoice_direct_expense_lines.sql",
-] as const;
+const migrationName = "0000_invoice_recognition_module.sql";
+const migrationCreatedAt = 1_784_764_900_000;
+const legacyMigrationCreatedAt = Array.from(
+  { length: 17 },
+  (_, index) => String(1_784_764_800_000 + index * 1_000),
+);
 
 function splitStatements(sql: string): string[] {
   return sql
@@ -46,44 +34,70 @@ export async function applyInvoiceMigrations(client: Client): Promise<void> {
     `);
     await client.query("commit");
 
-    for (let index = 0; index < migrations.length; index += 1) {
-      const createdAt = 1784764800000 + index * 1000;
-      const migrationName = migrations[index];
-      const contents = await readFile(
-        join(process.cwd(), "migrations", migrationName),
-        "utf8",
-      );
-      const hash = createHash("sha256").update(contents).digest("hex");
-      const present = await client.query<{ hash: string }>(
-        "select hash from drizzle.__drizzle_migrations where created_at = $1",
-        [createdAt],
-      );
-      if (present.rowCount) {
-        if (present.rows[0].hash !== hash) {
-          throw new Error(
-            `Migration integrity check failed for ${migrationName}`,
-          );
-        }
-        continue;
+    const contents = await readFile(
+      join(process.cwd(), "migrations", migrationName),
+      "utf8",
+    );
+    const hash = createHash("sha256").update(contents).digest("hex");
+    const present = await client.query<{ hash: string }>(
+      "select hash from drizzle.__drizzle_migrations where created_at = $1",
+      [migrationCreatedAt],
+    );
+    if (present.rowCount) {
+      if (present.rows[0].hash !== hash) {
+        throw new Error(`Migration integrity check failed for ${migrationName}`);
       }
-      const statements = splitStatements(contents);
-      for (const statement of statements.filter((value) =>
-        /\bcreate\s+unique\s+index\s+concurrently\b/i.test(value),
-      )) {
-        await client.query(statement);
+      return;
+    }
+
+    const legacy = await client.query<{ created_at: string }>(
+      `select created_at::text
+         from drizzle.__drizzle_migrations
+        where created_at = any($1::bigint[])
+        order by created_at`,
+      [legacyMigrationCreatedAt],
+    );
+    if (legacy.rowCount) {
+      const observed = legacy.rows.map((row) => row.created_at);
+      const compatible =
+        observed.length >= 16 &&
+        observed.every((value, index) => value === legacyMigrationCreatedAt[index]);
+      if (!compatible) {
+        throw new Error(
+          "Legacy invoice migration journal is incomplete; rebuild from a backup before continuing.",
+        );
       }
       await client.query("begin");
-      for (const statement of statements.filter(
-        (value) => !/\bcreate\s+unique\s+index\s+concurrently\b/i.test(value),
-      )) {
-        await client.query(statement);
-      }
+      await client.query(`
+        alter table invoice_extraction_runs
+          alter column model set default 'gpt-5.6-luna',
+          alter column execution_mode set default 'synchronous'
+      `);
       await client.query(
         "insert into drizzle.__drizzle_migrations(hash, created_at) values ($1, $2)",
-        [hash, createdAt],
+        [hash, migrationCreatedAt],
       );
       await client.query("commit");
+      return;
     }
+
+    const statements = splitStatements(contents);
+    for (const statement of statements.filter((value) =>
+      /\bcreate\s+unique\s+index\s+concurrently\b/i.test(value),
+    )) {
+      await client.query(statement);
+    }
+    await client.query("begin");
+    for (const statement of statements.filter(
+      (value) => !/\bcreate\s+unique\s+index\s+concurrently\b/i.test(value),
+    )) {
+      await client.query(statement);
+    }
+    await client.query(
+      "insert into drizzle.__drizzle_migrations(hash, created_at) values ($1, $2)",
+      [hash, migrationCreatedAt],
+    );
+    await client.query("commit");
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
