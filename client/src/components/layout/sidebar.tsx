@@ -21,6 +21,7 @@ import {
   UserCog,
   LogOut,
   Plug,
+  ScanLine,
 } from "lucide-react";
 
 interface CompanyOption {
@@ -114,6 +115,21 @@ export default function Sidebar() {
             );
           })}
           
+          {/* User Management — admin + super_admin only */}
+          {isAdminOrSuper && (
+            <li>
+              <Link href="/invoice-quality" className={cn(
+                "flex items-center space-x-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors",
+                location === "/invoice-quality"
+                  ? "sidebar-active"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
+              )}>
+                <ScanLine className="w-4 h-4 flex-shrink-0" />
+                <span>Invoice AI Quality</span>
+              </Link>
+            </li>
+          )}
+
           {/* User Management — admin + super_admin only */}
           {isAdminOrSuper && (
             <li>

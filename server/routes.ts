@@ -14,6 +14,13 @@ import { z } from "zod";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { createInventoryIntakeHandler } from "./modules/inventory-receiving/inventory-intake-route";
+import { resolveUserId, withCompanyContext } from "./auth-context";
+import { registerInvoiceDraftRoutes } from "./modules/invoice-extraction/http/invoice-draft-routes";
+import { registerInvoiceAssetRoutes } from "./modules/invoice-extraction/http/invoice-asset-routes";
+import { registerInvoiceExtractionRoutes } from "./modules/invoice-extraction/http/invoice-extraction-routes";
+import { registerInvoiceReviewRoutes } from "./modules/invoice-extraction/http/invoice-review-routes";
+import { registerInvoiceEvaluationRoutes } from "./modules/invoice-extraction/http/invoice-evaluation-routes";
 
 // Configure multer for file uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -38,39 +45,6 @@ const uploadInvoice = multer({
     cb(null, allowedTypes.includes(file.mimetype));
   }
 });
-
-// Resolve userId from either local session or Replit OIDC
-const resolveUserId = (req: any): string | undefined =>
-  req.session?.localUserId || req.user?.claims?.sub;
-
-// Middleware to get user's company context
-const withCompanyContext = async (req: any, res: any, next: any) => {
-  try {
-    const userId = resolveUserId(req);
-    const user = await storage.getUser(userId);
-    
-    if (!user) {
-      return res.status(401).json({ message: "User not found" });
-    }
-
-    let effectiveCompanyId = user.companyId;
-    // Super admins can temporarily view as another company via session override
-    if (user.role === "super_admin" && (req.session as any)?.superAdminActiveCompanyId) {
-      effectiveCompanyId = (req.session as any).superAdminActiveCompanyId;
-    }
-
-    req.userContext = {
-      userId: user.id,
-      companyId: effectiveCompanyId,
-      role: user.role
-    };
-    
-    next();
-  } catch (error) {
-    console.error("Error getting user context:", error);
-    res.status(500).json({ message: "Failed to get user context" });
-  }
-};
 
 /**
  * Load-balancing auto-assignment algorithm.
@@ -169,6 +143,11 @@ async function rebalanceWorkOrders(companyId: string): Promise<{ reassigned: num
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
+  registerInvoiceDraftRoutes(app);
+  registerInvoiceAssetRoutes(app);
+  registerInvoiceExtractionRoutes(app);
+  registerInvoiceReviewRoutes(app);
+  registerInvoiceEvaluationRoutes(app);
 
   // Local auth routes
   app.post('/api/auth/local/login', async (req: any, res) => {
@@ -362,6 +341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -396,6 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/switch-company", isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "super_admin") {
@@ -448,6 +429,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/admin/audit-log", isAuthenticated, async (req: any, res) => {
     try {
       const userId = resolveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await storage.getUser(userId);
       if (!user || user.role !== "super_admin") {
         return res.status(403).json({ message: "Only super admins can view the audit log" });
@@ -1033,84 +1015,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/inventory/intakes", isAuthenticated, withCompanyContext, async (req: any, res) => {
-    try {
-      const { items, ...headerRaw } = req.body;
-
-      if (!headerRaw.vendor || !headerRaw.vendor.trim()) {
-        return res.status(400).json({ message: "Vendor is required" });
-      }
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ message: "At least one line item is required" });
-      }
-
-      // Validate items — name and quantity required; partId optional (new parts are auto-created)
-      for (const item of items) {
-        if (!item.partNameSnapshot || !item.qty || item.qty < 1) {
-          return res.status(400).json({ message: "Each item must have a name and quantity ≥ 1" });
-        }
-        if (item.itemType && item.itemType !== "consumable" && item.itemType !== "inventory") {
-          return res.status(400).json({ message: "itemType must be 'consumable' or 'inventory'" });
-        }
-      }
-
-      // Validate that any supplied groupId/subgroupId values belong to this company
-      // and that each subgroup belongs to its stated group
-      const placements = items
-        .filter((i: any) => i.groupId || i.subgroupId)
-        .map((i: any) => ({ groupId: i.groupId || undefined, subgroupId: i.subgroupId || undefined }));
-      if (placements.length > 0) {
-        try {
-          await storage.validateCatalogPlacements(placements, req.userContext.companyId);
-        } catch (err: any) {
-          return res.status(400).json({ message: err.message ?? "Invalid catalog placement" });
-        }
-      }
-
-      // Calculate reconciliation status
-      const calculatedTotal =
-        Number(headerRaw.subtotal || 0) +
-        Number(headerRaw.taxAmount || 0) +
-        Number(headerRaw.deliveryFee || 0);
-      const enteredTotal = Number(headerRaw.totalAmount || 0);
-      const diff = Math.abs(calculatedTotal - enteredTotal);
-      const reconciliationStatus =
-        enteredTotal === 0
-          ? "warning"
-          : diff <= 0.01
-          ? "matched"
-          : "warning";
-
-      const header = {
-        vendor: headerRaw.vendor.trim(),
-        invoiceNumber: headerRaw.invoiceNumber || null,
-        invoiceDate: headerRaw.invoiceDate ? new Date(headerRaw.invoiceDate) : null,
-        subtotal: String(headerRaw.subtotal || "0"),
-        taxAmount: String(headerRaw.taxAmount || "0"),
-        deliveryFee: String(headerRaw.deliveryFee || "0"),
-        totalAmount: String(headerRaw.totalAmount || "0"),
-        reconciliationStatus,
-        notes: headerRaw.notes || null,
-        quickbooksSyncStatus: "not_synced",
-        quickbooksId: null,
-        quickbooksLastSyncedAt: null,
-        externalReferenceNumber: headerRaw.externalReferenceNumber || null,
-        invoicePhotoUrl: headerRaw.invoicePhotoUrl || null,
-      };
-
-      const intake = await storage.createInventoryIntake(
-        header,
-        items,
-        req.userContext.companyId,
-        req.userContext.userId
-      );
-
-      res.status(201).json(intake);
-    } catch (error) {
-      console.error("Failed to create inventory intake:", error);
-      res.status(400).json({ message: "Failed to create inventory intake", error: (error as any).message });
-    }
-  });
+  app.post(
+    "/api/inventory/intakes",
+    isAuthenticated,
+    withCompanyContext,
+    createInventoryIntakeHandler(storage),
+  );
 
   app.post("/api/inventory", isAuthenticated, withCompanyContext, async (req: any, res) => {
     try {

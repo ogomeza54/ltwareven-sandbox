@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -7,15 +7,39 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { createClientUuid } from "@/lib/client-uuid";
 import { 
-  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink, Camera, FileText as FilePdf, Upload
+  PackagePlus, Plus, Trash2, CheckCircle2, AlertTriangle, Search, X, Link2, Unlink, ChevronDown
 } from "lucide-react";
 import DateInput, { todayValue } from "@/components/ui/date-input";
+import { InvoiceSourceUpload } from "@/features/invoice-extraction/invoice-source-upload";
+import {
+  confirmInvoiceIntent,
+  createInvoiceConfirmationIntent,
+  getInvoiceReview,
+  InvoiceSourceApiError,
+  overrideInvoiceDuplicate,
+  updateInvoiceHeaderReview,
+  updateInvoiceLineMatches,
+  updateInvoiceLinesReview,
+} from "@/features/invoice-extraction/invoice-source-api";
+import type {
+  InvoiceConfirmationIntentDto,
+  InvoiceHeaderField,
+  InvoiceReviewWorkspaceDto,
+} from "@shared/invoice-extraction/contracts";
+import {
+  resolveInvoiceItemType,
+  type InvoiceItemType,
+} from "@/features/invoice-extraction/invoice-item-type";
+import { linkInvoiceLineToStock } from "@/features/invoice-extraction/invoice-line-linking";
 
-type ItemType = "inventory" | "consumable";
+type ItemType = InvoiceItemType;
 
 interface LineItem {
   id: string;
+  reviewLineId?: string;
+  classificationNeedsReview?: boolean;
   partId?: string;
   partNameSnapshot: string;
   partNumberSnapshot: string;
@@ -30,6 +54,90 @@ interface LineItem {
 interface ReceiveInventoryModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+interface StockPartSuggestion {
+  part: any;
+  score: number;
+  exactReference: boolean;
+  similarReference: boolean;
+  similarName: boolean;
+}
+
+function normalizePartText(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function canonicalPartName(value: string | null | undefined): string {
+  return normalizePartText(value)
+    .split(" ")
+    .map((token) => (token === "kit" ? "kt" : token))
+    .join(" ");
+}
+
+function compactPartReference(value: string | null | undefined): string {
+  return normalizePartText(value).replace(/\s/g, "");
+}
+
+function textEditSimilarity(left: string, right: string): number {
+  if (!left || !right) return 0;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return 1 - previous[right.length] / Math.max(left.length, right.length);
+}
+
+function tokenOverlap(left: string, right: string): number {
+  const leftTokens = new Set(canonicalPartName(left).split(" ").filter(Boolean));
+  const rightTokens = new Set(canonicalPartName(right).split(" ").filter(Boolean));
+  if (!leftTokens.size || !rightTokens.size) return 0;
+  let shared = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) shared += 1;
+  });
+  return shared / (leftTokens.size + rightTokens.size - shared);
+}
+
+function rankStockPartSuggestions(item: LineItem, parts: readonly any[]): StockPartSuggestion[] {
+  const reference = compactPartReference(item.partNumberSnapshot);
+  return parts
+    .map((part) => {
+      const partReference = compactPartReference(part.partNumber);
+      const exactReference = Boolean(reference && reference === partReference);
+      const referenceSimilarity =
+        reference.length >= 8 && partReference.length >= 8
+          ? textEditSimilarity(reference, partReference)
+          : 0;
+      const similarReference = !exactReference && referenceSimilarity >= 0.72;
+      const nameSimilarity = tokenOverlap(item.partNameSnapshot, part.name ?? "");
+      const similarName = nameSimilarity >= 0.6;
+      const score =
+        (exactReference ? 100 : similarReference ? Math.round(referenceSimilarity * 55) : 0) +
+        (similarName ? Math.round(nameSimilarity * 40) : 0);
+      return { part, score, exactReference, similarReference, similarName };
+    })
+    .filter((suggestion) => suggestion.score >= 35)
+    .sort((left, right) =>
+      right.score - left.score ||
+      String(left.part.partNumber ?? "").localeCompare(String(right.part.partNumber ?? "")),
+    )
+    .slice(0, 5);
 }
 
 function newLineItem(): LineItem {
@@ -76,6 +184,17 @@ function getReconciliation(subtotal: number, tax: number, delivery: number, tota
   return "warning";
 }
 
+const allInvoiceHeaderFields: readonly InvoiceHeaderField[] = [
+  "vendorName",
+  "invoiceNumber",
+  "invoiceDate",
+  "currency",
+  "subtotal",
+  "tax",
+  "freight",
+  "total",
+];
+
 export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInventoryModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -88,40 +207,95 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const [deliveryFee, setDeliveryFee] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [items, setItems] = useState<LineItem[]>([newLineItem()]);
+  const vendorInputRef = useRef<HTMLInputElement>(null);
+  const duplicateWarningRef = useRef<HTMLDivElement>(null);
+  const duplicateReasonInputRef = useRef<HTMLInputElement>(null);
+  const partNumberInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [invoiceSourceBusy, setInvoiceSourceBusy] = useState(false);
+  const [preparedInvoiceIntent, setPreparedInvoiceIntent] =
+    useState<InvoiceConfirmationIntentDto | null>(null);
+  const [aiReviewWorkspace, setAiReviewWorkspace] =
+    useState<InvoiceReviewWorkspaceDto | null>(null);
+  const [invoiceSourceSession, setInvoiceSourceSession] = useState(0);
+  const confirmationKeyRef = useRef<string | null>(null);
+  const [duplicateReason, setDuplicateReason] = useState("");
+  const [lineReferenceErrors, setLineReferenceErrors] = useState<Record<string, string>>({});
+  const [dismissedPartSuggestions, setDismissedPartSuggestions] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [partSearch, setPartSearch] = useState<Record<string, string>>({});
   const [searchFocus, setSearchFocus] = useState<string | null>(null);
-  const [invoicePhotoUrl, setInvoicePhotoUrl] = useState<string | null>(null);
-  const [photoFileName, setPhotoFileName] = useState<string | null>(null);
-  const [photoUploading, setPhotoUploading] = useState(false);
-
-  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoUploading(true);
-    try {
-      const form = new FormData();
-      form.append("photo", file);
-      const res = await fetch("/api/inventory/intakes/upload-photo", { method: "POST", body: form });
-      if (!res.ok) throw new Error("Upload failed");
-      const data = await res.json();
-      setInvoicePhotoUrl(data.photoUrl);
-      setPhotoFileName(file.name);
-    } catch {
-      toast({ title: "Photo upload failed", description: "Please try again.", variant: "destructive" });
-    } finally {
-      setPhotoUploading(false);
-    }
-  };
-
   const { data: allParts = [] } = useQuery<any[]>({ queryKey: ["/api/inventory"] });
   const { data: catalogTree = [] } = useQuery<any[]>({ queryKey: ["/api/catalog/tree"] });
 
   const subtotal = sumLines(items);
+  const stockSubtotal = sumLines(
+    items.filter(
+      (item) =>
+        item.itemType === "inventory" || item.itemType === "consumable",
+    ),
+  );
+  const adjustmentTotal = sumLines(
+    items.filter((item) => item.itemType === "adjustment"),
+  );
   const taxNum = parseFloat(taxAmount) || 0;
   const deliveryNum = parseFloat(deliveryFee) || 0;
   const calculatedTotal = subtotal + taxNum + deliveryNum;
   const reconciliation = getReconciliation(subtotal, taxNum, deliveryNum, totalAmount);
+  const hasFilledItems = items.some((item) => item.partNameSnapshot.trim());
+  const hasUnreviewedClassification = items.some(
+    (item) => item.classificationNeedsReview,
+  );
+  const hasMissingNewPartReference = items.some(
+    (item) =>
+      item.itemType !== "adjustment" &&
+      item.itemType !== "service" &&
+      item.itemType !== "direct_expense" &&
+      !item.partId &&
+      item.partNameSnapshot.trim() &&
+      !item.partNumberSnapshot.trim(),
+  );
+  const hasUnresolvedStockSuggestion = items.some(
+    (item) =>
+      item.itemType !== "adjustment" &&
+      item.itemType !== "service" &&
+      item.itemType !== "direct_expense" &&
+      !item.partId &&
+      !dismissedPartSuggestions.has(item.id) &&
+      rankStockPartSuggestions(item, allParts as any[]).length > 0,
+  );
+  const isAiAssistedInvoice = Boolean(aiReviewWorkspace || preparedInvoiceIntent);
+  const reviewIsIncomplete =
+    isAiAssistedInvoice &&
+    (reconciliation !== "matched" ||
+      hasUnreviewedClassification ||
+      hasMissingNewPartReference ||
+      hasUnresolvedStockSuggestion ||
+      preparedInvoiceIntent?.duplicateStatus === "suspected");
+  const aiIssueFor = (field: string) =>
+    aiReviewWorkspace?.issues.find(
+      (issue) => issue.path === `header.${field}`,
+    );
+
+  const focusDuplicateWarning = useCallback(() => {
+    duplicateWarningRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    duplicateReasonInputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (
+      !open ||
+      preparedInvoiceIntent?.duplicateStatus !== "suspected"
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(focusDuplicateWarning);
+    return () => cancelAnimationFrame(frame);
+  }, [focusDuplicateWarning, open, preparedInvoiceIntent?.duplicateStatus]);
 
   // Get subgroups for a given groupId
   const getSubgroups = (groupId: string) => {
@@ -147,9 +321,15 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     if (item.subgroupId) {
       pool = pool.filter((p: any) => p.subgroupId === item.subgroupId);
     }
-    return pool.filter((p: any) =>
+    const directMatches = pool.filter((p: any) =>
       p.name?.toLowerCase().includes(q) || p.partNumber?.toLowerCase().includes(q)
-    ).slice(0, 8);
+    );
+    const likelyMatches = rankStockPartSuggestions(item, pool).map(({ part }) => part);
+    return [...likelyMatches, ...directMatches]
+      .filter((part, index, matches) =>
+        matches.findIndex((candidate) => candidate.id === part.id) === index,
+      )
+      .slice(0, 8);
   };
 
   // Catalog item name suggestions (not yet linked to a part) for the selected subgroup
@@ -182,24 +362,24 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.id !== id));
 
   const selectPart = (itemId: string, part: any) => {
-    // Lot price = unit price × current qty
+    // Linking identifies the stock item only. The invoice price remains the
+    // source of truth for this receipt and must not be replaced by catalog cost.
     setItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
-      const lotPrice = ((parseFloat(part.price || "0")) * item.qty).toFixed(2);
-      return {
-        ...item,
-        partId: part.id,
-        partNameSnapshot: part.name,
-        partNumberSnapshot: part.partNumber || "",
-        lotPrice,
-        lineTotal: lotPrice,
-        itemType: (part.itemType as ItemType) || "inventory",
-        groupId: part.groupId || undefined,
-        subgroupId: part.subgroupId || undefined,
-      };
+      return linkInvoiceLineToStock(item, part);
     }));
     setPartSearch(prev => ({ ...prev, [itemId]: part.name }));
+    setLineReferenceErrors((previous) => {
+      const next = { ...previous };
+      delete next[itemId];
+      return next;
+    });
     setSearchFocus(null);
+    setDismissedPartSuggestions((previous) => {
+      const next = new Set(previous);
+      next.delete(itemId);
+      return next;
+    });
   };
 
   // Select a catalog item (maintenanceItem) that has a linked part → fill from that part
@@ -222,6 +402,23 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setPartSearch(prev => ({ ...prev, [itemId]: "" }));
   };
 
+  const prepareNewPart = (item: LineItem) => {
+    const name = (partSearch[item.id] ?? item.partNameSnapshot).trim();
+    if (!name) return;
+    updateItem(item.id, {
+      partId: undefined,
+      partNameSnapshot: name,
+    });
+    setPartSearch((previous) => ({ ...previous, [item.id]: name }));
+    setSearchFocus(null);
+    setDismissedPartSuggestions((previous) => new Set(previous).add(item.id));
+    if (!item.partNumberSnapshot.trim()) {
+      requestAnimationFrame(() => {
+        partNumberInputRefs.current[item.id]?.focus();
+      });
+    }
+  };
+
   const resetForm = () => {
     setVendor("");
     setInvoiceNumber("");
@@ -233,11 +430,117 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     setItems([newLineItem()]);
     setPartSearch({});
     setSearchFocus(null);
-    setInvoicePhotoUrl(null);
-    setPhotoFileName(null);
+    setPreparedInvoiceIntent(null);
+    setAiReviewWorkspace(null);
+    setDuplicateReason("");
+    setLineReferenceErrors({});
+    setDismissedPartSuggestions(new Set());
+    confirmationKeyRef.current = null;
   };
 
+  const applyAiReview = useCallback(
+    (workspace: InvoiceReviewWorkspaceDto) => {
+      const mappedItems: LineItem[] = workspace.lines.map((line) => {
+        const isNonStock =
+          line.classification === "adjustment" ||
+          line.classification === "service" ||
+          line.classification === "direct_expense";
+        const existingPart = line.match.selectedPart
+          ? (allParts as any[]).find(
+              (part: any) => part.id === line.match.selectedPart?.id,
+            )
+          : null;
+        const proposedPart = line.match.proposedNewPart;
+        const resolvedType = resolveInvoiceItemType({
+          classification: line.classification,
+          selectedPartType: line.match.selectedPart?.itemType,
+          proposedPartType: proposedPart?.itemType,
+        });
+        const quantity = Number(line.quantity ?? "1") || 1;
+        const lineTotal =
+          line.calculatedLineTotal ??
+          ((Number(line.unitCost ?? "0") || 0) * quantity).toFixed(2);
+        return {
+          id: `ai-${line.id}`,
+          reviewLineId: line.id,
+          partId: isNonStock ? undefined : line.match.selectedPart?.id,
+          partNameSnapshot:
+            isNonStock
+              ? line.description ??
+                (line.classification === "service" || line.classification === "direct_expense"
+                  ? "Service"
+                  : "Financial adjustment")
+              : line.match.selectedPart?.name ??
+                proposedPart?.name ??
+                line.description ??
+                "",
+          partNumberSnapshot:
+            isNonStock
+              ? line.vendorPartNumber ?? ""
+              : line.vendorPartNumber ||
+                proposedPart?.partNumber ||
+                line.match.selectedPart?.partNumber ||
+                "",
+          itemType: resolvedType.itemType,
+          classificationNeedsReview: resolvedType.needsReview,
+          groupId: isNonStock
+            ? undefined
+            : existingPart?.groupId || proposedPart?.groupId || undefined,
+          subgroupId: isNonStock
+            ? undefined
+            : existingPart?.subgroupId || proposedPart?.subgroupId || undefined,
+          qty: quantity,
+          lotPrice: lineTotal,
+          lineTotal,
+        };
+      });
+      setAiReviewWorkspace(workspace);
+      setPreparedInvoiceIntent(null);
+      setVendor(workspace.finalHeader.vendorName ?? "");
+      setInvoiceNumber(workspace.finalHeader.invoiceNumber ?? "");
+      setInvoiceDate(workspace.finalHeader.invoiceDate ?? todayValue());
+      setTaxAmount(
+        workspace.reconciliation.calculatedTax ??
+          workspace.finalHeader.tax ??
+          "0.00",
+      );
+      setDeliveryFee(
+        workspace.reconciliation.calculatedFreight ??
+          workspace.finalHeader.freight ??
+          "0.00",
+      );
+      setTotalAmount(
+        workspace.reconciliation.calculatedTotal ??
+          workspace.finalHeader.total ??
+          "",
+      );
+      setItems(mappedItems);
+      setLineReferenceErrors({});
+      setDismissedPartSuggestions(new Set());
+      setPartSearch(
+        Object.fromEntries(
+          mappedItems.map((item) => [item.id, item.partNameSnapshot]),
+        ),
+      );
+      requestAnimationFrame(() =>
+        vendorInputRef.current?.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        }),
+      );
+    },
+    [allParts],
+  );
+
   const handleClose = () => {
+    if (invoiceSourceBusy) {
+      toast({
+        title: "Invoice upload in progress",
+        description: "Wait for the source document operation to finish before closing.",
+        variant: "destructive",
+      });
+      return;
+    }
     onOpenChange(false);
     resetForm();
   };
@@ -254,7 +557,7 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
         taxAmount: taxAmount || "0",
         deliveryFee: deliveryFee || "0",
         totalAmount: totalAmount || calculatedTotal.toFixed(2),
-        invoicePhotoUrl: invoicePhotoUrl || undefined,
+        invoicePhotoUrl: undefined,
         items: filledItems.map(item => {
           const lp = parseFloat(item.lotPrice) || 0;
           const qty = item.qty || 1;
@@ -286,14 +589,242 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
     },
   });
 
+  const confirmPreparedMutation = useMutation({
+    mutationFn: async () => {
+      if (
+        preparedInvoiceIntent &&
+        preparedInvoiceIntent.duplicateStatus !== "suspected"
+      ) {
+        return confirmInvoiceIntent(preparedInvoiceIntent);
+      }
+      if (!aiReviewWorkspace) {
+        throw new Error("The AI invoice review is not ready.");
+      }
+      const itemByReviewId = new Map(
+        items
+          .filter((item) => item.reviewLineId)
+          .map((item) => [item.reviewLineId!, item]),
+      );
+      const saveReviewAndPrepare = async (
+        workspace: InvoiceReviewWorkspaceDto,
+      ): Promise<InvoiceConfirmationIntentDto> => {
+        let current = await updateInvoiceHeaderReview(
+          workspace,
+          {
+            vendorName: vendor.trim() || null,
+            invoiceNumber: invoiceNumber.trim() || null,
+            invoiceDate: invoiceDate || null,
+            currency: "USD",
+            subtotal: subtotal.toFixed(2),
+            tax: (taxNum || 0).toFixed(2),
+            freight: (deliveryNum || 0).toFixed(2),
+            total: (parseFloat(totalAmount) || calculatedTotal).toFixed(2),
+          },
+          allInvoiceHeaderFields,
+          "approved",
+        );
+        setAiReviewWorkspace(current);
+        current = await updateInvoiceLinesReview(
+          current,
+          items.map((item) => ({
+            id: item.reviewLineId ?? null,
+            description: item.partNameSnapshot.trim() || null,
+            vendorPartNumber: item.partNumberSnapshot.trim() || null,
+            quantity: String(item.qty || 1),
+            unitCost: derivedPerUnit(item.lotPrice, item.qty),
+            classification: item.itemType,
+          })),
+          "approved",
+        );
+        setAiReviewWorkspace(current);
+        current = await updateInvoiceLineMatches(
+          current,
+          current.lines.map((line, index) => {
+            const item = itemByReviewId.get(line.id) ?? items[index];
+            if (!item) throw new Error("An invoice line could not be resolved.");
+            if (
+              item.itemType === "adjustment" ||
+              item.itemType === "service" ||
+              item.itemType === "direct_expense"
+            ) {
+              return {
+                lineId: line.id,
+                decision: "unresolved" as const,
+                selectedPartId: null,
+                proposedNewPart: null,
+              };
+            }
+            if (item.partId) {
+              return {
+                lineId: line.id,
+                decision: "existing" as const,
+                selectedPartId: item.partId,
+                proposedNewPart: null,
+              };
+            }
+            if (!item.partNameSnapshot.trim() || !item.partNumberSnapshot.trim()) {
+              throw new Error(
+                `Enter a part number for ${item.partNameSnapshot || "this new stock item"} before confirming.`,
+              );
+            }
+            return {
+              lineId: line.id,
+              decision: "new" as const,
+              selectedPartId: null,
+              proposedNewPart: {
+                name: item.partNameSnapshot.trim(),
+                partNumber: item.partNumberSnapshot.trim(),
+                itemType: item.itemType,
+                category: null,
+                groupId: item.groupId ?? null,
+                subgroupId: item.subgroupId ?? null,
+              },
+            };
+          }),
+        );
+        setAiReviewWorkspace(current);
+        confirmationKeyRef.current ??= createClientUuid();
+        return createInvoiceConfirmationIntent(
+          current,
+          confirmationKeyRef.current,
+        );
+      };
+
+      const draftId = aiReviewWorkspace.draftId;
+      let latest = await getInvoiceReview(draftId);
+      setAiReviewWorkspace(latest);
+      let intent: InvoiceConfirmationIntentDto;
+      try {
+        intent = await saveReviewAndPrepare(latest);
+      } catch (error) {
+        if (
+          !(error instanceof InvoiceSourceApiError) ||
+          error.code !== "INVOICE_DRAFT_REVISION_CONFLICT"
+        ) {
+          throw error;
+        }
+        latest = await getInvoiceReview(draftId);
+        setAiReviewWorkspace(latest);
+        intent = await saveReviewAndPrepare(latest);
+      }
+      setPreparedInvoiceIntent(intent);
+      if (intent.duplicateStatus === "suspected") return intent;
+      return confirmInvoiceIntent(intent);
+    },
+    onSuccess: (intent) => {
+      if (intent.duplicateStatus === "suspected") {
+        toast({
+          title: "Possible duplicate",
+          description:
+            "This invoice may already have been received. Stock was not updated.",
+          variant: "destructive",
+        });
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/intakes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/catalog/tree"] });
+      // A confirmed draft is terminal and must never be restored when the
+      // receiving modal opens for the next invoice. Clear the cached draft
+      // before remounting the source uploader so it cannot repopulate the form.
+      queryClient.setQueriesData(
+        { queryKey: ["invoice-drafts-for-receiving"] },
+        null,
+      );
+      queryClient.invalidateQueries({
+        queryKey: ["invoice-drafts-for-receiving"],
+      });
+      setInvoiceSourceSession((session) => session + 1);
+      toast({
+        title: "Inventory received",
+        description: "The reviewed invoice updated stock exactly once.",
+      });
+      handleClose();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to confirm invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const confirmationIsDisabled =
+    createMutation.isPending ||
+    confirmPreparedMutation.isPending ||
+    invoiceSourceBusy ||
+    !vendor.trim() ||
+    !hasFilledItems ||
+    reviewIsIncomplete;
+
   const handleSubmit = () => {
     if (!vendor.trim()) {
       toast({ title: "Vendor required", description: "Please enter a vendor name.", variant: "destructive" });
+      vendorInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      vendorInputRef.current?.focus();
       return;
     }
     const filledItems = items.filter(i => i.partNameSnapshot.trim());
     if (filledItems.length === 0) {
       toast({ title: "Items required", description: "Add at least one line item.", variant: "destructive" });
+      return;
+    }
+    if (aiReviewWorkspace && reconciliation !== "matched") {
+      toast({
+        title: "Invoice totals need review",
+        description: "Correct the subtotal, tax, freight or invoice total before confirmation.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const classificationIssue = items.find(
+      (item) => item.classificationNeedsReview,
+    );
+    if (aiReviewWorkspace && classificationIssue) {
+      toast({
+        title: "Part type needs review",
+        description: `Choose Inventory, Consumable, or Service for ${classificationIssue.partNameSnapshot || "the highlighted line"}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const missingReference = items.find(
+      (item) =>
+        item.itemType !== "adjustment" &&
+        item.itemType !== "service" &&
+        item.itemType !== "direct_expense" &&
+        !item.partId &&
+        item.partNameSnapshot.trim() &&
+        !item.partNumberSnapshot.trim(),
+    );
+    if (aiReviewWorkspace && missingReference) {
+      const message = "Enter a part number to create this new stock item.";
+      setLineReferenceErrors({ [missingReference.id]: message });
+      requestAnimationFrame(() => {
+        const input = partNumberInputRefs.current[missingReference.id];
+        input?.scrollIntoView({ behavior: "smooth", block: "center" });
+        input?.focus({ preventScroll: true });
+      });
+      toast({
+        title: "Part number required",
+        description: `Enter a part number for ${missingReference.partNameSnapshot} before confirming.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (preparedInvoiceIntent?.duplicateStatus === "suspected") {
+      focusDuplicateWarning();
+      toast({
+        title: "Possible duplicate",
+        description:
+          "Review or override the duplicate warning before updating stock.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (aiReviewWorkspace || preparedInvoiceIntent) {
+      confirmPreparedMutation.mutate();
       return;
     }
     createMutation.mutate();
@@ -314,69 +845,176 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) handleClose();
+      }}
+    >
+      <DialogContent className="flex h-screen w-screen max-w-none flex-col gap-0 overflow-hidden border-0 p-0 motion-reduce:duration-0 supports-[height:100dvh]:h-[100dvh] [&>button]:min-h-11 [&>button]:min-w-11 sm:h-[90vh] sm:w-[calc(100vw-2rem)] sm:max-w-5xl sm:rounded-lg sm:border">
+        <DialogHeader className="shrink-0 border-b bg-background px-4 py-4 pr-14 sm:px-6">
           <DialogTitle className="flex items-center gap-2 text-foreground">
             <PackagePlus className="h-5 w-5 text-amber-500" />
             Receive Inventory
           </DialogTitle>
           <DialogDescription className="text-foreground/70">
-            Enter vendor invoice details and line items. Part quantities will be updated on save.
+            Scan an invoice or enter it manually. Check the details before updating stock.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 pt-2">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+          <InvoiceSourceUpload
+            key={invoiceSourceSession}
+            open={open}
+            onBusyChange={setInvoiceSourceBusy}
+            onReviewReady={applyAiReview}
+            onEnterManual={() => {
+              vendorInputRef.current?.scrollIntoView({
+                block: "center",
+                behavior: "auto",
+              });
+              vendorInputRef.current?.focus();
+            }}
+          />
+
+          {aiReviewWorkspace ? (
+            <div
+              role="status"
+              className="rounded border border-green-500/50 bg-green-500/5 p-3 text-sm text-green-500"
+            >
+              Invoice ready · {items.length} item{items.length === 1 ? "" : "s"} found. Check the details below before updating stock.
+            </div>
+          ) : null}
+
+          {preparedInvoiceIntent?.duplicateStatus === "suspected" ? (
+            <div
+              ref={duplicateWarningRef}
+              className="scroll-m-6 space-y-2 rounded border border-destructive bg-destructive/5 p-3"
+            >
+              <p className="text-sm font-medium text-destructive">
+                Possible duplicate invoice. Stock has not been updated.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                An administrator can provide a reason to confirm this receipt anyway.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  ref={duplicateReasonInputRef}
+                  aria-label="Duplicate override reason"
+                  value={duplicateReason}
+                  onChange={(event) => setDuplicateReason(event.target.value)}
+                  placeholder="Reason for receiving this duplicate"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={duplicateReason.trim().length < 3}
+                  onClick={async () => {
+                    try {
+                      const overridden = await overrideInvoiceDuplicate(
+                        preparedInvoiceIntent,
+                        duplicateReason,
+                      );
+                      setPreparedInvoiceIntent(overridden);
+                    } catch (error) {
+                      toast({
+                        title: "Duplicate override failed",
+                        description:
+                          error instanceof Error ? error.message : "Try again.",
+                        variant: "destructive",
+                      });
+                    }
+                  }}
+                >
+                  Approve duplicate
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <fieldset
+            disabled={confirmPreparedMutation.isPending}
+            className="contents disabled:opacity-80"
+          >
           {/* Vendor — only field needed before entering items */}
           <div className="max-w-sm space-y-1.5">
-            <Label className="text-foreground font-medium">Vendor / Supplier *</Label>
+            <Label htmlFor="receive-inventory-vendor" className="text-foreground font-medium">Vendor / Supplier *</Label>
             <Input
+              ref={vendorInputRef}
+              id="receive-inventory-vendor"
               placeholder="e.g., FleetParts Wholesale"
               value={vendor}
               onChange={e => setVendor(e.target.value)}
-              className="text-foreground placeholder:text-foreground/50"
+              className={`text-foreground placeholder:text-foreground/50 ${aiIssueFor("vendorName") ? "border-amber-500" : ""}`}
             />
+            {aiIssueFor("vendorName") ? (
+              <p className="text-xs text-amber-500">
+                {aiIssueFor("vendorName")?.message}
+              </p>
+            ) : null}
           </div>
 
           {/* Line Items */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-foreground">Line Items</h3>
-              <Button type="button" size="sm" variant="outline" onClick={addItem}>
+              <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={addItem}>
                 <Plus className="h-4 w-4 mr-1" /> Add Item
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              Select a category and subgroup to scope the item search. Search to link to an existing part, or type a new name to auto-create it on save.
+              Check each part and make sure it is linked to the correct stock item.
             </p>
 
-            <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
+            <div className="rounded-lg border">
+              <table className="block w-full text-sm md:table">
+                <thead className="hidden bg-muted/50 md:table-header-group">
                   <tr>
                     <th className="text-left px-2 py-2 text-foreground font-medium w-6" title="Linked to catalog part" />
-                    <th className="text-left px-3 py-2 text-foreground font-medium w-52">Type & Category</th>
+                    <th className="text-left px-3 py-2 text-foreground font-medium w-52">Type &amp; Category</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium">Part / Item</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-24">Part #</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-16">Qty</th>
                     <th className="text-left px-3 py-2 text-foreground font-medium w-28">Lot Price</th>
                     <th className="text-right px-3 py-2 text-foreground font-medium w-24">Line Total</th>
-                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Unit cost after proportional tax & delivery allocation">Landed</th>
+                    <th className="text-right px-3 py-2 text-amber-500 font-medium w-28" title="Landed cost per unit after proportional tax, delivery and other invoice charges">Landed Cost / unit</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="block space-y-3 p-3 md:table-row-group md:space-y-0 md:p-0">
                   {items.map((item) => {
                     const filteredParts = getFilteredParts(item);
                     const catalogSuggestions = getCatalogSuggestions(item);
                     const subgroups = item.groupId ? getSubgroups(item.groupId) : [];
-                    const showDropdown = searchFocus === item.id && (filteredParts.length > 0 || catalogSuggestions.length > 0);
+                    const searchValue = partSearch[item.id] ?? item.partNameSnapshot;
+                    const likelyStockMatch =
+                      item.itemType !== "service" &&
+                      item.itemType !== "adjustment" &&
+                      item.itemType !== "direct_expense" &&
+                      !item.partId &&
+                      !dismissedPartSuggestions.has(item.id)
+                        ? rankStockPartSuggestions(item, allParts as any[])[0]
+                        : undefined;
+                    const showDropdown =
+                      item.itemType !== "adjustment" &&
+                      item.itemType !== "service" &&
+                      item.itemType !== "direct_expense" &&
+                      searchFocus === item.id;
 
                     return (
-                      <tr key={item.id} className="hover:bg-muted/20 align-top">
+                      <tr key={item.id} className="block rounded-lg border border-border p-3 align-top hover:bg-muted/20 md:table-row md:rounded-none md:border-0 md:p-0">
                         {/* Link status icon */}
-                        <td className="px-2 pt-3">
-                          {item.partId ? (
+                        <td className="mb-2 flex items-center gap-2 md:table-cell md:px-2 md:pt-3">
+                          <span className="font-medium md:hidden">Catalog status</span>
+                          {item.itemType === "adjustment" ? (
+                            <span title="Financial adjustment — no stock movement">
+                              <span className={item.lineTotal.startsWith("-") ? "text-red-400" : "text-amber-400"}>±</span>
+                            </span>
+                          ) : item.itemType === "service" || item.itemType === "direct_expense" ? (
+                            <span title="Service — no stock movement">
+                              <span className="text-violet-400">S</span>
+                            </span>
+                          ) : item.partId ? (
                             <span title="Linked to existing catalog part">
                               <Link2 className="h-3.5 w-3.5 text-green-500" />
                             </span>
@@ -392,13 +1030,37 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Type toggle + Group + Subgroup stacked */}
-                        <td className="px-3 py-2 space-y-1.5">
+                        <td className="block space-y-1.5 py-2 md:table-cell md:px-3">
+                          <span className="font-medium md:hidden">Type &amp; Category</span>
                           {/* Type toggle */}
-                          <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium">
+                          {item.itemType === "adjustment" ? (
+                            <div className="space-y-1.5">
+                              <Badge
+                                variant="outline"
+                                className={item.lineTotal.startsWith("-")
+                                  ? "min-h-9 border-red-500/60 text-red-400"
+                                  : "min-h-9 border-amber-500/60 text-amber-400"}
+                              >
+                                {item.lineTotal.startsWith("-") ? "Credit" : "Charge"} · no stock movement
+                              </Badge>
+                              <button
+                                type="button"
+                                className="text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                                onClick={() => updateItem(item.id, {
+                                  itemType: "inventory",
+                                  qty: Math.abs(item.qty) || 1,
+                                  lotPrice: Math.abs(parseFloat(item.lotPrice) || 0).toFixed(2),
+                                })}
+                              >
+                                Treat as stock item
+                              </button>
+                            </div>
+                          ) : <div className="flex flex-wrap gap-1 rounded-md border border-border p-1 text-xs font-medium">
                             <button
                               type="button"
-                              onClick={() => updateItem(item.id, { itemType: "inventory" })}
-                              className={`flex-1 px-1.5 py-1 transition-colors ${
+                              onClick={() => updateItem(item.id, { itemType: "inventory", classificationNeedsReview: false })}
+                              aria-pressed={item.itemType === "inventory"}
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
                                 item.itemType === "inventory"
                                   ? "bg-blue-600 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -408,8 +1070,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             </button>
                             <button
                               type="button"
-                              onClick={() => updateItem(item.id, { itemType: "consumable" })}
-                              className={`flex-1 px-1.5 py-1 transition-colors border-l border-border ${
+                              onClick={() => updateItem(item.id, { itemType: "consumable", classificationNeedsReview: false })}
+                              aria-pressed={item.itemType === "consumable"}
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
                                 item.itemType === "consumable"
                                   ? "bg-amber-500 text-white"
                                   : "bg-transparent text-muted-foreground hover:text-foreground"
@@ -417,13 +1080,49 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             >
                               Consumable
                             </button>
-                          </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateItem(item.id, {
+                                  itemType: "service",
+                                  partId: undefined,
+                                  groupId: undefined,
+                                  subgroupId: undefined,
+                                  classificationNeedsReview: false,
+                                });
+                                setLineReferenceErrors((previous) => {
+                                  const next = { ...previous };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                              }}
+                              aria-pressed={item.itemType === "service"}
+                              className={`min-h-11 min-w-[6.5rem] flex-1 rounded px-2 py-1 text-center leading-tight transition-colors ${
+                                item.itemType === "service"
+                                  ? "bg-violet-600 text-white"
+                                  : "bg-transparent text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Service
+                            </button>
+                          </div>}
+                          {item.classificationNeedsReview ? (
+                            <p className="text-xs text-amber-500" role="alert">
+                              Choose Inventory, Consumable, or Service for this line.
+                            </p>
+                          ) : null}
 
                           {/* Group dropdown */}
+                          {item.itemType !== "adjustment" &&
+                          item.itemType !== "service" &&
+                          item.itemType !== "direct_expense" ? (
+                          <>
                           <select
                             value={item.groupId || ""}
                             onChange={e => updateItem(item.id, { groupId: e.target.value || undefined })}
-                            className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                            aria-label="Item category"
+                            style={{ colorScheme: "dark" }}
+                            className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-xs font-medium text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40"
                           >
                             <option value="">— Category —</option>
                             {(catalogTree as any[]).map((g: any) => (
@@ -436,7 +1135,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                             <select
                               value={item.subgroupId || ""}
                               onChange={e => updateItem(item.id, { subgroupId: e.target.value || undefined })}
-                              className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1 text-foreground outline-none focus:border-amber-500/60"
+                              aria-label="Item subgroup"
+                              style={{ colorScheme: "dark" }}
+                              className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-2 py-1 text-xs font-medium text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40"
                             >
                               <option value="">— Subgroup —</option>
                               {subgroups.map((sg: any) => (
@@ -444,15 +1145,76 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                               ))}
                             </select>
                           )}
+                          </>
+                          ) : null}
                         </td>
 
                         {/* Part name search */}
-                        <td className="px-3 py-2 pt-3">
-                          <div className="relative">
-                            <div className="flex items-center gap-1">
-                              <Search className="h-3 w-3 text-foreground/50 flex-shrink-0" />
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Part / Item</span>
+                          {item.itemType === "adjustment" ? (
+                            <div>
                               <input
-                                className="flex-1 bg-transparent outline-none text-foreground placeholder:text-foreground/50 min-w-0"
+                                aria-label="Adjustment description"
+                                className="min-h-11 w-full bg-transparent text-foreground outline-none"
+                                value={item.partNameSnapshot}
+                                onChange={(event) => {
+                                  updateItem(item.id, { partNameSnapshot: event.target.value });
+                                  setPartSearch((previous) => ({ ...previous, [item.id]: event.target.value }));
+                                }}
+                              />
+                              <p className="text-xs text-muted-foreground">Included in invoice totals and landed cost; excluded from stock.</p>
+                            </div>
+                          ) : item.itemType === "service" ? (
+                            <div>
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-violet-500/50 bg-violet-500/10 px-2 text-[11px] font-medium text-violet-300"
+                              >
+                                Service · no stock movement
+                              </Badge>
+                              <input
+                                aria-label="Service or labor description"
+                                className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3 text-foreground outline-none focus:border-violet-500"
+                                value={item.partNameSnapshot}
+                                onChange={(event) => {
+                                  updateItem(item.id, { partNameSnapshot: event.target.value });
+                                  setPartSearch((previous) => ({ ...previous, [item.id]: event.target.value }));
+                                }}
+                              />
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Included in invoice totals only. No part will be created and stock will not change.
+                              </p>
+                            </div>
+                          ) : <div className="relative">
+                            {!item.partId && item.partNameSnapshot.trim() ? (
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-amber-500/50 bg-amber-500/10 px-2 text-[11px] font-medium text-amber-400"
+                              >
+                                Not linked
+                              </Badge>
+                            ) : item.partId ? (
+                              <Badge
+                                variant="outline"
+                                className="mb-1 min-h-6 border-green-500/50 bg-green-500/10 px-2 text-[11px] font-medium text-green-400"
+                              >
+                                Linked to stock
+                              </Badge>
+                            ) : null}
+                            <div
+                              className={`flex min-h-11 items-center gap-2 rounded-md border bg-slate-950 px-3 transition-colors ${
+                                searchFocus === item.id
+                                  ? "border-amber-500 ring-1 ring-amber-500/40"
+                                  : item.partId
+                                    ? "border-green-500/50"
+                                    : "border-slate-600 hover:border-amber-500/70"
+                              }`}
+                            >
+                              <Search className="h-4 w-4 flex-shrink-0 text-foreground/60" />
+                              <input
+                                aria-label="Part or item name"
+                                className="min-h-11 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-foreground/50"
                                 placeholder={item.subgroupId ? "Search within subgroup..." : "Search or type part name..."}
                                 value={partSearch[item.id] ?? item.partNameSnapshot}
                                 onChange={e => {
@@ -463,89 +1225,215 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                                 onBlur={() => setTimeout(() => setSearchFocus(null), 150)}
                               />
                               {item.partId && (
-                                <button onClick={() => clearPart(item.id)} className="text-foreground/40 hover:text-foreground flex-shrink-0">
+                                <button type="button" aria-label="Clear linked part" onClick={() => clearPart(item.id)} className="min-h-11 min-w-11 flex-shrink-0 text-foreground/40 hover:text-foreground">
                                   <X className="h-3 w-3" />
                                 </button>
                               )}
+                              {!item.partId ? (
+                                <ChevronDown
+                                  className={`h-4 w-4 flex-shrink-0 text-foreground/50 transition-transform ${searchFocus === item.id ? "rotate-180" : ""}`}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
                             </div>
+                            {aiReviewWorkspace ? (
+                              <p
+                                className={`mt-1 text-xs ${item.partId ? "text-green-500" : "text-amber-500"}`}
+                              >
+                                {item.partId
+                                  ? "Matched to existing stock"
+                                  : "Choose a stock item or create a new part."}
+                              </p>
+                            ) : null}
+                            {likelyStockMatch ? (
+                              <div className="mt-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-amber-300">Possible stock match</p>
+                                    <p className="mt-1 truncate font-medium text-foreground">
+                                      {likelyStockMatch.part.name}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Part #{likelyStockMatch.part.partNumber || "No reference"}
+                                      {likelyStockMatch.part.quantityInStock != null
+                                        ? ` · ${Number(likelyStockMatch.part.quantityInStock)} in stock`
+                                        : ""}
+                                    </p>
+                                    <p className="mt-1 text-xs text-amber-200/80">
+                                      {likelyStockMatch.exactReference
+                                        ? "Same part number found in stock."
+                                        : likelyStockMatch.similarReference
+                                          ? "The part number and name are similar. Check before choosing."
+                                          : "The part name is very similar. Check the part number before choosing."}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="min-h-10 bg-amber-500 text-white hover:bg-amber-600"
+                                    onClick={() => selectPart(item.id, likelyStockMatch.part)}
+                                  >
+                                    Use this stock item
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="min-h-10"
+                                    onClick={() => prepareNewPart(item)}
+                                  >
+                                    Create new part instead
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
                             {showDropdown && (
-                              <div className="absolute left-0 top-full z-50 w-80 bg-popover border border-border rounded-md shadow-lg mt-1">
-                                {/* Existing parts */}
-                                {filteredParts.length > 0 && (
-                                  <>
-                                    {item.subgroupId && (
-                                      <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border">
-                                        Parts in this subgroup
-                                      </div>
-                                    )}
-                                    {filteredParts.map((part: any) => (
-                                      <button
-                                        key={part.id}
-                                        className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
-                                        onMouseDown={() => selectPart(item.id, part)}
-                                      >
-                                        <span className="font-medium">{part.name}</span>
-                                        <span className="text-foreground/60 text-xs ml-2">{part.partNumber}</span>
-                                      </button>
-                                    ))}
-                                  </>
-                                )}
-                                {/* Catalog item name suggestions (not linked to a part) */}
-                                {catalogSuggestions.filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId)).length > 0 && (
-                                  <>
-                                    <div className="px-3 py-1 text-xs text-muted-foreground border-t border-border">
-                                      Catalog suggestions
-                                    </div>
-                                    {catalogSuggestions
-                                      .filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId))
-                                      .map((ci: any) => (
+                              <div className="absolute left-0 top-full z-50 mt-1 w-full max-w-[calc(100vw-3rem)] overflow-hidden rounded-md border border-slate-600 bg-slate-950 shadow-xl md:w-80">
+                                <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+                                  Choose a stock item
+                                </div>
+                                <div className="max-h-56 overflow-y-auto">
+                                  {/* Existing parts */}
+                                  {filteredParts.length > 0 && (
+                                    <>
+                                      {item.subgroupId && (
+                                        <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border">
+                                          Parts in this subgroup
+                                        </div>
+                                      )}
+                                      {filteredParts.map((part: any) => (
                                         <button
-                                          key={ci.id}
-                                          className="w-full text-left px-3 py-2 hover:bg-muted text-foreground text-sm flex justify-between items-center"
-                                          onMouseDown={() => selectCatalogItem(item.id, ci)}
+                                          key={part.id}
+                                          type="button"
+                                          className="flex min-h-14 w-full items-center justify-between gap-4 border-b border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                                          onMouseDown={() => selectPart(item.id, part)}
                                         >
-                                          <span>{ci.name}</span>
-                                          <span className="text-amber-500 text-xs ml-2">catalog</span>
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-medium">{part.name}</span>
+                                            <span className="block truncate text-xs text-muted-foreground">{part.partNumber || "No part number"}</span>
+                                          </span>
+                                          <span className="shrink-0 text-right text-xs">
+                                            <span className="block text-muted-foreground">In stock</span>
+                                            <span className="font-medium text-green-400">{Number(part.quantityInStock ?? 0)}</span>
+                                          </span>
                                         </button>
-                                      ))
-                                    }
-                                  </>
-                                )}
+                                      ))}
+                                    </>
+                                  )}
+                                  {/* Catalog item name suggestions (not linked to a part) */}
+                                  {catalogSuggestions.filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId)).length > 0 && (
+                                    <>
+                                      <div className="px-3 py-1 text-xs text-muted-foreground border-t border-border">
+                                        Catalog suggestions
+                                      </div>
+                                      {catalogSuggestions
+                                        .filter((ci: any) => !filteredParts.find((p: any) => p.id === ci.partId))
+                                        .map((ci: any) => (
+                                          <button
+                                            key={ci.id}
+                                            type="button"
+                                            className="flex min-h-12 w-full items-center justify-between border-b border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                                            onMouseDown={() => selectCatalogItem(item.id, ci)}
+                                          >
+                                            <span>{ci.name}</span>
+                                            <span className="text-amber-500 text-xs ml-2">catalog</span>
+                                          </button>
+                                        ))
+                                      }
+                                    </>
+                                  )}
+                                  {searchValue.trim() &&
+                                  filteredParts.length === 0 &&
+                                  catalogSuggestions.length === 0 ? (
+                                    <p className="border-b border-border px-3 py-3 text-sm text-muted-foreground">
+                                      No matching stock items found.
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={!searchValue.trim()}
+                                  className="flex min-h-12 w-full items-center gap-2 border-t border-border bg-slate-950 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    prepareNewPart(item);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                                  Create new part
+                                </button>
                               </div>
                             )}
-                          </div>
+                          </div>}
                         </td>
 
                         {/* Part number */}
-                        <td className="px-3 py-2 pt-3">
-                          <input
-                            className="w-full bg-transparent outline-none text-foreground placeholder:text-foreground/50"
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Part number</span>
+                          {item.itemType === "service" || item.itemType === "direct_expense" ? (
+                            <span className="text-muted-foreground">Not required</span>
+                          ) : <input
+                            ref={(element) => {
+                              partNumberInputRefs.current[item.id] = element;
+                            }}
+                            aria-label="Part number"
+                            aria-invalid={Boolean(lineReferenceErrors[item.id])}
+                            aria-describedby={lineReferenceErrors[item.id] ? `part-number-error-${item.id}` : undefined}
+                            className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none placeholder:text-foreground/50 md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             placeholder="Part #"
                             value={item.partNumberSnapshot}
-                            onChange={e => updateItem(item.id, { partNumberSnapshot: e.target.value })}
-                          />
+                            onChange={e => {
+                              updateItem(item.id, { partNumberSnapshot: e.target.value });
+                              if (e.target.value.trim()) {
+                                setLineReferenceErrors((previous) => {
+                                  const next = { ...previous };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                              }
+                            }}
+                          />}
+                          {lineReferenceErrors[item.id] ? (
+                            <p
+                              id={`part-number-error-${item.id}`}
+                              role="alert"
+                              className="mt-1 text-xs text-destructive"
+                            >
+                              {lineReferenceErrors[item.id]}
+                            </p>
+                          ) : null}
                         </td>
 
                         {/* Qty */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Quantity</span>
                           <input
                             type="number"
-                            min="1"
-                            className="w-full bg-transparent outline-none text-foreground"
+                            min={item.itemType === "adjustment" ? undefined : "1"}
+                            aria-label="Quantity"
+                            className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none md:min-h-0 md:rounded-none md:border-0 md:px-0"
                             value={item.qty}
-                            onChange={e => updateItem(item.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                            onChange={e => updateItem(item.id, {
+                              qty: item.itemType === "adjustment"
+                                ? (Number(e.target.value) || 1)
+                                : Math.max(1, parseInt(e.target.value) || 1),
+                            })}
                           />
                         </td>
 
                         {/* Lot Price + per-unit derived display */}
-                        <td className="px-3 py-2 pt-3">
+                        <td className="block py-2 md:table-cell md:px-3 md:pt-3">
+                          <span className="font-medium md:hidden">Lot price</span>
                           <div className="flex items-center gap-1">
                             <span className="text-foreground/60">$</span>
                             <input
                               type="number"
                               min="0"
                               step="0.01"
-                              className="w-full bg-transparent outline-none text-foreground"
+                              aria-label="Lot price"
+                              className="min-h-11 w-full rounded border border-border bg-transparent px-2 text-foreground outline-none md:min-h-0 md:rounded-none md:border-0 md:px-0"
                               placeholder="0.00"
                               value={item.lotPrice}
                               onChange={e => updateItem(item.id, { lotPrice: e.target.value })}
@@ -559,15 +1447,21 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Line Total */}
-                        <td className="px-3 py-2 pt-3 text-right font-medium text-foreground">
-                          ${parseFloat(item.lineTotal || "0").toFixed(2)}
+                        <td className="flex justify-between py-2 font-medium text-foreground md:table-cell md:px-3 md:pt-3 md:text-right">
+                          <span className="md:hidden">Line Total</span>
+                          <span>${parseFloat(item.lineTotal || "0").toFixed(2)}</span>
                         </td>
 
                         {/* Landed Cost */}
-                        <td className="px-3 py-2 pt-3 text-right">
-                          {item.partNameSnapshot.trim() ? (
-                            <span className={`font-semibold tabular-nums ${taxNum + deliveryNum > 0 ? "text-amber-400" : "text-foreground"}`}>
-                              ${parseFloat(calcLandedCost(item.lineTotal, item.qty, subtotal, taxNum + deliveryNum)).toFixed(4)}
+                        <td className="flex justify-between py-2 md:table-cell md:px-3 md:pt-3 md:text-right">
+                          <span className="font-medium text-amber-500 md:hidden">Landed Cost / unit</span>
+                          {item.itemType === "adjustment" ||
+                          item.itemType === "service" ||
+                          item.itemType === "direct_expense" ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : item.partNameSnapshot.trim() ? (
+                            <span className={`font-semibold tabular-nums ${taxNum + deliveryNum + adjustmentTotal !== 0 ? "text-amber-400" : "text-foreground"}`}>
+                              ${parseFloat(calcLandedCost(item.lineTotal, item.qty, stockSubtotal, taxNum + deliveryNum + adjustmentTotal)).toFixed(4)}
                             </span>
                           ) : (
                             <span className="text-muted-foreground/40">—</span>
@@ -575,9 +1469,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                         </td>
 
                         {/* Delete */}
-                        <td className="px-2 py-2 pt-3">
+                        <td className="flex justify-end py-2 md:table-cell md:px-2 md:pt-3">
                           {items.length > 1 && (
-                            <button onClick={() => removeItem(item.id)} className="text-foreground/40 hover:text-red-500">
+                            <button type="button" aria-label="Remove line item" onClick={() => removeItem(item.id)} className="min-h-11 min-w-11 text-foreground/40 hover:text-red-500">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           )}
@@ -588,6 +1482,9 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 </tbody>
               </table>
             </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Landed cost / unit includes the lot price, proportional tax, delivery and other invoice charges. Charges and credits do not change stock quantities.
+            </p>
           </div>
 
           {/* Footer — Invoice reference fields + ancillary costs */}
@@ -595,13 +1492,19 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             {/* Invoice details row */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-foreground font-medium">Invoice Number</Label>
+                <Label htmlFor="receive-inventory-invoice-number" className="text-foreground font-medium">Invoice / Quote Number</Label>
                 <Input
-                  placeholder="e.g., INV-2024-00821"
+                  id="receive-inventory-invoice-number"
+                  placeholder="e.g., INV-2024-00821 or quote number"
                   value={invoiceNumber}
                   onChange={e => setInvoiceNumber(e.target.value)}
-                  className="text-foreground placeholder:text-foreground/50"
+                  className={`text-foreground placeholder:text-foreground/50 ${aiIssueFor("invoiceNumber") ? "border-amber-500" : ""}`}
                 />
+                {aiIssueFor("invoiceNumber") ? (
+                  <p className="text-xs text-amber-500">
+                    {aiIssueFor("invoiceNumber")?.message}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-foreground font-medium">Invoice Date</Label>
@@ -622,46 +1525,16 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               </div>
             </div>
 
-            {/* Invoice photo upload */}
-            <div className="space-y-1.5">
-              <Label className="text-foreground font-medium flex items-center gap-1.5">
-                <Camera className="h-4 w-4 text-muted-foreground" />
-                Invoice Photo <span className="text-muted-foreground font-normal text-xs">(optional — JPG, PNG, PDF, max 10 MB)</span>
-              </Label>
-              {invoicePhotoUrl ? (
-                <div className="flex items-center gap-2 text-sm">
-                  {invoicePhotoUrl.endsWith(".pdf") ? (
-                    <FilePdf className="h-4 w-4 text-red-400" />
-                  ) : (
-                    <img src={invoicePhotoUrl} alt="invoice" className="h-10 w-10 object-cover rounded border border-border" />
-                  )}
-                  <span className="text-foreground/80 truncate max-w-xs">{photoFileName}</span>
-                  <button
-                    type="button"
-                    onClick={() => { setInvoicePhotoUrl(null); setPhotoFileName(null); }}
-                    className="text-muted-foreground hover:text-red-500 ml-auto"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <label className={`flex items-center gap-2 w-fit cursor-pointer px-3 py-2 rounded border border-dashed border-border text-sm text-muted-foreground hover:border-amber-500/60 hover:text-foreground transition-colors ${photoUploading ? "opacity-50 pointer-events-none" : ""}`}>
-                  <Upload className="h-4 w-4" />
-                  {photoUploading ? "Uploading…" : "Attach invoice photo or PDF"}
-                  <input type="file" accept="image/jpeg,image/png,image/gif,application/pdf" className="hidden" onChange={handlePhotoSelect} />
-                </label>
-              )}
-            </div>
-
             <div className="border-t border-border/50 pt-3">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3 max-w-sm ml-auto">
+            <div className="ml-auto grid max-w-sm grid-cols-[minmax(0,1fr)_minmax(6rem,auto)] gap-x-4 gap-y-3 sm:gap-x-8">
               <div className="text-foreground font-medium text-right">Parts Subtotal</div>
               <div className="text-foreground text-right font-semibold">${subtotal.toFixed(2)}</div>
 
-              <Label className="text-foreground font-medium text-right self-center">Tax</Label>
+              <Label htmlFor="receive-inventory-tax" className="text-foreground font-medium text-right self-center">Tax</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-tax"
                   type="number"
                   min="0"
                   step="0.01"
@@ -672,10 +1545,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
                 />
               </div>
 
-              <Label className="text-foreground font-medium text-right self-center">Delivery / Freight</Label>
+              <Label htmlFor="receive-inventory-freight" className="text-foreground font-medium text-right self-center">Delivery / Freight</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-freight"
                   type="number"
                   min="0"
                   step="0.01"
@@ -689,10 +1563,11 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
               <div className="text-foreground/60 text-right text-sm">Calculated Total</div>
               <div className="text-foreground text-right text-sm">${calculatedTotal.toFixed(2)}</div>
 
-              <Label className="text-foreground font-semibold text-right self-center">Invoice Total</Label>
+              <Label htmlFor="receive-inventory-total" className="text-foreground font-semibold text-right self-center">Invoice Total</Label>
               <div className="flex items-center justify-end gap-1">
                 <span className="text-foreground/60">$</span>
                 <input
+                  id="receive-inventory-total"
                   type="number"
                   min="0"
                   step="0.01"
@@ -717,19 +1592,29 @@ export default function ReceiveInventoryModal({ open, onOpenChange }: ReceiveInv
             )}
             </div>
           </div>
+          </fieldset>
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-4 border-t">
-          <Button variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-6 sm:pb-4">
+          <Button variant="outline" className="min-h-11" onClick={handleClose} disabled={createMutation.isPending || confirmPreparedMutation.isPending || invoiceSourceBusy}>
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMutation.isPending}
-            className="bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+            disabled={confirmationIsDisabled}
+            title={reviewIsIncomplete ? "Review the highlighted invoice details before updating stock." : undefined}
+            className="min-h-11 bg-amber-500 font-semibold text-white hover:bg-amber-600 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
           >
-            {createMutation.isPending ? "Saving..." : "Receive & Update Stock"}
+            {confirmPreparedMutation.isPending
+              ? "Confirming..."
+              : preparedInvoiceIntent || aiReviewWorkspace
+                ? "Confirm & Update Stock"
+                : createMutation.isPending
+              ? "Saving..."
+              : invoiceSourceBusy
+                ? "Saving invoice source…"
+                : "Receive & Update Stock"}
           </Button>
         </div>
       </DialogContent>

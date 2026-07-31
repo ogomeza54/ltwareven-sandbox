@@ -24,6 +24,16 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql, desc, asc, inArray, or, isNull } from "drizzle-orm";
+import {
+  receiveInventory,
+  validateCatalogPlacementsWithExecutor,
+} from "./modules/inventory-receiving/postgres-inventory-intake-service";
+import type { InventoryReceivingLine } from "./modules/inventory-receiving/types";
+export {
+  assertQbFieldsComplete,
+  buildIntakeQbFields,
+  buildLineItemInsertValues,
+} from "./modules/inventory-receiving/inventory-intake-mappers";
 
 export interface IStorage {
   // Company operations
@@ -213,6 +223,8 @@ export class DatabaseStorage implements IStorage {
         profileImageUrl: users.profileImageUrl,
         role: users.role,
         companyId: users.companyId,
+        passwordHash: users.passwordHash,
+        mustChangePassword: users.mustChangePassword,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
         companyName: companies.name,
@@ -834,178 +846,22 @@ export class DatabaseStorage implements IStorage {
     placements: Array<{ groupId?: string; subgroupId?: string }>,
     companyId: string
   ): Promise<void> {
-    const groupIds = [...new Set(placements.map(p => p.groupId).filter(Boolean))] as string[];
-    const subgroupIds = [...new Set(placements.map(p => p.subgroupId).filter(Boolean))] as string[];
-
-    if (groupIds.length > 0) {
-      const ownedGroups = await db.select({ id: maintenanceGroups.id })
-        .from(maintenanceGroups)
-        .where(and(inArray(maintenanceGroups.id, groupIds), eq(maintenanceGroups.companyId, companyId)));
-      const ownedGroupIds = new Set(ownedGroups.map(g => g.id));
-      for (const id of groupIds) {
-        if (!ownedGroupIds.has(id)) throw new Error(`Group ${id} not found`);
-      }
-    }
-
-    if (subgroupIds.length > 0) {
-      const ownedSubgroups = await db.select({ id: maintenanceSubgroups.id, groupId: maintenanceSubgroups.groupId })
-        .from(maintenanceSubgroups)
-        .where(and(inArray(maintenanceSubgroups.id, subgroupIds), eq(maintenanceSubgroups.companyId, companyId)));
-      const subgroupMap = new Map(ownedSubgroups.map(sg => [sg.id, sg.groupId]));
-      for (const p of placements) {
-        if (!p.subgroupId) continue;
-        if (!subgroupMap.has(p.subgroupId)) throw new Error(`Subgroup ${p.subgroupId} not found`);
-        if (p.groupId && subgroupMap.get(p.subgroupId) !== p.groupId) {
-          throw new Error(`Subgroup ${p.subgroupId} does not belong to group ${p.groupId}`);
-        }
-      }
-    }
+    await validateCatalogPlacementsWithExecutor(db, placements, companyId);
   }
 
   async createInventoryIntake(
     intakeHeader: Omit<InsertInventoryIntake, 'companyId' | 'createdByUserId'>,
-    items: Array<{ partId?: string; partNameSnapshot: string; partNumberSnapshot: string; itemType?: string; groupId?: string; subgroupId?: string; qty: number; unitCost: string; lineTotal: string; landedCost?: string }>,
+    items: InventoryReceivingLine[],
     companyId: string,
     userId: string
   ): Promise<InventoryIntake> {
-    // Validate that any provided partIds belong to this company before we write anything
-    const linkedPartIds = items.map(i => i.partId).filter(Boolean) as string[];
-    if (linkedPartIds.length > 0) {
-      const ownedParts = await db.select({ id: inventoryParts.id })
-        .from(inventoryParts)
-        .where(and(
-          inArray(inventoryParts.id, linkedPartIds),
-          eq(inventoryParts.companyId, companyId)
-        ));
-      const ownedIds = new Set(ownedParts.map(p => p.id));
-      for (const id of linkedPartIds) {
-        if (!ownedIds.has(id)) {
-          throw new Error(`Part ${id} not found in company inventory`);
-        }
-      }
-    }
-
-    // Compute weighted ancillary allocation per item
-    const totalAncillary = parseFloat(intakeHeader.taxAmount as string || "0") + parseFloat(intakeHeader.deliveryFee as string || "0");
-    const invoiceSubtotal = items.reduce((sum, i) => sum + parseFloat(i.lineTotal || "0"), 0);
-
-    const itemsWithLanded = items.map(item => {
-      const lineTotal = parseFloat(item.lineTotal || "0");
-      const qty = item.qty || 1;
-      const weight = invoiceSubtotal > 0 ? lineTotal / invoiceSubtotal : 0;
-      const ancillaryShare = weight * totalAncillary;
-      const landedCost = ((lineTotal + ancillaryShare) / qty).toFixed(4);
-      return { ...item, landedCost };
-    });
-
-    // Determine QB sync status: intakes with any inventory-type item are
-    // held as "pending_usage" (synced only when parts are consumed on a work order);
-    // consumable-only intakes flip to "not_synced" immediately so the nightly
-    // export can pick them up right away.
-    const hasInventoryItem = items.some(i => (i.itemType || "inventory") === "inventory");
-    const qbSyncStatus = hasInventoryItem ? "pending_usage" : "not_synced";
-
-    // Look up company QB config to override hardcoded defaults if set
     const qbConfig = await this.getIntegrationConfig("quickbooks", companyId);
-
-    // Wrap everything in a transaction for all-or-nothing consistency
-    return await db.transaction(async (tx) => {
-      const qbFields = buildIntakeQbFields(
-        intakeHeader.vendor as string,
-        intakeHeader.invoiceNumber as string | null | undefined,
-        qbConfig ?? undefined,
-      );
-      assertQbFieldsComplete(qbFields);
-
-      const [intake] = await tx.insert(inventoryIntakes)
-        .values({
-          ...intakeHeader,
-          companyId,
-          createdByUserId: userId,
-          qbTransactionType: qbFields.qbTransactionType,
-          qbDebitAccount: qbFields.qbDebitAccount,
-          qbCreditAccount: qbFields.qbCreditAccount,
-          qbVendorName: qbFields.qbVendorName,
-          qbInvoiceNumber: qbFields.qbInvoiceNumber,
-          qbAmount: intakeHeader.totalAmount || "0",
-          quickbooksSyncStatus: qbSyncStatus,
-        })
-        .returning();
-
-      if (itemsWithLanded.length > 0) {
-        // For unlinked items (no partId), auto-create the catalog entry at qty 0
-        const resolvedItems = await Promise.all(itemsWithLanded.map(async (item) => {
-          if (item.partId) return item;
-
-          // Create a new catalog entry — landedCost becomes the catalog price
-          const [newPart] = await tx.insert(inventoryParts).values({
-            name: item.partNameSnapshot,
-            partNumber: item.partNumberSnapshot || "",
-            itemType: item.itemType || "inventory",
-            groupId: item.groupId || null,
-            subgroupId: item.subgroupId || null,
-            price: item.landedCost || item.unitCost || "0",
-            quantityInStock: 0,
-            companyId,
-          }).returning();
-
-          // If a subgroup was selected, ensure a maintenanceItem entry exists for this part
-          if (item.subgroupId) {
-            const existingItems = await tx.select({ id: maintenanceItems.id, partId: maintenanceItems.partId })
-              .from(maintenanceItems)
-              .where(and(
-                eq(maintenanceItems.subgroupId, item.subgroupId),
-                eq(maintenanceItems.companyId, companyId),
-                sql`lower(${maintenanceItems.name}) = lower(${item.partNameSnapshot})`
-              ));
-
-            if (existingItems.length === 0) {
-              // No catalog entry yet — create one linked to the new part
-              await tx.insert(maintenanceItems).values({
-                name: item.partNameSnapshot,
-                subgroupId: item.subgroupId,
-                partId: newPart.id,
-                sortOrder: 0,
-                companyId,
-              });
-            } else if (existingItems[0] && existingItems[0].partId === null) {
-              // Catalog entry exists but has no linked part yet — link it now
-              await tx.update(maintenanceItems)
-                .set({ partId: newPart.id })
-                .where(eq(maintenanceItems.id, existingItems[0].id));
-            }
-            // If the catalog entry already has a linked part, leave it untouched
-          }
-
-          return { ...item, partId: newPart.id };
-        }));
-
-        await tx.insert(inventoryIntakeItems).values(
-          resolvedItems.map(item =>
-            buildLineItemInsertValues(intake.id, intake, item, companyId)
-          )
-        );
-
-        // Increment stock, update catalog price, sync itemType and catalog placement for all parts
-        for (const item of resolvedItems) {
-          if (item.partId) {
-            const updates: Record<string, any> = {
-              quantityInStock: sql`${inventoryParts.quantityInStock} + ${item.qty}`,
-              price: item.landedCost,
-              itemType: item.itemType || "inventory",
-            };
-            // Only update catalog placement if the intake row specified one
-            if (item.groupId) updates.groupId = item.groupId;
-            if (item.subgroupId) updates.subgroupId = item.subgroupId;
-            await tx.update(inventoryParts)
-              .set(updates)
-              .where(and(eq(inventoryParts.id, item.partId), eq(inventoryParts.companyId, companyId)));
-          }
-        }
-      }
-
-      return intake;
-    });
+    return receiveInventory(
+      db,
+      { header: intakeHeader, items },
+      { companyId, userId },
+      qbConfig,
+    );
   }
 
   // ── Inventory Adjustments ─────────────────────────────────────────────────────
@@ -1739,90 +1595,3 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
-
-/**
- * Builds the complete insert-value record for one inventory_intake_items row,
- * mirroring the QB fields from the parent intake header.  Keeping this as a
- * pure exported function lets tests exercise the exact mapping that
- * createInventoryIntake uses without requiring a live database connection.
- */
-export function buildLineItemInsertValues(
-  intakeId: string,
-  intake: {
-    qbTransactionType: string | null;
-    qbDebitAccount: string | null;
-    qbCreditAccount: string | null;
-    qbVendorName: string | null;
-    qbInvoiceNumber: string | null;
-  },
-  item: {
-    partId?: string | null;
-    partNameSnapshot: string;
-    partNumberSnapshot?: string;
-    itemType?: string;
-    groupId?: string | null;
-    subgroupId?: string | null;
-    qty: number;
-    unitCost: string;
-    lineTotal: string;
-    landedCost?: string;
-  },
-  companyId: string,
-) {
-  return {
-    inventoryIntakeId: intakeId,
-    partId: item.partId || null,
-    partNameSnapshot: item.partNameSnapshot,
-    partNumberSnapshot: item.partNumberSnapshot ?? "",
-    itemType: item.itemType || "inventory",
-    groupId: item.groupId || null,
-    subgroupId: item.subgroupId || null,
-    qty: item.qty,
-    unitCost: item.unitCost,
-    lineTotal: item.lineTotal,
-    landedCost: item.landedCost,
-    companyId,
-    quickbooksSyncStatus: "not_synced",
-    qbTransactionType: intake.qbTransactionType,
-    qbDebitAccount: intake.qbDebitAccount,
-    qbCreditAccount: intake.qbCreditAccount,
-    qbVendorName: intake.qbVendorName,
-    qbInvoiceNumber: intake.qbInvoiceNumber,
-    qbAmount: item.lineTotal,
-  };
-}
-
-/**
- * Builds the four required QuickBooks header fields from an intake's vendor string
- * and optional invoice number.  All values are deterministic — nothing from this
- * function should ever be undefined once vendor is present.
- */
-export function buildIntakeQbFields(
-  vendor: string,
-  invoiceNumber: string | null | undefined,
-  config?: { qbTransactionType?: string | null; qbDebitAccount?: string | null; qbCreditAccount?: string | null },
-) {
-  return {
-    qbVendorName: vendor.trim() || null,
-    qbTransactionType: (config?.qbTransactionType || "bill") as string,
-    qbDebitAccount: (config?.qbDebitAccount || "Inventory Asset") as string,
-    qbCreditAccount: (config?.qbCreditAccount || "Accounts Payable") as string,
-    qbInvoiceNumber: invoiceNumber ?? null,
-  };
-}
-
-export type IntakeQbFields = ReturnType<typeof buildIntakeQbFields>;
-
-/**
- * Throws a descriptive error if any of the four required QB fields is null/empty.
- * Call this before inserting an intake or its line items so null values never
- * propagate silently to the QB export queue.
- */
-export function assertQbFieldsComplete(fields: IntakeQbFields): void {
-  const required = ["qbVendorName", "qbTransactionType", "qbDebitAccount", "qbCreditAccount"] as const;
-  for (const key of required) {
-    if (!fields[key]) {
-      throw new Error(`Cannot save intake: required QB field "${key}" is missing or empty`);
-    }
-  }
-}

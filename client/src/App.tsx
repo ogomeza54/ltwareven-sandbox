@@ -16,6 +16,7 @@ import Customers from "@/pages/customers";
 import Vehicles from "@/pages/vehicles";
 import Reports from "@/pages/reports";
 import Invoices from "@/pages/invoices";
+import InvoiceQuality from "@/pages/invoice-quality";
 import UsersPage from "@/pages/users";
 import IntegrationsPage from "@/pages/integrations";
 import Landing from "@/pages/landing";
@@ -60,6 +61,9 @@ function Router() {
         <Route path="/vehicles" component={Vehicles} />
         <Route path="/reports" component={Reports} />
         <Route path="/invoices" component={Invoices} />
+        {(user?.role === "admin" || user?.role === "super_admin") && (
+          <Route path="/invoice-quality" component={InvoiceQuality} />
+        )}
         {(user?.role === "admin" || user?.role === "super_admin") && (
           <Route path="/users" component={UsersPage} />
         )}

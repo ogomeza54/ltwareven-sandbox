@@ -33,7 +33,7 @@ export const validateFiles = (files: File[]): string[] => {
       errors.push(`File ${index + 1} is too large. Maximum size is 10MB.`);
     }
     
-    if (!allowedTypes.includes(file.mimetype || file.type)) {
+    if (!allowedTypes.includes(file.type)) {
       errors.push(`File ${index + 1} is not a supported image format. Use JPG, PNG, or GIF.`);
     }
   });

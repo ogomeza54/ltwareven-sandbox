@@ -1,6 +1,20 @@
 node_modules
 dist
+.env
+.env.*
+!.env.example
+.local-backups/
+.private/
 .DS_Store
 server/public
 vite.config.ts.*
 *.tar.gz
+test-results/
+playwright-report/
+output/
+tmp/
+
+# BMAD Method — local installation, skills, and generated artifacts
+_bmad/
+_bmad-output/
+.agents/skills/bmad-*/

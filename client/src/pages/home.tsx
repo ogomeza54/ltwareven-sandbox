@@ -51,7 +51,7 @@ export default function Home() {
             
             <div className="flex items-center gap-4">
               <Avatar className="border-2 border-amber-500/30">
-                <AvatarImage src={user?.profileImageUrl} />
+                <AvatarImage src={user?.profileImageUrl ?? undefined} />
                 <AvatarFallback className="bg-amber-500/10 text-amber-400 font-bold">
                   {(user?.firstName?.[0] || user?.email?.[0] || 'U').toUpperCase()}
                 </AvatarFallback>
