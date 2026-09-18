@@ -99,7 +99,9 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
+      // SANDBOX LOCAL (Codesmic): reusePort solo existe en Linux.
+      // En macOS Node lanza ENOTSUP y el servidor no arranca.
+      reusePort: process.platform === "linux",
     },
     () => {
       log(`serving on port ${port}`);
